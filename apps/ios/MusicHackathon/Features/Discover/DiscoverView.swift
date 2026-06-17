@@ -4,21 +4,25 @@ struct DiscoverView: View {
   @Environment(PlaybackController.self) private var playbackController
 
   var body: some View {
-    ScrollView(showsIndicators: false) {
-      VStack(spacing: 0) {
-        RadioHeaderCard(track: featuredTrack, state: playbackController.state)
-          .padding(.horizontal, 10)
-          .padding(.top, 28)
+    GeometryReader { proxy in
+      ScrollView(.vertical, showsIndicators: false) {
+        VStack(spacing: 0) {
+          RadioHeaderCard(track: featuredTrack, state: playbackController.state)
+            .padding(.horizontal, 10)
+            .padding(.top, 28)
 
-        NowPlayingSetCard(
-          track: featuredTrack,
-          isPlaying: playbackController.state == .playing,
-          playAction: toggleFeaturedTrack
-        )
-        .padding(.horizontal, 10)
-        .offset(y: -52)
+          NowPlayingSetCard(
+            track: featuredTrack,
+            isPlaying: playbackController.state == .playing,
+            playAction: toggleFeaturedTrack
+          )
+          .padding(.horizontal, 10)
+          .offset(y: -52)
+        }
+        .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+        .clipped()
       }
-      .padding(.bottom, 126)
+      .scrollBounceBehavior(.always, axes: .vertical)
     }
     .background(.clear)
   }
