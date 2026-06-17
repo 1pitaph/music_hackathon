@@ -27,6 +27,16 @@ After every code update, rebuild as needed and restart the app in an iOS Simulat
 
 Prefer iOS 26 capabilities for new UI and platform integrations when they improve the product. The project currently declares `IPHONEOS_DEPLOYMENT_TARGET = 17.0`, so guard iOS 26-only APIs with `@available(iOS 26.0, *)` and add fallbacks unless the target is intentionally raised.
 
+## SwiftUI Navigation & Tab Bar Decisions
+
+Preserve system navigation containers unless the user explicitly asks to replace them. In particular, keep the app shell based on SwiftUI `TabView` and `.tabItem` when changing tab content or visual styling.
+
+Do not replace a system `TabView` with a hand-rolled selected-state switch plus custom buttons just to match a screenshot. First try to achieve the requested UI by evolving the existing `TabView`, using system tab bar APIs, iOS 26 tab bar behavior, toolbar/background customization, or bottom accessories where appropriate.
+
+If a fully custom tab bar is truly necessary, state the tradeoff before implementing it: custom bars can lose native tab lifecycle behavior, accessibility defaults, platform styling, iOS 26 system tab bar appearance, and future OS improvements.
+
+Treat screenshots as visual direction, not permission to rewrite navigation architecture. Separate content surface changes from app shell changes, and keep app shell changes minimal and explicit.
+
 ## Coding Style & Naming Conventions
 
 Use Swift and SwiftUI conventions already present in the project. Indent Swift files with two spaces. Name types in `PascalCase`, properties and functions in `camelCase`, and keep feature views inside their feature folder. Prefer small SwiftUI views, private helper views, and environment-based dependency injection. Use descriptive names such as `PlaybackController` and `MusicAuthorizationService`.

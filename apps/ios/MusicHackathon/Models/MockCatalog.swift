@@ -3,27 +3,27 @@ import Foundation
 enum MockCatalog {
   static let featuredTracks: [Track] = [
     Track(
-      title: "Afterglow Sketch",
-      artist: "North Pier",
-      album: "Late Signals",
-      mood: "Focus",
-      duration: 214,
+      title: "future",
+      artist: "WRABEL",
+      album: "up up above",
+      mood: "Pop Surrealism",
+      duration: 900,
       artworkSystemName: "waveform"
     ),
     Track(
-      title: "Glass Roads",
-      artist: "Mira Vale",
-      album: "City Tempo",
-      mood: "Commute",
-      duration: 188,
+      title: "birds & the bees",
+      artist: "WRABEL",
+      album: "up up above",
+      mood: "Glowing",
+      duration: 221,
       artworkSystemName: "music.quarternote.3"
     ),
     Track(
-      title: "Low Sun Loop",
-      artist: "Tape Garden",
-      album: "Small Hours",
-      mood: "Unwind",
-      duration: 241,
+      title: "beautiful chaos",
+      artist: "WRABEL",
+      album: "up up above",
+      mood: "Cinematic",
+      duration: 236,
       artworkSystemName: "record.circle"
     )
   ]
