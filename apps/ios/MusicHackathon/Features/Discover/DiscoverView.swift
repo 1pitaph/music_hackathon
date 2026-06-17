@@ -22,7 +22,7 @@ struct DiscoverView: View {
             playAction: toggleFeaturedTrack
           )
           .padding(.horizontal, 10)
-          .offset(y: -52)
+          .offset(y: -20)
         }
         .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
         .clipped()
