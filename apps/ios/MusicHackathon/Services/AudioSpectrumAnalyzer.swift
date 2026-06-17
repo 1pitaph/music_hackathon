@@ -16,16 +16,35 @@ struct AudioSpectrumAnalysis: Equatable, Sendable {
       return Array(repeating: 0.18, count: bandCount)
     }
 
-    let exactFrame = max(0, seconds) * frameRate
-    let lowerIndex = min(Int(exactFrame.rounded(.down)), frames.count - 1)
-    let upperIndex = min(lowerIndex + 1, frames.count - 1)
-    let fraction = Float(exactFrame - Double(lowerIndex))
+    let clampedSeconds = max(0, seconds)
 
-    guard lowerIndex != upperIndex else {
-      return frames[lowerIndex].bands
+    guard clampedSeconds > frames[0].timestamp else {
+      return frames[0].bands
     }
 
-    return zip(frames[lowerIndex].bands, frames[upperIndex].bands).map { lower, upper in
+    guard clampedSeconds < frames[frames.count - 1].timestamp else {
+      return frames[frames.count - 1].bands
+    }
+
+    var lowerIndex = 0
+    var upperIndex = frames.count - 1
+
+    while lowerIndex + 1 < upperIndex {
+      let midpoint = (lowerIndex + upperIndex) / 2
+
+      if frames[midpoint].timestamp <= clampedSeconds {
+        lowerIndex = midpoint
+      } else {
+        upperIndex = midpoint
+      }
+    }
+
+    let lowerFrame = frames[lowerIndex]
+    let upperFrame = frames[upperIndex]
+    let frameDuration = max(upperFrame.timestamp - lowerFrame.timestamp, .leastNonzeroMagnitude)
+    let fraction = Float((clampedSeconds - lowerFrame.timestamp) / frameDuration)
+
+    return zip(lowerFrame.bands, upperFrame.bands).map { lower, upper in
       lower + ((upper - lower) * fraction)
     }
   }
@@ -62,7 +81,8 @@ enum AudioSpectrumAnalyzer {
     }
 
     let fftSize = 2048
-    let hopSize = max(1, Int(samples.sampleRate / frameRate))
+    let hopSize = max(1, fftSize / 4)
+    let analysisFrameRate = samples.sampleRate / Double(hopSize)
     let binRanges = logarithmicBinRanges(
       bandCount: bandCount,
       fftSize: fftSize,
@@ -76,7 +96,7 @@ enum AudioSpectrumAnalyzer {
       binRanges: binRanges
     )
 
-    return AudioSpectrumAnalysis(frames: frames, frameRate: frameRate, bandCount: bandCount)
+    return AudioSpectrumAnalysis(frames: frames, frameRate: analysisFrameRate, bandCount: bandCount)
   }
 
   private static func mixedMonoSamples(from audioURL: URL) throws -> (values: [Float], sampleRate: Double) {
@@ -259,7 +279,7 @@ enum AudioSpectrumAnalyzer {
     return bands.enumerated().map { index, value in
       let left = bands[max(0, index - 1)]
       let right = bands[min(bands.count - 1, index + 1)]
-      return (left * 0.2) + (value * 0.6) + (right * 0.2)
+      return (left * 0.25) + (value * 0.5) + (right * 0.25)
     }
   }
 
@@ -285,6 +305,7 @@ enum AudioSpectrumAnalyzer {
     }
 
     let globalEnergyPeak = frameEnergies.max() ?? 0
+    let minimumDecibels: Float = -42
 
     guard bandPeaks.contains(where: { $0 > 0 }), globalEnergyPeak > 0 else {
       return rawFrames.map { frame in
@@ -295,13 +316,20 @@ enum AudioSpectrumAnalyzer {
       }
     }
 
-    return rawFrames.enumerated().map { frameIndex, frame in
-      let energyScale = pow(min(1, frameEnergies[frameIndex] / globalEnergyPeak), 0.35)
+    let normalizedFrames = rawFrames.enumerated().map { frameIndex, frame in
+      let energyScale = pow(normalizedDecibels(
+        value: frameEnergies[frameIndex],
+        peak: globalEnergyPeak,
+        minimumDecibels: minimumDecibels
+      ), 1.1)
       let normalized = frame.bands.enumerated().map { bandIndex, band in
         let bandPeak = max(bandPeaks[bandIndex], .leastNonzeroMagnitude)
-        let bandScale = pow(min(1, band / bandPeak), 0.58)
-        let weightedBand = bandScale * (0.34 + (0.66 * energyScale))
-        return max(0.05, min(1, weightedBand))
+        let bandScale = pow(
+          normalizedDecibels(value: band, peak: bandPeak, minimumDecibels: minimumDecibels),
+          1.35
+        )
+        let weightedBand = bandScale * (0.12 + (0.76 * energyScale))
+        return max(0.02, min(1, weightedBand))
       }
 
       return AudioSpectrumFrame(
@@ -309,5 +337,45 @@ enum AudioSpectrumAnalyzer {
         bands: smoothedBands(normalized)
       )
     }
+
+    return temporallySmoothedFrames(normalizedFrames)
+  }
+
+  private static func normalizedDecibels(
+    value: Float,
+    peak: Float,
+    minimumDecibels: Float
+  ) -> Float {
+    let ratio = max(value / max(peak, .leastNonzeroMagnitude), 0.000_1)
+    let decibels = max(minimumDecibels, 20 * log10(ratio))
+    return min(max((decibels - minimumDecibels) / abs(minimumDecibels), 0), 1)
+  }
+
+  private static func temporallySmoothedFrames(_ frames: [AudioSpectrumFrame]) -> [AudioSpectrumFrame] {
+    guard var previousFrame = frames.first else {
+      return []
+    }
+
+    var smoothedFrames = [previousFrame]
+    smoothedFrames.reserveCapacity(frames.count)
+
+    for frame in frames.dropFirst() {
+      let delta = max(frame.timestamp - previousFrame.timestamp, 1.0 / 120.0)
+      let attackAlpha = smoothingAlpha(delta: delta, timeConstant: 0.018)
+      let releaseAlpha = smoothingAlpha(delta: delta, timeConstant: 0.11)
+      let bands = zip(previousFrame.bands, frame.bands).map { previous, target in
+        let alpha = target > previous ? attackAlpha : releaseAlpha
+        return previous + ((target - previous) * alpha)
+      }
+      let nextFrame = AudioSpectrumFrame(timestamp: frame.timestamp, bands: bands)
+      smoothedFrames.append(nextFrame)
+      previousFrame = nextFrame
+    }
+
+    return smoothedFrames
+  }
+
+  private static func smoothingAlpha(delta: TimeInterval, timeConstant: TimeInterval) -> Float {
+    1 - exp(-Float(delta / max(timeConstant, .leastNonzeroMagnitude)))
   }
 }

@@ -10,8 +10,7 @@ struct DiscoverView: View {
           RadioHeaderCard(
             track: featuredTrack,
             state: playbackController.state,
-            elapsedTimeText: playbackController.elapsedTimeText,
-            elapsedSeconds: playbackController.elapsedSeconds
+            elapsedTimeText: playbackController.elapsedTimeText
           )
             .padding(.horizontal, 10)
             .padding(.top, 28)
@@ -20,7 +19,6 @@ struct DiscoverView: View {
             track: featuredTrack,
             isPlaying: playbackController.state == .playing,
             elapsedTimeText: playbackController.elapsedTimeText,
-            elapsedSeconds: playbackController.elapsedSeconds,
             playAction: toggleFeaturedTrack
           )
           .padding(.horizontal, 10)
@@ -51,7 +49,6 @@ private struct RadioHeaderCard: View {
   let track: Track
   let state: PlaybackState
   let elapsedTimeText: String
-  let elapsedSeconds: TimeInterval
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
@@ -75,7 +72,6 @@ private struct RadioHeaderCard: View {
 
       ReactiveSpectrumView(
         audioURL: track.previewURL,
-        elapsedSeconds: elapsedSeconds,
         isPlaying: state == .playing,
         baseColor: Color(red: 0.55, green: 0.66, blue: 0.76).opacity(0.82),
         activeColor: .white.opacity(0.92),
@@ -127,7 +123,6 @@ private struct NowPlayingSetCard: View {
   let track: Track
   let isPlaying: Bool
   let elapsedTimeText: String
-  let elapsedSeconds: TimeInterval
   let playAction: () -> Void
 
   private var upNextText: String {
@@ -210,7 +205,6 @@ private struct NowPlayingSetCard: View {
 
         ReactiveSpectrumView(
           audioURL: track.previewURL,
-          elapsedSeconds: elapsedSeconds,
           isPlaying: isPlaying,
           baseColor: .black.opacity(0.1),
           activeColor: .black,
@@ -278,8 +272,9 @@ private struct FeedLine: View {
 }
 
 private struct ReactiveSpectrumView: View {
+  @Environment(PlaybackController.self) private var playbackController
+
   let audioURL: URL?
-  let elapsedSeconds: TimeInterval
   let isPlaying: Bool
   let baseColor: Color
   let activeColor: Color
@@ -294,15 +289,17 @@ private struct ReactiveSpectrumView: View {
   var body: some View {
     Group {
       if let audioURL {
-        SpectrumBarsView(
-          bands: currentBands,
-          isPlaying: isPlaying,
-          baseColor: baseColor,
-          activeColor: activeColor,
-          barWidth: barWidth,
-          spacing: spacing,
-          cornerRadius: cornerRadius
-        )
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !isPlaying)) { context in
+          SpectrumBarsView(
+            bands: currentBands(frameDate: context.date),
+            isPlaying: isPlaying,
+            baseColor: baseColor,
+            activeColor: activeColor,
+            barWidth: barWidth,
+            spacing: spacing,
+            cornerRadius: cornerRadius
+          )
+        }
         .task(id: SpectrumLoadRequest(audioURL: audioURL, bandCount: fallbackBars.count)) {
           analysis = await AudioSpectrumAnalyzer.analyze(audioURL: audioURL, bandCount: fallbackBars.count)
         }
@@ -310,7 +307,6 @@ private struct ReactiveSpectrumView: View {
         fallbackView
       }
     }
-    .drawingGroup()
     .accessibilityHidden(true)
   }
 
@@ -326,11 +322,12 @@ private struct ReactiveSpectrumView: View {
     )
   }
 
-  private var currentBands: [Float] {
+  private func currentBands(frameDate: Date) -> [Float] {
     if let analysis {
-      return analysis.bands(at: elapsedSeconds)
+      return analysis.bands(at: playbackController.currentPlaybackSeconds())
     }
 
+    _ = frameDate
     let maxFallback = max(fallbackBars.max() ?? 1, 1)
     return fallbackBars.map { Float(max(0.12, $0 / maxFallback)) }
   }
@@ -357,26 +354,27 @@ private struct SpectrumBarsView: View {
       let color = isPlaying ? activeColor : baseColor
 
       HStack(alignment: .center, spacing: spacing * scale) {
-        ForEach(Array(bands.enumerated()), id: \.offset) { _, band in
+        ForEach(bands.indices, id: \.self) { index in
           Capsule()
             .fill(color)
             .frame(
               width: barWidth * scale,
-              height: barHeight(for: band, in: proxy.size.height, scale: scale)
+              height: barHeight(for: bands[index], in: proxy.size.height, scale: scale)
             )
         }
       }
       .frame(width: proxy.size.width, height: proxy.size.height)
     }
-    .animation(.linear(duration: isPlaying ? 0.08 : 0.18), value: bands)
+    .animation(isPlaying ? nil : .easeOut(duration: 0.16), value: bands)
   }
 
   private func barHeight(for band: Float, in availableHeight: CGFloat, scale: CGFloat) -> CGFloat {
     let dotHeight = barWidth * scale
     let clampedBand = CGFloat(min(max(band, 0), 1))
-    let activeBand = max(0, (clampedBand - 0.18) / 0.82)
-    let curvedBand = pow(activeBand, 0.9)
-    return dotHeight + ((availableHeight - dotHeight) * curvedBand)
+    let activeBand = min(max((clampedBand - 0.1) / 0.9, 0), 1)
+    let curvedBand = activeBand * activeBand * (3 - (2 * activeBand))
+    let maxHeight = availableHeight * 0.86
+    return dotHeight + ((maxHeight - dotHeight) * curvedBand)
   }
 }
 

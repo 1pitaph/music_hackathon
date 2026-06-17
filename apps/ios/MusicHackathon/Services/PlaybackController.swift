@@ -85,6 +85,11 @@ final class PlaybackController {
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
   }
 
+  func currentPlaybackSeconds() -> TimeInterval {
+    let seconds = player.currentTime().seconds
+    return seconds.isFinite ? max(0, seconds) : 0
+  }
+
   private func addPeriodicTimeObserver() {
     let interval = CMTime(seconds: 1.0 / 30.0, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
     timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
@@ -130,7 +135,11 @@ final class PlaybackController {
   private func updatePlaybackProgress(for time: CMTime) {
     let elapsedSeconds = time.seconds.isFinite ? max(0, time.seconds) : 0
     self.elapsedSeconds = elapsedSeconds
-    elapsedTimeText = Self.timeText(for: elapsedSeconds)
+
+    let newElapsedTimeText = Self.timeText(for: elapsedSeconds)
+    if elapsedTimeText != newElapsedTimeText {
+      elapsedTimeText = newElapsedTimeText
+    }
 
     guard
       let duration = player.currentItem?.duration.seconds,
