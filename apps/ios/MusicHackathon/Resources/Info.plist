@@ -8,6 +8,8 @@
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Airset</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -21,11 +23,11 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppleMusicUsageDescription</key>
-	<string>Music Hackathon uses Apple Music access to help you discover and manage music.</string>
+	<string>Airset uses Apple Music access to help you discover and manage music.</string>
 	<key>NSMediaLibraryUsageDescription</key>
-	<string>Music Hackathon uses your media library access for playlist and library features.</string>
+	<string>Airset uses your media library access for playlist and library features.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Music Hackathon may use microphone access for future recording and music creation features.</string>
+	<string>Airset may use microphone access for future recording and music creation features.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
