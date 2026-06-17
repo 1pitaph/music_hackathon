@@ -1,4 +1,8 @@
+import AVFoundation
+import DSWaveformImage
+import DSWaveformImageViews
 import SwiftUI
+import UIKit
 
 struct DiscoverView: View {
   @Environment(PlaybackController.self) private var playbackController
@@ -7,13 +11,20 @@ struct DiscoverView: View {
     GeometryReader { proxy in
       ScrollView(.vertical, showsIndicators: false) {
         VStack(spacing: 0) {
-          RadioHeaderCard(track: featuredTrack, state: playbackController.state)
+          RadioHeaderCard(
+            track: featuredTrack,
+            state: playbackController.state,
+            elapsedTimeText: playbackController.elapsedTimeText,
+            playbackProgress: playbackController.playbackProgress
+          )
             .padding(.horizontal, 10)
             .padding(.top, 28)
 
           NowPlayingSetCard(
             track: featuredTrack,
             isPlaying: playbackController.state == .playing,
+            elapsedTimeText: playbackController.elapsedTimeText,
+            playbackProgress: playbackController.playbackProgress,
             playAction: toggleFeaturedTrack
           )
           .padding(.horizontal, 10)
@@ -43,6 +54,8 @@ struct DiscoverView: View {
 private struct RadioHeaderCard: View {
   let track: Track
   let state: PlaybackState
+  let elapsedTimeText: String
+  let playbackProgress: Double
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
@@ -59,18 +72,22 @@ private struct RadioHeaderCard: View {
 
         Spacer(minLength: 12)
 
-        Text("0:00")
+        Text(elapsedTimeText)
           .font(.system(size: 24, weight: .heavy, design: .rounded))
           .foregroundStyle(.white)
       }
 
-      WaveformView(
-        bars: WaveformView.radioBars,
-        activeBars: state == .playing ? 19 : 0,
+      AudioWaveformStripView(
+        audioURL: track.previewURL,
+        progress: playbackProgress,
         baseColor: Color(red: 0.55, green: 0.66, blue: 0.76).opacity(0.82),
         activeColor: .white.opacity(0.92),
-        barWidth: 5,
-        spacing: 9,
+        stripeWidth: 5,
+        stripeSpacing: 9,
+        fallbackBars: StaticWaveformBarsView.radioBars,
+        fallbackActiveBars: state == .playing ? 19 : 0,
+        fallbackBarWidth: 5,
+        fallbackSpacing: 9,
         cornerRadius: 3
       )
       .frame(height: 118)
@@ -113,6 +130,8 @@ private struct RadioHeaderCard: View {
 private struct NowPlayingSetCard: View {
   let track: Track
   let isPlaying: Bool
+  let elapsedTimeText: String
+  let playbackProgress: Double
   let playAction: () -> Void
 
   private var upNextText: String {
@@ -189,17 +208,21 @@ private struct NowPlayingSetCard: View {
       }
 
       HStack(spacing: 22) {
-        Text("0:00")
+        Text(elapsedTimeText)
           .font(.system(size: 20, weight: .bold, design: .rounded))
           .foregroundStyle(.black.opacity(0.42))
 
-        WaveformView(
-          bars: WaveformView.progressBars,
-          activeBars: isPlaying ? 9 : 1,
+        AudioWaveformStripView(
+          audioURL: track.previewURL,
+          progress: playbackProgress,
           baseColor: .black.opacity(0.1),
           activeColor: .black,
-          barWidth: 5,
-          spacing: 8,
+          stripeWidth: 5,
+          stripeSpacing: 8,
+          fallbackBars: StaticWaveformBarsView.progressBars,
+          fallbackActiveBars: isPlaying ? 9 : 1,
+          fallbackBarWidth: 5,
+          fallbackSpacing: 8,
           cornerRadius: 3
         )
         .frame(height: 42)
@@ -259,7 +282,171 @@ private struct FeedLine: View {
   }
 }
 
-private struct WaveformView: View {
+private struct AudioWaveformStripView: View {
+  let audioURL: URL?
+  let progress: Double
+  let baseColor: Color
+  let activeColor: Color
+  let stripeWidth: CGFloat
+  let stripeSpacing: CGFloat
+  let fallbackBars: [CGFloat]
+  let fallbackActiveBars: Int
+  let fallbackBarWidth: CGFloat
+  let fallbackSpacing: CGFloat
+  let cornerRadius: CGFloat
+
+  @State private var samples: [Float] = []
+
+  var body: some View {
+    Group {
+      if let audioURL {
+        GeometryReader { proxy in
+          let clampedProgress = min(max(progress, 0), 1)
+          let displayScale = UIScreen.main.scale
+          let sampleCount = max(1, Int(proxy.size.width * displayScale))
+          let configuration = waveformConfiguration(scale: displayScale)
+
+          if samples.isEmpty {
+            fallbackView
+              .task(id: WaveformLoadRequest(audioURL: audioURL, sampleCount: sampleCount)) {
+                samples = await AudioWaveformSampleLoader.samples(from: audioURL, count: sampleCount)
+              }
+          } else {
+            let shape = WaveformShape(
+              samples: samples,
+              configuration: configuration,
+              renderer: LinearWaveformRenderer()
+            )
+
+            ZStack(alignment: .leading) {
+              waveformLayer(shape: shape, color: baseColor)
+              waveformLayer(shape: shape, color: activeColor)
+                .mask(alignment: .leading) {
+                  Rectangle()
+                    .frame(width: proxy.size.width * clampedProgress)
+                }
+            }
+            .task(id: WaveformLoadRequest(audioURL: audioURL, sampleCount: sampleCount)) {
+              samples = await AudioWaveformSampleLoader.samples(from: audioURL, count: sampleCount)
+            }
+          }
+        }
+      } else {
+        fallbackView
+      }
+    }
+    .drawingGroup()
+    .accessibilityHidden(true)
+  }
+
+  private var fallbackView: some View {
+    StaticWaveformBarsView(
+      bars: fallbackBars,
+      activeBars: fallbackActiveBars,
+      baseColor: baseColor,
+      activeColor: activeColor,
+      barWidth: fallbackBarWidth,
+      spacing: fallbackSpacing,
+      cornerRadius: cornerRadius
+    )
+  }
+
+  private func waveformLayer(shape: WaveformShape, color: Color) -> some View {
+    shape.stroke(
+      color,
+      style: StrokeStyle(lineWidth: stripeWidth, lineCap: .round)
+    )
+  }
+
+  private func waveformConfiguration(scale: CGFloat) -> Waveform.Configuration {
+    Waveform.Configuration(
+      style: .striped(
+        .init(
+          color: .white,
+          width: stripeWidth,
+          spacing: stripeSpacing,
+          lineCap: .round
+        )
+      ),
+      damping: .init(percentage: 0.08, sides: .both),
+      scale: scale,
+      verticalScalingFactor: 1,
+      shouldAntialias: true
+    )
+  }
+}
+
+private struct WaveformLoadRequest: Equatable {
+  let audioURL: URL
+  let sampleCount: Int
+}
+
+private enum AudioWaveformSampleLoader {
+  static func samples(from audioURL: URL, count: Int) async -> [Float] {
+    await Task.detached(priority: .userInitiated) {
+      loadSamples(from: audioURL, count: count)
+    }.value
+  }
+
+  private static func loadSamples(from audioURL: URL, count: Int) -> [Float] {
+    do {
+      let audioFile = try AVAudioFile(forReading: audioURL)
+      let frameCapacity = AVAudioFrameCount(audioFile.length)
+
+      guard
+        count > 0,
+        frameCapacity > 0,
+        let buffer = AVAudioPCMBuffer(pcmFormat: audioFile.processingFormat, frameCapacity: frameCapacity)
+      else {
+        return []
+      }
+
+      try audioFile.read(into: buffer)
+
+      guard
+        let channelData = buffer.floatChannelData,
+        buffer.frameLength > 0
+      else {
+        return []
+      }
+
+      let frameLength = Int(buffer.frameLength)
+      let channelCount = max(1, Int(buffer.format.channelCount))
+      var peaks = Array(repeating: Float.zero, count: count)
+
+      for index in 0..<count {
+        let start = index * frameLength / count
+        let end = max(start + 1, min(frameLength, (index + 1) * frameLength / count))
+        var peak = Float.zero
+
+        for frame in start..<end {
+          var mixedSample = Float.zero
+
+          for channel in 0..<channelCount {
+            mixedSample += abs(channelData[channel][frame])
+          }
+
+          peak = max(peak, mixedSample / Float(channelCount))
+        }
+
+        peaks[index] = peak
+      }
+
+      let maxPeak = peaks.max() ?? 0
+      guard maxPeak > 0 else {
+        return Array(repeating: 1, count: count)
+      }
+
+      return peaks.map { peak in
+        1 - min(1, peak / maxPeak)
+      }
+    } catch {
+      return []
+    }
+  }
+}
+
+private struct StaticWaveformBarsView: View {
   let bars: [CGFloat]
   let activeBars: Int
   let baseColor: Color

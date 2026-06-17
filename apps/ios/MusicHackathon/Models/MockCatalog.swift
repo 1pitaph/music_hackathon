@@ -8,7 +8,8 @@ enum MockCatalog {
       album: "up up above",
       mood: "Pop Surrealism",
       duration: 900,
-      artworkSystemName: "waveform"
+      artworkSystemName: "waveform",
+      previewURL: featuredPreviewURL
     ),
     Track(
       title: "birds & the bees",
@@ -34,4 +35,8 @@ enum MockCatalog {
     "Practice room",
     "Weekend discoveries"
   ]
+
+  private static var featuredPreviewURL: URL? {
+    Bundle.main.url(forResource: "featured-preview", withExtension: "m4a")
+  }
 }

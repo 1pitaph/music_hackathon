@@ -18,6 +18,9 @@
 		A10000000000000000000009 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* LibraryView.swift */; };
 		A10000000000000000000010 /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* PlayerView.swift */; };
 		A10000000000000000000011 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* SettingsView.swift */; };
+		A10000000000000000000012 /* featured-preview.m4a in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* featured-preview.m4a */; };
+		A10000000000000000000013 /* DSWaveformImage in Frameworks */ = {isa = PBXBuildFile; productRef = B10000000000000000000001 /* DSWaveformImage */; };
+		A10000000000000000000014 /* DSWaveformImageViews in Frameworks */ = {isa = PBXBuildFile; productRef = B10000000000000000000002 /* DSWaveformImageViews */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -34,6 +37,7 @@
 		A20000000000000000000011 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A20000000000000000000012 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000000000000000000013 /* MusicHackathon.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicHackathon.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000014 /* featured-preview.m4a */ = {isa = PBXFileReference; lastKnownFileType = audio.m4a; path = "featured-preview.m4a"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -41,6 +45,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000013 /* DSWaveformImage in Frameworks */,
+				A10000000000000000000014 /* DSWaveformImageViews in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -109,6 +115,7 @@
 		A40000000000000000000009 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				A40000000000000000000015 /* Audio */,
 				A20000000000000000000012 /* Info.plist */,
 			);
 			path = Resources;
@@ -154,6 +161,14 @@
 			path = Settings;
 			sourceTree = "<group>";
 		};
+		A40000000000000000000015 /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000014 /* featured-preview.m4a */,
+			);
+			path = Audio;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -170,6 +185,10 @@
 			dependencies = (
 			);
 			name = MusicHackathon;
+			packageProductDependencies = (
+				B10000000000000000000001 /* DSWaveformImage */,
+				B10000000000000000000002 /* DSWaveformImageViews */,
+			);
 			productName = MusicHackathon;
 			productReference = A20000000000000000000013 /* MusicHackathon.app */;
 			productType = "com.apple.product-type.application";
@@ -198,6 +217,9 @@
 				Base,
 			);
 			mainGroup = A40000000000000000000001;
+			packageReferences = (
+				B10000000000000000000003 /* XCRemoteSwiftPackageReference "DSWaveformImage" */,
+			);
 			productRefGroup = A40000000000000000000010 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -212,6 +234,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000012 /* featured-preview.m4a in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -237,6 +260,30 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		B10000000000000000000003 /* XCRemoteSwiftPackageReference "DSWaveformImage" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/dmrschmidt/DSWaveformImage";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 14.5.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B10000000000000000000001 /* DSWaveformImage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B10000000000000000000003 /* XCRemoteSwiftPackageReference "DSWaveformImage" */;
+			productName = DSWaveformImage;
+		};
+		B10000000000000000000002 /* DSWaveformImageViews */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B10000000000000000000003 /* XCRemoteSwiftPackageReference "DSWaveformImage" */;
+			productName = DSWaveformImageViews;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		AA0000000000000000000001 /* Debug */ = {
