@@ -1,8 +1,4 @@
-import AVFoundation
-import DSWaveformImage
-import DSWaveformImageViews
 import SwiftUI
-import UIKit
 
 struct DiscoverView: View {
   @Environment(PlaybackController.self) private var playbackController
@@ -15,7 +11,7 @@ struct DiscoverView: View {
             track: featuredTrack,
             state: playbackController.state,
             elapsedTimeText: playbackController.elapsedTimeText,
-            playbackProgress: playbackController.playbackProgress
+            elapsedSeconds: playbackController.elapsedSeconds
           )
             .padding(.horizontal, 10)
             .padding(.top, 28)
@@ -24,7 +20,7 @@ struct DiscoverView: View {
             track: featuredTrack,
             isPlaying: playbackController.state == .playing,
             elapsedTimeText: playbackController.elapsedTimeText,
-            playbackProgress: playbackController.playbackProgress,
+            elapsedSeconds: playbackController.elapsedSeconds,
             playAction: toggleFeaturedTrack
           )
           .padding(.horizontal, 10)
@@ -55,7 +51,7 @@ private struct RadioHeaderCard: View {
   let track: Track
   let state: PlaybackState
   let elapsedTimeText: String
-  let playbackProgress: Double
+  let elapsedSeconds: TimeInterval
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
@@ -77,20 +73,20 @@ private struct RadioHeaderCard: View {
           .foregroundStyle(.white)
       }
 
-      AudioWaveformStripView(
+      ReactiveSpectrumView(
         audioURL: track.previewURL,
-        progress: playbackProgress,
+        elapsedSeconds: elapsedSeconds,
+        isPlaying: state == .playing,
         baseColor: Color(red: 0.55, green: 0.66, blue: 0.76).opacity(0.82),
         activeColor: .white.opacity(0.92),
-        stripeWidth: 5,
-        stripeSpacing: 9,
+        barWidth: 5,
+        spacing: 9,
         fallbackBars: StaticWaveformBarsView.radioBars,
         fallbackActiveBars: state == .playing ? 19 : 0,
-        fallbackBarWidth: 5,
-        fallbackSpacing: 9,
         cornerRadius: 3
       )
       .frame(height: 118)
+      .offset(y: -18)
     }
     .padding(.horizontal, 24)
     .padding(.top, 22)
@@ -131,7 +127,7 @@ private struct NowPlayingSetCard: View {
   let track: Track
   let isPlaying: Bool
   let elapsedTimeText: String
-  let playbackProgress: Double
+  let elapsedSeconds: TimeInterval
   let playAction: () -> Void
 
   private var upNextText: String {
@@ -212,17 +208,16 @@ private struct NowPlayingSetCard: View {
           .font(.system(size: 20, weight: .bold, design: .rounded))
           .foregroundStyle(.black.opacity(0.42))
 
-        AudioWaveformStripView(
+        ReactiveSpectrumView(
           audioURL: track.previewURL,
-          progress: playbackProgress,
+          elapsedSeconds: elapsedSeconds,
+          isPlaying: isPlaying,
           baseColor: .black.opacity(0.1),
           activeColor: .black,
-          stripeWidth: 5,
-          stripeSpacing: 8,
+          barWidth: 5,
+          spacing: 8,
           fallbackBars: StaticWaveformBarsView.progressBars,
           fallbackActiveBars: isPlaying ? 9 : 1,
-          fallbackBarWidth: 5,
-          fallbackSpacing: 8,
           cornerRadius: 3
         )
         .frame(height: 42)
@@ -282,54 +277,34 @@ private struct FeedLine: View {
   }
 }
 
-private struct AudioWaveformStripView: View {
+private struct ReactiveSpectrumView: View {
   let audioURL: URL?
-  let progress: Double
+  let elapsedSeconds: TimeInterval
+  let isPlaying: Bool
   let baseColor: Color
   let activeColor: Color
-  let stripeWidth: CGFloat
-  let stripeSpacing: CGFloat
+  let barWidth: CGFloat
+  let spacing: CGFloat
   let fallbackBars: [CGFloat]
   let fallbackActiveBars: Int
-  let fallbackBarWidth: CGFloat
-  let fallbackSpacing: CGFloat
   let cornerRadius: CGFloat
 
-  @State private var samples: [Float] = []
+  @State private var analysis: AudioSpectrumAnalysis?
 
   var body: some View {
     Group {
       if let audioURL {
-        GeometryReader { proxy in
-          let clampedProgress = min(max(progress, 0), 1)
-          let displayScale = UIScreen.main.scale
-          let sampleCount = max(1, Int(proxy.size.width * displayScale))
-          let configuration = waveformConfiguration(scale: displayScale)
-
-          if samples.isEmpty {
-            fallbackView
-              .task(id: WaveformLoadRequest(audioURL: audioURL, sampleCount: sampleCount)) {
-                samples = await AudioWaveformSampleLoader.samples(from: audioURL, count: sampleCount)
-              }
-          } else {
-            let shape = WaveformShape(
-              samples: samples,
-              configuration: configuration,
-              renderer: LinearWaveformRenderer()
-            )
-
-            ZStack(alignment: .leading) {
-              waveformLayer(shape: shape, color: baseColor)
-              waveformLayer(shape: shape, color: activeColor)
-                .mask(alignment: .leading) {
-                  Rectangle()
-                    .frame(width: proxy.size.width * clampedProgress)
-                }
-            }
-            .task(id: WaveformLoadRequest(audioURL: audioURL, sampleCount: sampleCount)) {
-              samples = await AudioWaveformSampleLoader.samples(from: audioURL, count: sampleCount)
-            }
-          }
+        SpectrumBarsView(
+          bands: currentBands,
+          isPlaying: isPlaying,
+          baseColor: baseColor,
+          activeColor: activeColor,
+          barWidth: barWidth,
+          spacing: spacing,
+          cornerRadius: cornerRadius
+        )
+        .task(id: SpectrumLoadRequest(audioURL: audioURL, bandCount: fallbackBars.count)) {
+          analysis = await AudioSpectrumAnalyzer.analyze(audioURL: audioURL, bandCount: fallbackBars.count)
         }
       } else {
         fallbackView
@@ -345,104 +320,63 @@ private struct AudioWaveformStripView: View {
       activeBars: fallbackActiveBars,
       baseColor: baseColor,
       activeColor: activeColor,
-      barWidth: fallbackBarWidth,
-      spacing: fallbackSpacing,
+      barWidth: barWidth,
+      spacing: spacing,
       cornerRadius: cornerRadius
     )
   }
 
-  private func waveformLayer(shape: WaveformShape, color: Color) -> some View {
-    shape.stroke(
-      color,
-      style: StrokeStyle(lineWidth: stripeWidth, lineCap: .round)
-    )
-  }
-
-  private func waveformConfiguration(scale: CGFloat) -> Waveform.Configuration {
-    Waveform.Configuration(
-      style: .striped(
-        .init(
-          color: .white,
-          width: stripeWidth,
-          spacing: stripeSpacing,
-          lineCap: .round
-        )
-      ),
-      damping: .init(percentage: 0.08, sides: .both),
-      scale: scale,
-      verticalScalingFactor: 1,
-      shouldAntialias: true
-    )
-  }
-}
-
-private struct WaveformLoadRequest: Equatable {
-  let audioURL: URL
-  let sampleCount: Int
-}
-
-private enum AudioWaveformSampleLoader {
-  static func samples(from audioURL: URL, count: Int) async -> [Float] {
-    await Task.detached(priority: .userInitiated) {
-      loadSamples(from: audioURL, count: count)
-    }.value
-  }
-
-  private static func loadSamples(from audioURL: URL, count: Int) -> [Float] {
-    do {
-      let audioFile = try AVAudioFile(forReading: audioURL)
-      let frameCapacity = AVAudioFrameCount(audioFile.length)
-
-      guard
-        count > 0,
-        frameCapacity > 0,
-        let buffer = AVAudioPCMBuffer(pcmFormat: audioFile.processingFormat, frameCapacity: frameCapacity)
-      else {
-        return []
-      }
-
-      try audioFile.read(into: buffer)
-
-      guard
-        let channelData = buffer.floatChannelData,
-        buffer.frameLength > 0
-      else {
-        return []
-      }
-
-      let frameLength = Int(buffer.frameLength)
-      let channelCount = max(1, Int(buffer.format.channelCount))
-      var peaks = Array(repeating: Float.zero, count: count)
-
-      for index in 0..<count {
-        let start = index * frameLength / count
-        let end = max(start + 1, min(frameLength, (index + 1) * frameLength / count))
-        var peak = Float.zero
-
-        for frame in start..<end {
-          var mixedSample = Float.zero
-
-          for channel in 0..<channelCount {
-            mixedSample += abs(channelData[channel][frame])
-          }
-
-          peak = max(peak, mixedSample / Float(channelCount))
-        }
-
-        peaks[index] = peak
-      }
-
-      let maxPeak = peaks.max() ?? 0
-      guard maxPeak > 0 else {
-        return Array(repeating: 1, count: count)
-      }
-
-      return peaks.map { peak in
-        1 - min(1, peak / maxPeak)
-      }
-    } catch {
-      return []
+  private var currentBands: [Float] {
+    if let analysis {
+      return analysis.bands(at: elapsedSeconds)
     }
+
+    let maxFallback = max(fallbackBars.max() ?? 1, 1)
+    return fallbackBars.map { Float(max(0.12, $0 / maxFallback)) }
+  }
+}
+
+private struct SpectrumLoadRequest: Equatable {
+  let audioURL: URL
+  let bandCount: Int
+}
+
+private struct SpectrumBarsView: View {
+  let bands: [Float]
+  let isPlaying: Bool
+  let baseColor: Color
+  let activeColor: Color
+  let barWidth: CGFloat
+  let spacing: CGFloat
+  let cornerRadius: CGFloat
+
+  var body: some View {
+    GeometryReader { proxy in
+      let targetWidth = CGFloat(bands.count) * barWidth + CGFloat(max(bands.count - 1, 0)) * spacing
+      let scale = min(1, max(0.35, proxy.size.width / max(targetWidth, 1)))
+      let color = isPlaying ? activeColor : baseColor
+
+      HStack(alignment: .center, spacing: spacing * scale) {
+        ForEach(Array(bands.enumerated()), id: \.offset) { _, band in
+          Capsule()
+            .fill(color)
+            .frame(
+              width: barWidth * scale,
+              height: barHeight(for: band, in: proxy.size.height, scale: scale)
+            )
+        }
+      }
+      .frame(width: proxy.size.width, height: proxy.size.height)
+    }
+    .animation(.linear(duration: isPlaying ? 0.08 : 0.18), value: bands)
+  }
+
+  private func barHeight(for band: Float, in availableHeight: CGFloat, scale: CGFloat) -> CGFloat {
+    let dotHeight = barWidth * scale
+    let clampedBand = CGFloat(min(max(band, 0), 1))
+    let activeBand = max(0, (clampedBand - 0.18) / 0.82)
+    let curvedBand = pow(activeBand, 0.9)
+    return dotHeight + ((availableHeight - dotHeight) * curvedBand)
   }
 }
 

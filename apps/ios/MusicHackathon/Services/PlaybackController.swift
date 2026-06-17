@@ -17,10 +17,12 @@ final class PlaybackController {
   var state: PlaybackState = .idle
   var lastErrorMessage: String?
   var playbackProgress: Double = 0
+  var elapsedSeconds: TimeInterval = 0
   var elapsedTimeText: String = "0:00"
 
   @ObservationIgnored private let player = AVPlayer()
   @ObservationIgnored private var timeObserverToken: Any?
+  @ObservationIgnored private var endObserverToken: NSObjectProtocol?
 
   init() {
     configureAudioSession()
@@ -33,10 +35,13 @@ final class PlaybackController {
     state = .loading
     resetPlaybackProgress()
     removePeriodicTimeObserver()
+    removePlaybackEndObserver()
 
     if let previewURL = track.previewURL {
-      player.replaceCurrentItem(with: AVPlayerItem(url: previewURL))
+      let item = AVPlayerItem(url: previewURL)
+      player.replaceCurrentItem(with: item)
       addPeriodicTimeObserver()
+      addPlaybackEndObserver(for: item)
       player.play()
       state = .playing
     } else {
@@ -76,11 +81,12 @@ final class PlaybackController {
     currentTrack = nil
     resetPlaybackProgress()
     removePeriodicTimeObserver()
+    removePlaybackEndObserver()
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
   }
 
   private func addPeriodicTimeObserver() {
-    let interval = CMTime(seconds: 0.1, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+    let interval = CMTime(seconds: 1.0 / 30.0, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
     timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
       Task { @MainActor in
         self?.updatePlaybackProgress(for: time)
@@ -94,8 +100,36 @@ final class PlaybackController {
     self.timeObserverToken = nil
   }
 
+  private func addPlaybackEndObserver(for item: AVPlayerItem) {
+    endObserverToken = NotificationCenter.default.addObserver(
+      forName: AVPlayerItem.didPlayToEndTimeNotification,
+      object: item,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor in
+        self?.restartFinishedPreviewIfNeeded()
+      }
+    }
+  }
+
+  private func removePlaybackEndObserver() {
+    guard let endObserverToken else { return }
+    NotificationCenter.default.removeObserver(endObserverToken)
+    self.endObserverToken = nil
+  }
+
+  private func restartFinishedPreviewIfNeeded() {
+    guard state == .playing else { return }
+
+    player.seek(to: .zero)
+    resetPlaybackProgress()
+    player.play()
+    updateNowPlayingPlaybackRate(1)
+  }
+
   private func updatePlaybackProgress(for time: CMTime) {
     let elapsedSeconds = time.seconds.isFinite ? max(0, time.seconds) : 0
+    self.elapsedSeconds = elapsedSeconds
     elapsedTimeText = Self.timeText(for: elapsedSeconds)
 
     guard
@@ -112,6 +146,7 @@ final class PlaybackController {
 
   private func resetPlaybackProgress() {
     playbackProgress = 0
+    elapsedSeconds = 0
     elapsedTimeText = "0:00"
   }
 
