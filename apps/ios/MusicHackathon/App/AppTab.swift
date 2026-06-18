@@ -18,13 +18,22 @@ enum AppTab: String, CaseIterable, Identifiable {
     }
   }
 
+  var prefersHiddenNavigationBar: Bool {
+    switch self {
+    case .radio, .island:
+      true
+    case .mine:
+      false
+    }
+  }
+
   @ViewBuilder
   var content: some View {
     switch self {
     case .radio:
       DiscoverView()
     case .island:
-      LibraryView()
+      IslandView()
     case .mine:
       SettingsView()
     }
@@ -36,7 +45,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     case .radio:
       Label("Radio", systemImage: "dot.radiowaves.left.and.right")
     case .island:
-      Label("Island", systemImage: "person.2.wave.2")
+      Label("Island", systemImage: "map.fill")
     case .mine:
       Label("Mine", systemImage: "person.crop.circle")
     }

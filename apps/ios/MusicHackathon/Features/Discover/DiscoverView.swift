@@ -3,6 +3,11 @@ import SwiftUI
 struct DiscoverView: View {
   @Environment(PlaybackController.self) private var playbackController
 
+  @State private var featuredTracks: [Track] = MockCatalog.featuredTracks
+  @State private var isLoadingCatalog = false
+
+  private let catalogService = AppleMusicCatalogService()
+
   var body: some View {
     GeometryReader { proxy in
       ScrollView(.vertical, showsIndicators: false) {
@@ -17,7 +22,9 @@ struct DiscoverView: View {
 
           NowPlayingSetCard(
             track: featuredTrack,
+            tracks: featuredTracks,
             isPlaying: playbackController.state == .playing,
+            isLoading: playbackController.state == .loading || isLoadingCatalog,
             elapsedTimeText: playbackController.elapsedTimeText,
             playAction: toggleFeaturedTrack
           )
@@ -30,10 +37,13 @@ struct DiscoverView: View {
       .scrollBounceBehavior(.always, axes: .vertical)
     }
     .background(.clear)
+    .task {
+      await loadAppleMusicTracks()
+    }
   }
 
   private var featuredTrack: Track {
-    playbackController.currentTrack ?? MockCatalog.featuredTracks[0]
+    playbackController.currentTrack ?? featuredTracks[0]
   }
 
   private func toggleFeaturedTrack() {
@@ -41,6 +51,22 @@ struct DiscoverView: View {
       playbackController.play(track: featuredTrack)
     } else {
       playbackController.togglePlayback()
+    }
+  }
+
+  private func loadAppleMusicTracks() async {
+    guard !isLoadingCatalog else { return }
+
+    isLoadingCatalog = true
+    defer { isLoadingCatalog = false }
+
+    do {
+      let appleMusicTracks = try await catalogService.featuredTracks()
+      if !appleMusicTracks.isEmpty {
+        featuredTracks = Array(appleMusicTracks.prefix(3))
+      }
+    } catch {
+      featuredTracks = await catalogService.enrich(MockCatalog.featuredTracks)
     }
   }
 }
@@ -71,14 +97,13 @@ private struct RadioHeaderCard: View {
       }
 
       ReactiveSpectrumView(
-        audioURL: track.previewURL,
+        track: track,
         isPlaying: state == .playing,
         baseColor: Color(red: 0.55, green: 0.66, blue: 0.76).opacity(0.82),
         activeColor: .white.opacity(0.92),
         barWidth: 5,
         spacing: 9,
-        fallbackBars: StaticWaveformBarsView.radioBars,
-        fallbackActiveBars: state == .playing ? 19 : 0,
+        fallbackBars: SpectrumBarPresets.radioBars,
         cornerRadius: 3
       )
       .frame(height: 118)
@@ -121,15 +146,24 @@ private struct RadioHeaderCard: View {
 
 private struct NowPlayingSetCard: View {
   let track: Track
+  let tracks: [Track]
   let isPlaying: Bool
+  let isLoading: Bool
   let elapsedTimeText: String
   let playAction: () -> Void
 
   private var upNextText: String {
-    let nextTracks = MockCatalog.featuredTracks.dropFirst().prefix(2).enumerated()
+    let nextTracks = tracks
+      .filter { $0.id != track.id }
+      .prefix(2)
+      .enumerated()
     return nextTracks
       .map { "\($0.offset + 2). \($0.element.title)" }
       .joined(separator: "  ")
+  }
+
+  private var sourceText: String {
+    track.isAppleMusicTrack ? "Apple Music" : "Local preview"
   }
 
   var body: some View {
@@ -142,7 +176,7 @@ private struct NowPlayingSetCard: View {
             .lineLimit(1)
             .minimumScaleFactor(0.72)
 
-          Text("Curated by MusicDiscover")
+          Text(sourceText)
             .font(.system(size: 18, weight: .bold, design: .rounded))
             .foregroundStyle(.black.opacity(0.38))
             .lineLimit(1)
@@ -167,7 +201,7 @@ private struct NowPlayingSetCard: View {
       VStack(alignment: .leading, spacing: 14) {
         FeedLine(
           source: "MusicDiscover",
-          message: "An ethereal blend of pop and surrealism that finds beauty in chaos. It explores love and existentialism with a cinematic soul...",
+          message: "\(track.artist) sets the tone with \(track.mood.lowercased()) color, ready for your Apple Music queue.",
           lineLimit: 3
         )
 
@@ -204,14 +238,13 @@ private struct NowPlayingSetCard: View {
           .foregroundStyle(.black.opacity(0.42))
 
         ReactiveSpectrumView(
-          audioURL: track.previewURL,
+          track: track,
           isPlaying: isPlaying,
           baseColor: .black.opacity(0.1),
           activeColor: .black,
           barWidth: 5,
           spacing: 8,
-          fallbackBars: StaticWaveformBarsView.progressBars,
-          fallbackActiveBars: isPlaying ? 9 : 1,
+          fallbackBars: SpectrumBarPresets.progressBars,
           cornerRadius: 3
         )
         .frame(height: 42)
@@ -219,13 +252,14 @@ private struct NowPlayingSetCard: View {
         Spacer(minLength: 4)
 
         Button(action: playAction) {
-          Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+          Image(systemName: playButtonSystemImage)
             .font(.system(size: 31, weight: .bold))
             .foregroundStyle(.white)
             .frame(width: 64, height: 64)
             .background(.black, in: Circle())
         }
-        .accessibilityLabel(isPlaying ? "Pause" : "Play")
+        .disabled(isLoading)
+        .accessibilityLabel(playButtonAccessibilityLabel)
       }
     }
     .padding(.horizontal, 20)
@@ -247,6 +281,22 @@ private struct NowPlayingSetCard: View {
     }
     .shadow(color: .black.opacity(0.18), radius: 26, y: 16)
     .accessibilityElement(children: .contain)
+  }
+
+  private var playButtonSystemImage: String {
+    if isLoading {
+      return "hourglass"
+    }
+
+    return isPlaying ? "pause.fill" : "play.fill"
+  }
+
+  private var playButtonAccessibilityLabel: String {
+    if isLoading {
+      return "Loading"
+    }
+
+    return isPlaying ? "Pause" : "Play"
   }
 }
 
@@ -274,67 +324,58 @@ private struct FeedLine: View {
 private struct ReactiveSpectrumView: View {
   @Environment(PlaybackController.self) private var playbackController
 
-  let audioURL: URL?
+  let track: Track
   let isPlaying: Bool
   let baseColor: Color
   let activeColor: Color
   let barWidth: CGFloat
   let spacing: CGFloat
   let fallbackBars: [CGFloat]
-  let fallbackActiveBars: Int
   let cornerRadius: CGFloat
 
   @State private var analysis: AudioSpectrumAnalysis?
 
   var body: some View {
-    Group {
-      if let audioURL {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !isPlaying)) { context in
-          SpectrumBarsView(
-            bands: currentBands(frameDate: context.date),
-            isPlaying: isPlaying,
-            baseColor: baseColor,
-            activeColor: activeColor,
-            barWidth: barWidth,
-            spacing: spacing,
-            cornerRadius: cornerRadius
-          )
-        }
-        .task(id: SpectrumLoadRequest(audioURL: audioURL, bandCount: fallbackBars.count)) {
-          analysis = await AudioSpectrumAnalyzer.analyze(audioURL: audioURL, bandCount: fallbackBars.count)
-        }
-      } else {
-        fallbackView
+    TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !isPlaying)) { context in
+      SpectrumBarsView(
+        bands: currentBands(frameDate: context.date),
+        isPlaying: isPlaying,
+        baseColor: baseColor,
+        activeColor: activeColor,
+        barWidth: barWidth,
+        spacing: spacing,
+        cornerRadius: cornerRadius
+      )
+    }
+    .task(id: SpectrumLoadRequest(trackID: track.id, previewURL: track.previewURL, bandCount: fallbackBars.count)) {
+      analysis = nil
+
+      guard let previewURL = track.previewURL else { return }
+      let loadedAnalysis = await SpectrumAnalysisCache.shared.analysis(for: previewURL, bandCount: fallbackBars.count)
+      if !Task.isCancelled {
+        analysis = loadedAnalysis
       }
     }
     .accessibilityHidden(true)
   }
 
-  private var fallbackView: some View {
-    StaticWaveformBarsView(
-      bars: fallbackBars,
-      activeBars: fallbackActiveBars,
-      baseColor: baseColor,
-      activeColor: activeColor,
-      barWidth: barWidth,
-      spacing: spacing,
-      cornerRadius: cornerRadius
-    )
-  }
-
   private func currentBands(frameDate: Date) -> [Float] {
-    if let analysis {
+    if let analysis, !analysis.frames.isEmpty {
       return analysis.bands(at: playbackController.currentPlaybackSeconds())
     }
 
     _ = frameDate
-    let maxFallback = max(fallbackBars.max() ?? 1, 1)
-    return fallbackBars.map { Float(max(0.12, $0 / maxFallback)) }
+    return ProceduralSpectrumGenerator.bands(
+      for: track,
+      at: playbackController.currentPlaybackSeconds(),
+      fallbackBars: fallbackBars
+    )
   }
 }
 
 private struct SpectrumLoadRequest: Equatable {
-  let audioURL: URL
+  let trackID: UUID
+  let previewURL: URL?
   let bandCount: Int
 }
 
@@ -378,33 +419,7 @@ private struct SpectrumBarsView: View {
   }
 }
 
-private struct StaticWaveformBarsView: View {
-  let bars: [CGFloat]
-  let activeBars: Int
-  let baseColor: Color
-  let activeColor: Color
-  let barWidth: CGFloat
-  let spacing: CGFloat
-  let cornerRadius: CGFloat
-
-  var body: some View {
-    GeometryReader { proxy in
-      let targetWidth = CGFloat(bars.count) * barWidth + CGFloat(max(bars.count - 1, 0)) * spacing
-      let scale = min(1, max(0.35, proxy.size.width / max(targetWidth, 1)))
-
-      HStack(alignment: .center, spacing: spacing * scale) {
-        ForEach(Array(bars.enumerated()), id: \.offset) { index, height in
-          Capsule()
-            .fill(index < activeBars ? activeColor : baseColor)
-            .frame(width: barWidth * scale, height: height)
-        }
-      }
-      .frame(width: proxy.size.width, height: proxy.size.height)
-    }
-    .drawingGroup()
-    .accessibilityHidden(true)
-  }
-
+private enum SpectrumBarPresets {
   static let radioBars: [CGFloat] = [
     78, 96, 112, 126, 140, 130, 114, 98, 82, 66,
     54, 46, 42, 48, 58, 72, 88, 98, 104, 106,

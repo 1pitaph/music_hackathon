@@ -10,8 +10,16 @@ struct SettingsView: View {
         HStack {
           Label("Authorization", systemImage: "music.note")
           Spacer()
-          Text(statusText)
+          Text(musicAuthorization.statusText)
             .foregroundStyle(.secondary)
+        }
+
+        HStack {
+          Label("Subscription", systemImage: "play.circle")
+          Spacer()
+          Text(musicAuthorization.subscriptionText)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.trailing)
         }
 
         Button {
@@ -25,33 +33,37 @@ struct SettingsView: View {
           )
         }
         .disabled(musicAuthorization.isRequestingAccess || musicAuthorization.status == .authorized)
+
+        Button {
+          Task {
+            await musicAuthorization.refreshAccessState()
+          }
+        } label: {
+          Label(
+            musicAuthorization.isRefreshingSubscription ? "Checking" : "Refresh Status",
+            systemImage: "arrow.clockwise"
+          )
+        }
+        .disabled(musicAuthorization.isRequestingAccess || musicAuthorization.isRefreshingSubscription)
+
+        if let message = musicAuthorization.lastErrorMessage {
+          Text(message)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        }
       }
 
       Section("Native Capabilities") {
         Label("Background audio mode is declared", systemImage: "speaker.wave.2")
         Label("Remote command center is wired", systemImage: "dot.radiowaves.left.and.right")
-        Label("Playback service is ready for AVPlayer", systemImage: "play.rectangle")
+        Label("MusicKit catalog playback is wired", systemImage: "music.note.tv")
+        Label("Local preview fallback is retained", systemImage: "play.rectangle")
       }
       .foregroundStyle(.secondary)
     }
     .listStyle(.insetGrouped)
     .task {
-      musicAuthorization.refresh()
-    }
-  }
-
-  private var statusText: String {
-    switch musicAuthorization.status {
-    case .authorized:
-      "Authorized"
-    case .denied:
-      "Denied"
-    case .notDetermined:
-      "Not Determined"
-    case .restricted:
-      "Restricted"
-    @unknown default:
-      "Unknown"
+      await musicAuthorization.refreshAccessState()
     }
   }
 }

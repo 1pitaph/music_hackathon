@@ -30,12 +30,13 @@ struct PlayerView: View {
         Button {
           playbackController.togglePlayback()
         } label: {
-          Image(systemName: playbackController.state == .playing ? "pause.fill" : "play.fill")
+          Image(systemName: playButtonSystemImage)
             .font(.title2)
             .frame(width: 56, height: 56)
         }
         .buttonStyle(.borderedProminent)
-        .accessibilityLabel(playbackController.state == .playing ? "Pause" : "Play")
+        .disabled(playbackController.state == .loading)
+        .accessibilityLabel(playButtonAccessibilityLabel)
       }
 
       statusText
@@ -50,23 +51,60 @@ struct PlayerView: View {
   }
 
   private var artwork: some View {
-    Image(systemName: playbackController.currentTrack?.artworkSystemName ?? "waveform.circle")
-      .font(.system(size: 92))
-      .foregroundStyle(.tint)
-      .frame(width: 180, height: 180)
-      .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
-      .accessibilityHidden(true)
+    Group {
+      if let artworkURL = playbackController.currentTrack?.artworkURL {
+        AsyncImage(url: artworkURL) { image in
+          image
+            .resizable()
+            .scaledToFill()
+        } placeholder: {
+          Image(systemName: "music.note")
+            .font(.system(size: 80))
+            .foregroundStyle(.tint)
+        }
+      } else {
+        Image(systemName: playbackController.currentTrack?.artworkSystemName ?? "waveform.circle")
+          .font(.system(size: 92))
+          .foregroundStyle(.tint)
+      }
+    }
+    .frame(width: 180, height: 180)
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+    .accessibilityHidden(true)
   }
 
   @ViewBuilder
   private var statusText: some View {
     if let message = playbackController.lastErrorMessage {
       Text(message)
-    } else if playbackController.currentTrack?.previewURL == nil {
-      Text("This scaffold uses fixture tracks without audio files. Add preview URLs or MusicKit playback next.")
+    } else if playbackController.state == .loading {
+      Text("Loading")
+    } else if let currentTrack = playbackController.currentTrack, !currentTrack.isPlayable {
+      Text("This track is not playable yet.")
+    } else if playbackController.activeBackend == .appleMusic {
+      Text("Apple Music")
+    } else if playbackController.activeBackend == .localPreview {
+      Text("Local preview")
     } else {
       Text(playbackController.state.rawValue.capitalized)
     }
+  }
+
+  private var playButtonSystemImage: String {
+    if playbackController.state == .loading {
+      return "hourglass"
+    }
+
+    return playbackController.state == .playing ? "pause.fill" : "play.fill"
+  }
+
+  private var playButtonAccessibilityLabel: String {
+    if playbackController.state == .loading {
+      return "Loading"
+    }
+
+    return playbackController.state == .playing ? "Pause" : "Play"
   }
 }
 

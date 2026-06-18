@@ -1,5 +1,6 @@
 import AVFoundation
 import MediaPlayer
+import MusicKit
 import Observation
 
 enum PlaybackState: String {
@@ -19,80 +20,214 @@ final class PlaybackController {
   var playbackProgress: Double = 0
   var elapsedSeconds: TimeInterval = 0
   var elapsedTimeText: String = "0:00"
+  var activeBackend: PlaybackBackend = .none
 
-  @ObservationIgnored private let player = AVPlayer()
+  @ObservationIgnored private let previewPlayer = AVPlayer()
+  @ObservationIgnored private let musicPlayer = ApplicationMusicPlayer.shared
+  @ObservationIgnored private let catalogService = AppleMusicCatalogService()
   @ObservationIgnored private var timeObserverToken: Any?
   @ObservationIgnored private var endObserverToken: NSObjectProtocol?
+  @ObservationIgnored private var musicProgressTask: Task<Void, Never>?
+  @ObservationIgnored private var playbackTask: Task<Void, Never>?
 
   init() {
     configureAudioSession()
     configureRemoteCommands()
   }
 
-  func play(track: Track) {
-    currentTrack = track
-    lastErrorMessage = nil
-    state = .loading
-    resetPlaybackProgress()
-    removePeriodicTimeObserver()
-    removePlaybackEndObserver()
+  deinit {
+    timeObserverToken.map(previewPlayer.removeTimeObserver)
 
-    if let previewURL = track.previewURL {
-      let item = AVPlayerItem(url: previewURL)
-      player.replaceCurrentItem(with: item)
-      addPeriodicTimeObserver()
-      addPlaybackEndObserver(for: item)
-      player.play()
-      state = .playing
-    } else {
-      state = .paused
+    if let endObserverToken {
+      NotificationCenter.default.removeObserver(endObserverToken)
     }
 
-    updateNowPlayingInfo(for: track)
+    musicProgressTask?.cancel()
+    playbackTask?.cancel()
+  }
+
+  func play(track: Track) {
+    playbackTask?.cancel()
+    playbackTask = Task { [weak self] in
+      await self?.startPlayback(for: track)
+    }
   }
 
   func togglePlayback() {
+    playbackTask?.cancel()
+
     switch state {
     case .playing:
-      player.pause()
-      state = .paused
-      updateNowPlayingPlaybackRate(0)
-    case .paused, .idle:
-      if currentTrack == nil {
-        currentTrack = MockCatalog.featuredTracks.first
-      }
-
-      if state == .paused, player.currentItem != nil {
-        player.play()
-        state = .playing
-        updateNowPlayingPlaybackRate(1)
-      } else if let currentTrack {
+      pause()
+    case .paused:
+      resume()
+    case .idle:
+      if let currentTrack {
         play(track: currentTrack)
+      } else if let firstTrack = MockCatalog.featuredTracks.first {
+        play(track: firstTrack)
       }
     case .loading, .failed:
       break
     }
   }
 
+  func pause() {
+    switch activeBackend {
+    case .appleMusic:
+      musicPlayer.pause()
+      stopMusicProgressTimer()
+    case .localPreview:
+      previewPlayer.pause()
+    case .none:
+      break
+    }
+
+    state = .paused
+    updateNowPlayingPlaybackRate(0)
+  }
+
   func stop() {
-    player.pause()
-    player.replaceCurrentItem(with: nil)
-    state = .idle
-    currentTrack = nil
-    resetPlaybackProgress()
-    removePeriodicTimeObserver()
-    removePlaybackEndObserver()
-    MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    playbackTask?.cancel()
+    stopCurrentPlayback(clearCurrentTrack: true)
   }
 
   func currentPlaybackSeconds() -> TimeInterval {
-    let seconds = player.currentTime().seconds
-    return seconds.isFinite ? max(0, seconds) : 0
+    switch activeBackend {
+    case .appleMusic:
+      let seconds = musicPlayer.playbackTime
+      return seconds.isFinite ? max(0, seconds) : elapsedSeconds
+    case .localPreview:
+      let seconds = previewPlayer.currentTime().seconds
+      return seconds.isFinite ? max(0, seconds) : 0
+    case .none:
+      return 0
+    }
+  }
+
+  private func startPlayback(for track: Track) async {
+    currentTrack = track
+    lastErrorMessage = nil
+    state = .loading
+    stopCurrentPlayback(clearCurrentTrack: false)
+    resetPlaybackProgress()
+
+    if track.appleMusicID != nil {
+      do {
+        try await startAppleMusicPlayback(for: track)
+        return
+      } catch {
+        if track.previewURL == nil {
+          failPlayback(error)
+          return
+        }
+
+        lastErrorMessage = nil
+      }
+    }
+
+    if let previewURL = track.previewURL {
+      startPreviewPlayback(for: track, previewURL: previewURL)
+    } else {
+      do {
+        try await startAppleMusicPlayback(for: track)
+      } catch {
+        failPlayback(error)
+      }
+    }
+  }
+
+  private func startAppleMusicPlayback(for track: Track) async throws {
+    let authorizedStatus = MusicAuthorization.currentStatus == .authorized
+      ? MusicAuthorization.currentStatus
+      : await MusicAuthorization.request()
+    guard authorizedStatus == .authorized else {
+      throw PlaybackError.appleMusicAccessDenied
+    }
+
+    let subscription = try await MusicSubscription.current
+    guard subscription.canPlayCatalogContent else {
+      throw PlaybackError.appleMusicSubscriptionRequired
+    }
+
+    let song = try await catalogService.song(for: track)
+    musicPlayer.queue = [song]
+    try await musicPlayer.play()
+
+    activeBackend = .appleMusic
+    state = .playing
+    updateNowPlayingInfo(for: track)
+    updateNowPlayingPlaybackRate(1)
+    startMusicProgressTimer(duration: track.duration)
+  }
+
+  private func startPreviewPlayback(for track: Track, previewURL: URL) {
+    let item = AVPlayerItem(url: previewURL)
+    previewPlayer.replaceCurrentItem(with: item)
+    addPeriodicTimeObserver()
+    addPlaybackEndObserver(for: item)
+    previewPlayer.play()
+
+    activeBackend = .localPreview
+    state = .playing
+    updateNowPlayingInfo(for: track)
+  }
+
+  private func resume() {
+    switch activeBackend {
+    case .appleMusic:
+      playbackTask = Task { [weak self] in
+        await self?.resumeAppleMusicPlayback()
+      }
+    case .localPreview:
+      if previewPlayer.currentItem != nil {
+        previewPlayer.play()
+        state = .playing
+        updateNowPlayingPlaybackRate(1)
+      } else if let currentTrack {
+        play(track: currentTrack)
+      }
+    case .none:
+      if let currentTrack {
+        play(track: currentTrack)
+      }
+    }
+  }
+
+  private func resumeAppleMusicPlayback() async {
+    do {
+      try await musicPlayer.play()
+      state = .playing
+      updateNowPlayingPlaybackRate(1)
+      startMusicProgressTimer(duration: currentTrack?.duration ?? 0)
+    } catch {
+      failPlayback(error)
+    }
+  }
+
+  private func stopCurrentPlayback(clearCurrentTrack: Bool) {
+    previewPlayer.pause()
+    previewPlayer.replaceCurrentItem(with: nil)
+    musicPlayer.stop()
+
+    activeBackend = .none
+    state = .idle
+    if clearCurrentTrack {
+      currentTrack = nil
+    }
+
+    resetPlaybackProgress()
+    removePeriodicTimeObserver()
+    removePlaybackEndObserver()
+    stopMusicProgressTimer()
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
   }
 
   private func addPeriodicTimeObserver() {
+    removePeriodicTimeObserver()
+
     let interval = CMTime(seconds: 1.0 / 30.0, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-    timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+    timeObserverToken = previewPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
       Task { @MainActor in
         self?.updatePlaybackProgress(for: time)
       }
@@ -101,11 +236,13 @@ final class PlaybackController {
 
   private func removePeriodicTimeObserver() {
     guard let timeObserverToken else { return }
-    player.removeTimeObserver(timeObserverToken)
+    previewPlayer.removeTimeObserver(timeObserverToken)
     self.timeObserverToken = nil
   }
 
   private func addPlaybackEndObserver(for item: AVPlayerItem) {
+    removePlaybackEndObserver()
+
     endObserverToken = NotificationCenter.default.addObserver(
       forName: AVPlayerItem.didPlayToEndTimeNotification,
       object: item,
@@ -126,10 +263,36 @@ final class PlaybackController {
   private func restartFinishedPreviewIfNeeded() {
     guard state == .playing else { return }
 
-    player.seek(to: .zero)
+    previewPlayer.seek(to: .zero)
     resetPlaybackProgress()
-    player.play()
+    previewPlayer.play()
     updateNowPlayingPlaybackRate(1)
+  }
+
+  private func startMusicProgressTimer(duration: TimeInterval) {
+    stopMusicProgressTimer()
+
+    musicProgressTask = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(1))
+
+        await MainActor.run {
+          guard
+            let self,
+            self.activeBackend == .appleMusic,
+            self.state == .playing
+          else { return }
+
+          self.elapsedSeconds = self.currentPlaybackSeconds()
+          self.updateMusicPlaybackProgress(duration: duration)
+        }
+      }
+    }
+  }
+
+  private func stopMusicProgressTimer() {
+    musicProgressTask?.cancel()
+    musicProgressTask = nil
   }
 
   private func updatePlaybackProgress(for time: CMTime) {
@@ -142,10 +305,21 @@ final class PlaybackController {
     }
 
     guard
-      let duration = player.currentItem?.duration.seconds,
+      let duration = previewPlayer.currentItem?.duration.seconds,
       duration.isFinite,
       duration > 0
     else {
+      playbackProgress = 0
+      return
+    }
+
+    playbackProgress = min(max(elapsedSeconds / duration, 0), 1)
+  }
+
+  private func updateMusicPlaybackProgress(duration: TimeInterval) {
+    elapsedTimeText = Self.timeText(for: elapsedSeconds)
+
+    guard duration > 0 else {
       playbackProgress = 0
       return
     }
@@ -157,6 +331,14 @@ final class PlaybackController {
     playbackProgress = 0
     elapsedSeconds = 0
     elapsedTimeText = "0:00"
+  }
+
+  private func failPlayback(_ error: Error) {
+    lastErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    state = .failed
+    activeBackend = .none
+    stopMusicProgressTimer()
+    updateNowPlayingPlaybackRate(0)
   }
 
   private func configureAudioSession() {
@@ -180,9 +362,7 @@ final class PlaybackController {
 
     commandCenter.pauseCommand.addTarget { [weak self] _ in
       Task { @MainActor in
-        guard let self else { return }
-        self.player.pause()
-        self.state = .paused
+        self?.pause()
       }
       return .success
     }
@@ -207,5 +387,25 @@ final class PlaybackController {
   private static func timeText(for seconds: TimeInterval) -> String {
     let totalSeconds = max(0, Int(seconds.rounded(.down)))
     return "\(totalSeconds / 60):\(String(format: "%02d", totalSeconds % 60))"
+  }
+}
+
+enum PlaybackBackend: String {
+  case none
+  case localPreview
+  case appleMusic
+}
+
+private enum PlaybackError: LocalizedError {
+  case appleMusicAccessDenied
+  case appleMusicSubscriptionRequired
+
+  var errorDescription: String? {
+    switch self {
+    case .appleMusicAccessDenied:
+      "Apple Music access is required to play this track."
+    case .appleMusicSubscriptionRequired:
+      "An active Apple Music subscription is required to play catalog tracks."
+    }
   }
 }

@@ -7,7 +7,7 @@ struct AppView: View {
   var body: some View {
     tabView
       .tint(.cyan)
-      .preferredColorScheme(.dark)
+      .preferredColorScheme(selectedTab == .island ? .light : .dark)
   }
 
   @ViewBuilder
@@ -31,7 +31,7 @@ struct AppView: View {
             tab.content
           }
           .navigationTitle(tab.title)
-          .toolbar(tab == .radio ? .hidden : .automatic, for: .navigationBar)
+          .toolbar(tab.prefersHiddenNavigationBar ? .hidden : .automatic, for: .navigationBar)
         }
         .tabItem { tab.label }
         .tag(tab)
