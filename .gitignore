@@ -10,12 +10,36 @@ DerivedData/
 .build/
 .swiftpm/
 
-# JavaScript workspaces, when web/admin apps are added later.
+# JavaScript / Expo workspaces
 node_modules/
 .turbo/
 dist/
 build/
+web-build/
+.expo/
+expo-env.d.ts
+.tsbuildinfo
+.metro-health-check*
+
+# Environment
 .env
 .env.*
 !.env.example
+
+# Native (Expo prebuild artifacts)
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+
+# Debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# Misc
 tmp
