@@ -11,20 +11,35 @@ import { Ionicons } from '@expo/vector-icons';
 import { UserProfile, StationItem } from '../data/mockData';
 import StationCover from '../components/station/StationCover';
 import StationDetailPage from '../components/station/StationDetailPage';
+import PublishedGridPage from '../components/station/PublishedGridPage';
 
-type TabKey = 'published' | 'saved' | 'recentlyPlayed';
-type MinePage = 'list' | 'stationDetail';
+type MinePage = 'list' | 'stationDetail' | 'publishedGrid';
 
 interface MineScreenProps {
   profile: UserProfile;
   onNavigateToSettings: () => void;
 }
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'published', label: 'Published' },
-  { key: 'saved', label: 'Saved' },
+// ====== Helpers ======
+
+function formatRelativeTime(timestamp?: number): string {
+  if (!timestamp) return '';
+  const diff = Date.now() - timestamp;
+  const days = Math.floor(diff / 86400000);
+  if (days < 1) return 'Today';
+  if (days === 1) return '1 day ago';
+  if (days < 7) return `${days} days ago`;
+  if (days < 14) return '1 week ago';
+  if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
+  return `${Math.floor(days / 30)} months ago`;
+}
+
+const PANELS = [
   { key: 'recentlyPlayed', label: 'Recently Played' },
-];
+  { key: 'saved', label: 'Saved' },
+] as const;
+
+type PanelKey = (typeof PANELS)[number]['key'];
 
 // ====== Main Screen ======
 
@@ -32,12 +47,23 @@ export default function MineScreen({
   profile,
   onNavigateToSettings,
 }: MineScreenProps) {
-  const [activeTab, setActiveTab] = useState<TabKey>('published');
   const [page, setPage] = useState<MinePage>('list');
   const [selectedStation, setSelectedStation] = useState<StationItem | null>(
     null,
   );
-  const stations: StationItem[] = profile[activeTab];
+  const [expanded, setExpanded] = useState<Record<PanelKey, boolean>>({
+    recentlyPlayed: true,
+    saved: true,
+  });
+
+  const togglePanel = (key: PanelKey) => {
+    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Recently published — sorted by createdAt desc, top 5
+  const recentStations = [...profile.published]
+    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+    .slice(0, 5);
 
   // Station detail page
   if (page === 'stationDetail' && selectedStation) {
@@ -49,11 +75,25 @@ export default function MineScreen({
     );
   }
 
+  // Published grid page
+  if (page === 'publishedGrid') {
+    return (
+      <PublishedGridPage
+        stations={profile.published}
+        onBack={() => setPage('list')}
+        onStationPress={(station) => {
+          setSelectedStation(station);
+          setPage('stationDetail');
+        }}
+      />
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.safe}>
-      {/* ====== Fixed Header ====== */}
-      <View style={styles.fixedArea}>
-        {/* Row 1: Settings */}
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      {/* ====== Fixed Compact Header ====== */}
+      <View style={styles.fixedHeader}>
+        {/* Settings */}
         <View style={styles.topRow}>
           <View style={styles.topRowSpacer} />
           <TouchableOpacity
@@ -77,87 +117,127 @@ export default function MineScreen({
             </Text>
           </View>
           <Text style={styles.title}>{profile.nickname}</Text>
-          <View style={styles.subtitleRow}>
-            <View style={styles.onAirDot} />
-            <Text style={styles.subtitle} numberOfLines={1}>
-              {profile.nowPlaying
-                ? `Now Playing: ${profile.nowPlaying.name}`
-                : `Now Playing: ${profile.published[0]?.name ?? ''}`}
-            </Text>
-          </View>
+          <Text style={styles.bio}>{profile.bio}</Text>
         </View>
 
         {/* Stats */}
         <View style={styles.statsRow}>
-          <View style={styles.statCard}>
+          <View style={styles.statItem}>
             <Text style={styles.statNumber}>
               {profile.stats.listeningHours}
             </Text>
             <Text style={styles.statLabel}>Hours</Text>
           </View>
-          <View style={styles.statCard}>
+          <View style={styles.statItem}>
             <Text style={styles.statNumber}>
               {profile.stats.stationsCount}
             </Text>
             <Text style={styles.statLabel}>Stations</Text>
           </View>
-          <View style={styles.statCard}>
+          <View style={styles.statItem}>
             <Text style={styles.statNumber}>
               {profile.stats.likesCount.toLocaleString()}
             </Text>
             <Text style={styles.statLabel}>Likes</Text>
           </View>
         </View>
-
-        {/* Tabs */}
-        <View style={styles.tabBar}>
-          {TABS.map((tab) => {
-            const isActive = activeTab === tab.key;
-            return (
-              <TouchableOpacity
-                key={tab.key}
-                onPress={() => setActiveTab(tab.key)}
-                style={styles.tabItem}
-                activeOpacity={0.7}
-              >
-                <Text
-                  style={[styles.tabLabel, isActive && styles.tabLabelActive]}
-                >
-                  {tab.label}
-                </Text>
-                {isActive && <View style={styles.tabIndicator} />}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
       </View>
 
-      {/* ====== Scrollable List ====== */}
+      {/* ====== Scrollable Content ====== */}
       <ScrollView
-        style={styles.listScroll}
-        contentContainerStyle={styles.listScrollContent}
+        style={styles.bodyScroll}
+        contentContainerStyle={styles.bodyScrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {stations.length === 0 ? (
-          <Text style={styles.emptyText}>Nothing here yet.</Text>
-        ) : (
-          stations.map((station, index) => (
-            <View key={station.id}>
-              {index > 0 && <View style={styles.listDivider} />}
+        {/* Recently Published */}
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionHeaderLeft}>
+            <Ionicons name="radio" size={18} color="rgba(255,255,255,0.6)" />
+            <Text style={styles.sectionTitle}>Radio Archive</Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setPage('publishedGrid')}
+            activeOpacity={0.6}
+          >
+            <Text style={styles.seeAll}>See All</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.recentScrollContent}
+        >
+          {recentStations.map((station) => (
+            <TouchableOpacity
+              key={station.id}
+              style={styles.recentCard}
+              activeOpacity={0.6}
+              onPress={() => {
+                setSelectedStation(station);
+                setPage('stationDetail');
+              }}
+            >
+              <StationCover station={station} size="recent" />
+              <Text style={styles.recentName} numberOfLines={1}>
+                {station.name}
+              </Text>
+              <Text style={styles.recentSubtitle} numberOfLines={1}>
+                {formatRelativeTime(station.createdAt)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {/* Expandable Panels: Recently Played / Saved */}
+        {PANELS.map((panel) => {
+          const isOpen = expanded[panel.key];
+          const items: StationItem[] = profile[panel.key];
+          return (
+            <View key={panel.key} style={styles.panel}>
               <TouchableOpacity
-                style={styles.listItem}
+                style={styles.panelHeader}
                 activeOpacity={0.6}
-                onPress={() => {
-                  setSelectedStation(station);
-                  setPage('stationDetail');
-                }}
+                onPress={() => togglePanel(panel.key)}
               >
-                <StationCover station={station} />
-                <Text style={styles.stationName}>{station.name}</Text>
+                <Text style={styles.panelTitle}>{panel.label}</Text>
+                <Ionicons
+                  name={isOpen ? 'chevron-down' : 'chevron-forward'}
+                  size={18}
+                  color="rgba(255,255,255,0.45)"
+                />
               </TouchableOpacity>
+
+              {isOpen && (
+                <View style={styles.panelBody}>
+                  {items.length === 0 ? (
+                    <Text style={styles.emptyText}>Nothing here yet.</Text>
+                  ) : (
+                    items.map((station, index) => (
+                      <View key={station.id}>
+                        {index > 0 && <View style={styles.listDivider} />}
+                        <TouchableOpacity
+                          style={styles.listItem}
+                          activeOpacity={0.6}
+                          onPress={() => {
+                            setSelectedStation(station);
+                            setPage('stationDetail');
+                          }}
+                        >
+                          <StationCover station={station} />
+                          <Text style={styles.stationName}>
+                            {station.name}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))
+                  )}
+                </View>
+              )}
             </View>
-          ))
-        )}
+          );
+        })}
+
         <View style={styles.listBottom} />
       </ScrollView>
     </SafeAreaView>
@@ -172,9 +252,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#121212',
   },
 
-  /* ---- Fixed Area ---- */
-  fixedArea: {
+  /* ---- Fixed Header ---- */
+  fixedHeader: {
     paddingHorizontal: 20,
+    paddingBottom: 12,
   },
 
   /* ---- Top Row: Settings ---- */
@@ -190,12 +271,12 @@ const styles = StyleSheet.create({
   /* ---- Identity Card ---- */
   identityCard: {
     alignItems: 'center',
-    marginTop: 12,
+    marginTop: 8,
   },
   avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.15)',
     justifyContent: 'center',
@@ -203,98 +284,112 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     color: 'rgba(255,255,255,0.7)',
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '600',
   },
   title: {
     color: '#fff',
-    fontSize: 22,
+    fontSize: 28,
     fontWeight: '700',
     marginTop: 16,
   },
-  subtitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  onAirDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#00d4aa',
-    borderWidth: 1,
-    borderColor: 'rgba(0,212,170,0.3)',
-    marginRight: 8,
-  },
-  subtitle: {
+  bio: {
     fontSize: 13,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.45)',
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 8,
+    textAlign: 'center',
   },
 
   /* ---- Stats ---- */
   statsRow: {
     flexDirection: 'row',
-    gap: 8,
-    marginTop: 24,
+    marginTop: 20,
   },
-  statCard: {
+  statItem: {
     flex: 1,
-    backgroundColor: '#1e1e1e',
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 12,
     alignItems: 'center',
   },
   statNumber: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
   },
   statLabel: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 11,
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 10,
     fontWeight: '500',
     letterSpacing: 0.5,
     marginTop: 4,
   },
 
-  /* ---- Tab Bar ---- */
-  tabBar: {
+  /* ---- Recently Published ---- */
+  sectionHeader: {
     flexDirection: 'row',
-    paddingTop: 20,
-    paddingBottom: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 16,
+    marginBottom: 14,
   },
-  tabItem: {
-    marginRight: 28,
-    paddingBottom: 10,
+  sectionHeaderLeft: {
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  tabLabel: {
-    fontSize: 14,
+  sectionTitle: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+    marginLeft: 8,
+  },
+  seeAll: {
     color: 'rgba(255,255,255,0.4)',
+    fontSize: 13,
     fontWeight: '500',
   },
-  tabLabelActive: {
-    color: '#fff',
+  recentScrollContent: {
+    paddingRight: 20,
+    gap: 14,
   },
-  tabIndicator: {
-    position: 'absolute',
-    bottom: 0,
-    width: 16,
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: '#fff',
+  recentCard: {
+    width: 104,
+  },
+  recentName: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 10,
+  },
+  recentSubtitle: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 11,
+    marginTop: 4,
   },
 
-  /* ---- Scrollable List ---- */
-  listScroll: {
+  /* ---- Body Scroll ---- */
+  bodyScroll: {
     flex: 1,
   },
-  listScrollContent: {
+  bodyScrollContent: {
     paddingHorizontal: 20,
+  },
+
+  /* ---- Expandable Panels ---- */
+  panel: {
+    marginTop: 4,
+  },
+  panelHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  panelTitle: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  panelBody: {
+    paddingBottom: 8,
   },
   listItem: {
     flexDirection: 'row',

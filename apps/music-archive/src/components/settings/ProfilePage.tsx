@@ -20,10 +20,11 @@ export default function ProfilePage({
   onSaveAndBackToMine,
 }: ProfilePageProps) {
   const [nickname, setNickname] = useState(profile.nickname);
+  const [bio, setBio] = useState(profile.bio);
   const [selectedColor, setSelectedColor] = useState(profile.avatarColor);
 
   const handleSave = () => {
-    onSave({ ...profile, nickname, avatarColor: selectedColor });
+    onSave({ ...profile, nickname, bio, avatarColor: selectedColor });
     onSaveAndBackToMine();
   };
 
@@ -47,7 +48,17 @@ export default function ProfilePage({
           autoFocus
         />
 
-        <Text style={[styles.label, styles.colorLabel]}>头像颜色</Text>
+        <Text style={[styles.label, styles.fieldGap]}>电台简介</Text>
+        <TextInput
+          style={styles.input}
+          value={bio}
+          onChangeText={setBio}
+          placeholder="输入电台简介"
+          placeholderTextColor="rgba(255,255,255,0.3)"
+          maxLength={60}
+        />
+
+        <Text style={[styles.label, styles.fieldGap]}>头像颜色</Text>
         <View style={styles.colorGrid}>
           {PRESET_COLORS.map((color) => {
             const isSelected = selectedColor === color;
@@ -102,7 +113,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginBottom: 12,
   },
-  colorLabel: {
+  fieldGap: {
     marginTop: 32,
   },
   input: {

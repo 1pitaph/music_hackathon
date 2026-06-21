@@ -2,12 +2,15 @@ export interface StationItem {
   id: string;
   name: string;
   coverUrl: string | null;
+  createdAt?: number;
+  isFeatured?: boolean;
 }
 
 export interface UserProfile {
   nickname: string;
   avatarUrl: string | null;
   avatarColor: string;
+  bio: string;
   stats: {
     listeningHours: number;
     stationsCount: number;
@@ -41,6 +44,7 @@ export const mockUserProfile: UserProfile = {
   nickname: 'Mine Radio',
   avatarUrl: null,
   avatarColor: '#2a2a2a',
+  bio: 'Your sound. Your story.',
   stats: {
     listeningHours: 342,
     stationsCount: 28,
@@ -48,11 +52,11 @@ export const mockUserProfile: UserProfile = {
   },
   nowPlaying: null,
   published: [
-    { id: 'p1', name: 'Late Night Lo-fi', coverUrl: null },
-    { id: 'p2', name: 'Morning Coffee', coverUrl: null },
-    { id: 'p3', name: 'Weekend Vinyl', coverUrl: null },
-    { id: 'p4', name: 'Indie Discovery', coverUrl: null },
-    { id: 'p5', name: 'Electronic Hour', coverUrl: null },
+    { id: 'p1', name: 'Late Night Lo-fi', coverUrl: null, createdAt: Date.now() - 2 * 86400000, isFeatured: true },
+    { id: 'p2', name: 'Morning Coffee', coverUrl: null, createdAt: Date.now() - 5 * 86400000 },
+    { id: 'p3', name: 'Weekend Vinyl', coverUrl: null, createdAt: Date.now() - 8 * 86400000, isFeatured: true },
+    { id: 'p4', name: 'Indie Discovery', coverUrl: null, createdAt: Date.now() - 12 * 86400000, isFeatured: true },
+    { id: 'p5', name: 'Electronic Hour', coverUrl: null, createdAt: Date.now() - 20 * 86400000 },
   ],
   saved: [
     { id: 's1', name: 'Jazz Standard', coverUrl: null },
