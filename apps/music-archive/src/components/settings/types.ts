@@ -3,11 +3,12 @@ import { UserProfile } from '../../data/mockData';
 export type SettingsPage =
   | 'list'
   | 'about'
-  | 'dataCollection'
   | 'appleMusic'
   | 'profile'
-  | 'autoPlay'
-  | 'stationVisibility';
+  | 'soundQuality'
+  | 'playHistory'
+  | 'importPlaylist'
+  | 'manualAdd';
 
 export interface SettingsSubPageProps {
   onBack: () => void;

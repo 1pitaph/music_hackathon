@@ -4,6 +4,7 @@ export interface StationItem {
   coverUrl: string | null;
   createdAt?: number;
   isFeatured?: boolean;
+  genre?: string;
 }
 
 export interface UserProfile {
@@ -20,6 +21,7 @@ export interface UserProfile {
   published: StationItem[];
   saved: StationItem[];
   recentlyPlayed: StationItem[];
+  artists: string[];
 }
 
 // ====== Cover Color Mapping ======
@@ -50,13 +52,13 @@ export const mockUserProfile: UserProfile = {
     stationsCount: 28,
     likesCount: 1247,
   },
-  nowPlaying: null,
+  nowPlaying: { id: 'p1', name: 'Late Night Lo-fi', coverUrl: null },
   published: [
-    { id: 'p1', name: 'Late Night Lo-fi', coverUrl: null, createdAt: Date.now() - 2 * 86400000, isFeatured: true },
-    { id: 'p2', name: 'Morning Coffee', coverUrl: null, createdAt: Date.now() - 5 * 86400000 },
-    { id: 'p3', name: 'Weekend Vinyl', coverUrl: null, createdAt: Date.now() - 8 * 86400000, isFeatured: true },
-    { id: 'p4', name: 'Indie Discovery', coverUrl: null, createdAt: Date.now() - 12 * 86400000, isFeatured: true },
-    { id: 'p5', name: 'Electronic Hour', coverUrl: null, createdAt: Date.now() - 20 * 86400000 },
+    { id: 'p1', name: 'Late Night Lo-fi', coverUrl: null, createdAt: Date.now() - 2 * 86400000, isFeatured: true, genre: 'Lo-fi' },
+    { id: 'p2', name: 'Morning Coffee', coverUrl: null, createdAt: Date.now() - 5 * 86400000, genre: 'Jazz' },
+    { id: 'p3', name: 'Weekend Vinyl', coverUrl: null, createdAt: Date.now() - 8 * 86400000, isFeatured: true, genre: 'Rock' },
+    { id: 'p4', name: 'Indie Discovery', coverUrl: null, createdAt: Date.now() - 12 * 86400000, isFeatured: true, genre: 'Indie' },
+    { id: 'p5', name: 'Electronic Hour', coverUrl: null, createdAt: Date.now() - 20 * 86400000, genre: 'Electronic' },
   ],
   saved: [
     { id: 's1', name: 'Jazz Standard', coverUrl: null },
@@ -74,5 +76,13 @@ export const mockUserProfile: UserProfile = {
     { id: 'r5', name: 'Electronic Hour', coverUrl: null },
     { id: 'r6', name: 'Classic Rock Radio', coverUrl: null },
     { id: 'r7', name: 'Weekend Vinyl', coverUrl: null },
+  ],
+  artists: [
+    'Billie Eilish',
+    'Laufey',
+    'Frank Ocean',
+    'Daniel Caesar',
+    'Joji',
+    'Keshi',
   ],
 };

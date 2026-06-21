@@ -4,13 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { SettingsSubPageProps } from './types';
 import SettingsHeader from './SettingsHeader';
 
-export default function AboutPage({ onBack }: SettingsSubPageProps) {
+export default function ImportPlaylistPage({ onBack }: SettingsSubPageProps) {
   return (
     <SafeAreaView style={styles.safe}>
-      <SettingsHeader title="关于" onBack={onBack} />
+      <SettingsHeader title="导入播放列表" onBack={onBack} />
       <View style={styles.content}>
-        <Text style={styles.productName}>Music Archive</Text>
-        <Text style={styles.version}>v1.0.0</Text>
+        <Text style={styles.hint}>Coming soon</Text>
       </View>
     </SafeAreaView>
   );
@@ -27,14 +26,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
   },
-  productName: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: '700',
-  },
-  version: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 15,
-    marginTop: 8,
+  hint: {
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 14,
   },
 });

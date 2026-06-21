@@ -80,6 +80,7 @@ export default function MineScreen({
     return (
       <PublishedGridPage
         stations={profile.published}
+        artists={profile.artists}
         onBack={() => setPage('list')}
         onStationPress={(station) => {
           setSelectedStation(station);

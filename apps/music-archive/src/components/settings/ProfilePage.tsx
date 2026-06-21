@@ -30,7 +30,7 @@ export default function ProfilePage({
 
   return (
     <SafeAreaView style={styles.safe}>
-      <SettingsHeader title="档案设置" onBack={onBack} />
+      <SettingsHeader title="" onBack={onBack} />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}

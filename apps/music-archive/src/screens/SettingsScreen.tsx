@@ -3,11 +3,12 @@ import { UserProfile } from '../data/mockData';
 import { SettingsPage } from '../components/settings/types';
 import SettingsList from '../components/settings/SettingsList';
 import AboutPage from '../components/settings/AboutPage';
-import DataCollectionPage from '../components/settings/DataCollectionPage';
 import AppleMusicPage from '../components/settings/AppleMusicPage';
 import ProfilePage from '../components/settings/ProfilePage';
-import AutoPlayPage from '../components/settings/AutoPlayPage';
-import StationVisibilityPage from '../components/settings/StationVisibilityPage';
+import SoundQualityPage from '../components/settings/SoundQualityPage';
+import PlayHistoryPage from '../components/settings/PlayHistoryPage';
+import ImportPlaylistPage from '../components/settings/ImportPlaylistPage';
+import ManualAddPage from '../components/settings/ManualAddPage';
 
 interface SettingsScreenProps {
   profile: UserProfile;
@@ -28,10 +29,6 @@ export default function SettingsScreen({
     return <AboutPage onBack={() => setPage('list')} />;
   }
 
-  if (page === 'dataCollection') {
-    return <DataCollectionPage onBack={() => setPage('list')} />;
-  }
-
   if (page === 'appleMusic') {
     return <AppleMusicPage onBack={() => setPage('list')} />;
   }
@@ -47,12 +44,20 @@ export default function SettingsScreen({
     );
   }
 
-  if (page === 'autoPlay') {
-    return <AutoPlayPage onBack={() => setPage('list')} />;
+  if (page === 'soundQuality') {
+    return <SoundQualityPage onBack={() => setPage('list')} />;
   }
 
-  if (page === 'stationVisibility') {
-    return <StationVisibilityPage onBack={() => setPage('list')} />;
+  if (page === 'playHistory') {
+    return <PlayHistoryPage onBack={() => setPage('list')} />;
+  }
+
+  if (page === 'importPlaylist') {
+    return <ImportPlaylistPage onBack={() => setPage('list')} />;
+  }
+
+  if (page === 'manualAdd') {
+    return <ManualAddPage onBack={() => setPage('list')} />;
   }
 
   return (

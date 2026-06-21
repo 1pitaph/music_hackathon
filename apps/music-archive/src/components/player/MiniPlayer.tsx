@@ -60,9 +60,8 @@ export default function MiniPlayer({ station, artist = 'Unknown Artist' }: MiniP
       >
         <Ionicons
           name={isPlaying ? 'pause' : 'play'}
-          size={16}
-          color="#000"
-          style={styles.playIcon}
+          size={24}
+          color="#fff"
         />
       </TouchableOpacity>
     </TouchableOpacity>
@@ -73,11 +72,12 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#1E1E1E',
+    marginHorizontal: 12,
+    marginBottom: 8,
     paddingHorizontal: 16,
     paddingVertical: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
   },
   info: {
     flex: 1,
@@ -95,14 +95,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   playButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  playIcon: {
-    marginLeft: 2,
   },
 });
