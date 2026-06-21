@@ -7,6 +7,7 @@ export interface StationItem {
 export interface UserProfile {
   nickname: string;
   avatarUrl: string | null;
+  avatarColor: string;
   stats: {
     listeningHours: number;
     stationsCount: number;
@@ -18,9 +19,28 @@ export interface UserProfile {
   recentlyPlayed: StationItem[];
 }
 
+// ====== Cover Color Mapping ======
+
+export const COVER_COLORS = [
+  '#8B5E3C',
+  '#C75B39',
+  '#3A6B5C',
+  '#5B4A7A',
+  '#D4956A',
+];
+
+export function getCoverColor(stationId: string): string {
+  let hash = 0;
+  for (let i = 0; i < stationId.length; i++) {
+    hash = ((hash << 5) - hash + stationId.charCodeAt(i)) | 0;
+  }
+  return COVER_COLORS[Math.abs(hash) % COVER_COLORS.length];
+}
+
 export const mockUserProfile: UserProfile = {
-  nickname: 'pp',
+  nickname: 'Mine Radio',
   avatarUrl: null,
+  avatarColor: '#2a2a2a',
   stats: {
     listeningHours: 342,
     stationsCount: 28,

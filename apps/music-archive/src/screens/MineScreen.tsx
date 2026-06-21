@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -8,11 +8,15 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { mockUserProfile, StationItem } from '../data/mockData';
+import { UserProfile, StationItem } from '../data/mockData';
+import StationCover from '../components/station/StationCover';
+import StationDetailPage from '../components/station/StationDetailPage';
 
 type TabKey = 'published' | 'saved' | 'recentlyPlayed';
+type MinePage = 'list' | 'stationDetail';
 
 interface MineScreenProps {
+  profile: UserProfile;
   onNavigateToSettings: () => void;
 }
 
@@ -22,73 +26,35 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'recentlyPlayed', label: 'Recently Played' },
 ];
 
-// ====== Waveform ======
-
-const WAVEFORM_LINES = 35;
-const WAVEFORM_MIN_H = 20;
-const WAVEFORM_MAX_H = 60;
-
-function pseudoRandom(seed: number): number {
-  const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
-  return x - Math.floor(x);
-}
-
-function Waveform() {
-  const lines = useMemo(() => {
-    return Array.from({ length: WAVEFORM_LINES }, (_, i) => {
-      const h =
-        WAVEFORM_MIN_H +
-        pseudoRandom(i * 3.7 + 0.5) * (WAVEFORM_MAX_H - WAVEFORM_MIN_H);
-      const centerDist =
-        Math.abs(i - (WAVEFORM_LINES - 1) / 2) / ((WAVEFORM_LINES - 1) / 2);
-      const opacity = 1.0 - centerDist * 0.7;
-      return { height: Math.round(h), opacity: Math.round(opacity * 100) / 100 };
-    });
-  }, []);
-
-  return (
-    <View style={styles.waveform}>
-      {lines.map((line, i) => (
-        <View
-          key={i}
-          style={[
-            styles.waveformLine,
-            { height: line.height, opacity: line.opacity },
-          ]}
-        />
-      ))}
-    </View>
-  );
-}
-
-// ====== Station Cover ======
-
-function StationCover({ station }: { station: StationItem }) {
-  return (
-    <View style={styles.cover}>
-      <Text style={styles.coverLetter}>{station.name.charAt(0)}</Text>
-    </View>
-  );
-}
-
 // ====== Main Screen ======
 
-export default function MineScreen({ onNavigateToSettings }: MineScreenProps) {
-  const profile = mockUserProfile;
+export default function MineScreen({
+  profile,
+  onNavigateToSettings,
+}: MineScreenProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('published');
+  const [page, setPage] = useState<MinePage>('list');
+  const [selectedStation, setSelectedStation] = useState<StationItem | null>(
+    null,
+  );
   const stations: StationItem[] = profile[activeTab];
+
+  // Station detail page
+  if (page === 'stationDetail' && selectedStation) {
+    return (
+      <StationDetailPage
+        station={selectedStation}
+        onBack={() => setPage('list')}
+      />
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
-      {/* ====== Fixed Area ====== */}
+      {/* ====== Fixed Header ====== */}
       <View style={styles.fixedArea}>
-        {/* Row 1: Avatar + Settings */}
+        {/* Row 1: Settings */}
         <View style={styles.topRow}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {profile.nickname.charAt(0)}
-            </Text>
-          </View>
           <View style={styles.topRowSpacer} />
           <TouchableOpacity
             onPress={onNavigateToSettings}
@@ -103,39 +69,39 @@ export default function MineScreen({ onNavigateToSettings }: MineScreenProps) {
           </TouchableOpacity>
         </View>
 
-        {/* Identity + Waveform */}
-        <View style={styles.identityArea}>
-          <View style={styles.identityText}>
-            <Text style={styles.title}>Mine Radio</Text>
-            <View style={styles.subtitleRow}>
-              <View style={styles.cyanDot} />
-              <Text style={styles.subtitle} numberOfLines={1}>
-                {profile.nowPlaying
-                  ? `Now Playing: ${profile.nowPlaying.name}`
-                  : `Now Playing: ${profile.published[0]?.name ?? ''}`}
-              </Text>
-            </View>
+        {/* Identity Card */}
+        <View style={styles.identityCard}>
+          <View style={[styles.avatar, { backgroundColor: profile.avatarColor }]}>
+            <Text style={styles.avatarText}>
+              {profile.nickname.charAt(0)}
+            </Text>
           </View>
-          <View style={styles.waveformWrap}>
-            <Waveform />
+          <Text style={styles.title}>{profile.nickname}</Text>
+          <View style={styles.subtitleRow}>
+            <View style={styles.onAirDot} />
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {profile.nowPlaying
+                ? `Now Playing: ${profile.nowPlaying.name}`
+                : `Now Playing: ${profile.published[0]?.name ?? ''}`}
+            </Text>
           </View>
         </View>
 
         {/* Stats */}
         <View style={styles.statsRow}>
-          <View style={styles.statItem}>
+          <View style={styles.statCard}>
             <Text style={styles.statNumber}>
               {profile.stats.listeningHours}
             </Text>
             <Text style={styles.statLabel}>Hours</Text>
           </View>
-          <View style={styles.statItem}>
+          <View style={styles.statCard}>
             <Text style={styles.statNumber}>
               {profile.stats.stationsCount}
             </Text>
             <Text style={styles.statLabel}>Stations</Text>
           </View>
-          <View style={styles.statItem}>
+          <View style={styles.statCard}>
             <Text style={styles.statNumber}>
               {profile.stats.likesCount.toLocaleString()}
             </Text>
@@ -178,10 +144,17 @@ export default function MineScreen({ onNavigateToSettings }: MineScreenProps) {
           stations.map((station, index) => (
             <View key={station.id}>
               {index > 0 && <View style={styles.listDivider} />}
-              <View style={styles.listItem}>
+              <TouchableOpacity
+                style={styles.listItem}
+                activeOpacity={0.6}
+                onPress={() => {
+                  setSelectedStation(station);
+                  setPage('stationDetail');
+                }}
+              >
                 <StationCover station={station} />
                 <Text style={styles.stationName}>{station.name}</Text>
-              </View>
+              </TouchableOpacity>
             </View>
           ))
         )}
@@ -204,104 +177,92 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
 
-  /* ---- Top Row: Avatar + Settings ---- */
+  /* ---- Top Row: Settings ---- */
   topRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingTop: 16,
+    paddingTop: 8,
   },
   topRowSpacer: {
     flex: 1,
   },
+
+  /* ---- Identity Card ---- */
+  identityCard: {
+    alignItems: 'center',
+    marginTop: 12,
+  },
   avatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#2a2a2a',
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     borderWidth: 2,
-    borderColor: '#fff',
+    borderColor: 'rgba(255,255,255,0.15)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarText: {
     color: 'rgba(255,255,255,0.7)',
-    fontSize: 24,
+    fontSize: 32,
     fontWeight: '600',
-  },
-
-  /* ---- Identity Area ---- */
-  identityArea: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingTop: 24,
-    paddingBottom: 8,
-  },
-  identityText: {
-    flex: 1,
   },
   title: {
     color: '#fff',
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: '700',
+    marginTop: 16,
   },
   subtitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 8,
   },
-  cyanDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  onAirDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     backgroundColor: '#00d4aa',
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,170,0.3)',
     marginRight: 8,
   },
   subtitle: {
-    fontSize: 14,
-    color: '#8a8a8f',
-  },
-
-  /* ---- Waveform ---- */
-  waveformWrap: {
-    width: 120,
-    height: 60,
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-  },
-  waveform: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-  },
-  waveformLine: {
-    width: 2,
-    marginHorizontal: 0.75,
-    backgroundColor: '#8a8a8f',
-    borderRadius: 1,
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.45)',
   },
 
   /* ---- Stats ---- */
   statsRow: {
     flexDirection: 'row',
-    paddingTop: 28,
+    gap: 8,
+    marginTop: 24,
   },
-  statItem: {
-    marginRight: 40,
+  statCard: {
+    flex: 1,
+    backgroundColor: '#1e1e1e',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    alignItems: 'center',
   },
   statNumber: {
     color: '#fff',
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '600',
   },
   statLabel: {
     color: 'rgba(255,255,255,0.45)',
-    fontSize: 13,
-    marginTop: 2,
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 0.5,
+    marginTop: 4,
   },
 
   /* ---- Tab Bar ---- */
   tabBar: {
     flexDirection: 'row',
-    paddingTop: 28,
+    paddingTop: 20,
     paddingBottom: 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(255,255,255,0.08)',
@@ -343,19 +304,6 @@ const styles = StyleSheet.create({
   listDivider: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: 'rgba(255,255,255,0.06)',
-  },
-  cover: {
-    width: 56,
-    height: 56,
-    borderRadius: 6,
-    backgroundColor: '#2a2a2a',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  coverLetter: {
-    color: 'rgba(255,255,255,0.35)',
-    fontSize: 22,
-    fontWeight: '600',
   },
   stationName: {
     color: '#fff',
