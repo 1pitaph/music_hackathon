@@ -14,7 +14,7 @@ interface MiniPlayerProps {
   artist?: string;
 }
 
-export default function MiniPlayer({ station, artist = 'Unknown Artist' }: MiniPlayerProps) {
+export default function MiniPlayer({ station, artist = '未知艺人' }: MiniPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
 
   const handlePlayPause = () => {
@@ -28,7 +28,7 @@ export default function MiniPlayer({ station, artist = 'Unknown Artist' }: MiniP
   // Always show the mini player
   const displayStation = station ?? {
     id: 'default',
-    name: 'Not Playing',
+    name: '未在播放',
     coverUrl: null,
   };
 

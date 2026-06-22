@@ -12,9 +12,9 @@ interface TabItem {
 }
 
 const TABS: TabItem[] = [
-  { key: 'radio', label: 'Radio', icon: 'radio-outline', iconActive: 'radio' },
-  { key: 'discover', label: 'Discover', icon: 'compass-outline', iconActive: 'compass' },
-  { key: 'mine', label: 'Mine', icon: 'person-outline', iconActive: 'person' },
+  { key: 'radio', label: '电台', icon: 'radio-outline', iconActive: 'radio' },
+  { key: 'discover', label: '发现', icon: 'compass-outline', iconActive: 'compass' },
+  { key: 'mine', label: '我的', icon: 'person-outline', iconActive: 'person' },
 ];
 
 interface BottomTabBarProps {

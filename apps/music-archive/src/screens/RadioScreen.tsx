@@ -6,8 +6,8 @@ export default function RadioScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.content}>
-        <Text style={styles.title}>Radio</Text>
-        <Text style={styles.hint}>Coming soon</Text>
+        <Text style={styles.title}>电台</Text>
+        <Text style={styles.hint}>即将推出</Text>
       </View>
     </SafeAreaView>
   );

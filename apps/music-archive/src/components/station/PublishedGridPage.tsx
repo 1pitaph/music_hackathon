@@ -23,9 +23,9 @@ interface PublishedGridPageProps {
 type GridTab = 'history' | 'curated' | 'artists';
 
 const TABS: { key: GridTab; label: string }[] = [
-  { key: 'history', label: 'History' },
-  { key: 'curated', label: 'Curated' },
-  { key: 'artists', label: 'Artists' },
+  { key: 'history', label: '历史' },
+  { key: 'curated', label: '精选' },
+  { key: 'artists', label: '艺人' },
 ];
 
 const screenWidth = Dimensions.get('window').width;
@@ -42,12 +42,12 @@ function formatRelativeTime(timestamp?: number): string {
   if (!timestamp) return '';
   const diff = Date.now() - timestamp;
   const days = Math.floor(diff / 86400000);
-  if (days < 1) return 'Today';
-  if (days === 1) return '1 day ago';
-  if (days < 7) return `${days} days ago`;
-  if (days < 14) return '1 week ago';
-  if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
-  return `${Math.floor(days / 30)} months ago`;
+  if (days < 1) return '今天';
+  if (days === 1) return '1天前';
+  if (days < 7) return `${days}天前`;
+  if (days < 14) return '1周前';
+  if (days < 30) return `${Math.floor(days / 7)}周前`;
+  return `${Math.floor(days / 30)}月前`;
 }
 
 export default function PublishedGridPage({
@@ -128,7 +128,7 @@ export default function PublishedGridPage({
             color="rgba(255,255,255,0.7)"
           />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Archive</Text>
+        <Text style={styles.headerTitle}>电台档案</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -189,7 +189,7 @@ export default function PublishedGridPage({
         <View style={styles.page}>
           {curatedData.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>No curated stations yet</Text>
+              <Text style={styles.emptyText}>暂无精选电台</Text>
             </View>
           ) : (
             <FlatList

@@ -6,8 +6,8 @@ export default function DiscoverScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.content}>
-        <Text style={styles.title}>Discover</Text>
-        <Text style={styles.hint}>Coming soon</Text>
+        <Text style={styles.title}>发现</Text>
+        <Text style={styles.hint}>即将推出</Text>
       </View>
     </SafeAreaView>
   );

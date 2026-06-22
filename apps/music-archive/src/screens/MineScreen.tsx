@@ -26,17 +26,17 @@ function formatRelativeTime(timestamp?: number): string {
   if (!timestamp) return '';
   const diff = Date.now() - timestamp;
   const days = Math.floor(diff / 86400000);
-  if (days < 1) return 'Today';
-  if (days === 1) return '1 day ago';
-  if (days < 7) return `${days} days ago`;
-  if (days < 14) return '1 week ago';
-  if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
-  return `${Math.floor(days / 30)} months ago`;
+  if (days < 1) return '今天';
+  if (days === 1) return '1天前';
+  if (days < 7) return `${days}天前`;
+  if (days < 14) return '1周前';
+  if (days < 30) return `${Math.floor(days / 7)}周前`;
+  return `${Math.floor(days / 30)}月前`;
 }
 
 const PANELS = [
-  { key: 'recentlyPlayed', label: 'Recently Played' },
-  { key: 'saved', label: 'Saved' },
+  { key: 'recentlyPlayed', label: '最近播放' },
+  { key: 'saved', label: '已收藏' },
 ] as const;
 
 type PanelKey = (typeof PANELS)[number]['key'];
@@ -127,19 +127,19 @@ export default function MineScreen({
             <Text style={styles.statNumber}>
               {profile.stats.listeningHours}
             </Text>
-            <Text style={styles.statLabel}>Hours</Text>
+            <Text style={styles.statLabel}>小时</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={styles.statNumber}>
               {profile.stats.stationsCount}
             </Text>
-            <Text style={styles.statLabel}>Stations</Text>
+            <Text style={styles.statLabel}>电台</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={styles.statNumber}>
               {profile.stats.likesCount.toLocaleString()}
             </Text>
-            <Text style={styles.statLabel}>Likes</Text>
+            <Text style={styles.statLabel}>喜欢</Text>
           </View>
         </View>
       </View>
@@ -154,13 +154,13 @@ export default function MineScreen({
         <View style={styles.sectionHeader}>
           <View style={styles.sectionHeaderLeft}>
             <Ionicons name="radio" size={18} color="rgba(255,255,255,0.6)" />
-            <Text style={styles.sectionTitle}>Radio Archive</Text>
+            <Text style={styles.sectionTitle}>电台档案</Text>
           </View>
           <TouchableOpacity
             onPress={() => setPage('publishedGrid')}
             activeOpacity={0.6}
           >
-            <Text style={styles.seeAll}>See All</Text>
+            <Text style={styles.seeAll}>查看全部</Text>
           </TouchableOpacity>
         </View>
 
@@ -212,7 +212,7 @@ export default function MineScreen({
               {isOpen && (
                 <View style={styles.panelBody}>
                   {items.length === 0 ? (
-                    <Text style={styles.emptyText}>Nothing here yet.</Text>
+                    <Text style={styles.emptyText}>暂无内容</Text>
                   ) : (
                     items.map((station, index) => (
                       <View key={station.id}>
