@@ -27,8 +27,10 @@
 		F10000000000000000000001 /* RadioModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001 /* RadioModels.swift */; };
 			F10000000000000000000007 /* RadioStationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000007 /* RadioStationController.swift */; };
 			G10000000000000000000001 /* RadioStationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = G20000000000000000000001 /* RadioStationClient.swift */; };
+			H10000000000000000000001 /* RadioMemoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = H20000000000000000000001 /* RadioMemoryStore.swift */; };
 			T10000000000000000000003 /* RadioStationClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000004 /* RadioStationClientTests.swift */; };
 			T10000000000000000000004 /* RadioStationControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000005 /* RadioStationControllerTests.swift */; };
+			T10000000000000000000005 /* RadioMemoryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000006 /* RadioMemoryStoreTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,9 +65,11 @@
 		F20000000000000000000001 /* RadioModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioModels.swift; sourceTree = "<group>"; };
 			F20000000000000000000007 /* RadioStationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationController.swift; sourceTree = "<group>"; };
 			G20000000000000000000001 /* RadioStationClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationClient.swift; sourceTree = "<group>"; };
+			H20000000000000000000001 /* RadioMemoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioMemoryStore.swift; sourceTree = "<group>"; };
 			T20000000000000000000003 /* MusicHackathonTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MusicHackathonTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 			T20000000000000000000004 /* RadioStationClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationClientTests.swift; sourceTree = "<group>"; };
 		T20000000000000000000005 /* RadioStationControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationControllerTests.swift; sourceTree = "<group>"; };
+		T20000000000000000000006 /* RadioMemoryStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioMemoryStoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -147,6 +151,7 @@
 					E20000000000000000000001 /* AppleMusicCatalogService.swift */,
 					F20000000000000000000007 /* RadioStationController.swift */,
 					G20000000000000000000001 /* RadioStationClient.swift */,
+					H20000000000000000000001 /* RadioMemoryStore.swift */,
 				E20000000000000000000002 /* SpectrumAnalysisCache.swift */,
 				A20000000000000000000015 /* AudioSpectrumAnalyzer.swift */,
 			);
@@ -217,6 +222,7 @@
 			children = (
 					T20000000000000000000004 /* RadioStationClientTests.swift */,
 					T20000000000000000000005 /* RadioStationControllerTests.swift */,
+					T20000000000000000000006 /* RadioMemoryStoreTests.swift */,
 			);
 			path = MusicHackathonTests;
 			sourceTree = "<group>";
@@ -339,6 +345,7 @@
 				E10000000000000000000001 /* AppleMusicCatalogService.swift in Sources */,
 					F10000000000000000000007 /* RadioStationController.swift in Sources */,
 					G10000000000000000000001 /* RadioStationClient.swift in Sources */,
+					H10000000000000000000001 /* RadioMemoryStore.swift in Sources */,
 				E10000000000000000000002 /* SpectrumAnalysisCache.swift in Sources */,
 				A10000000000000000000010 /* PlayerView.swift in Sources */,
 				A10000000000000000000011 /* SettingsView.swift in Sources */,
@@ -351,6 +358,7 @@
 			files = (
 					T10000000000000000000003 /* RadioStationClientTests.swift in Sources */,
 				T10000000000000000000004 /* RadioStationControllerTests.swift in Sources */,
+				T10000000000000000000005 /* RadioMemoryStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

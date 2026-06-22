@@ -11,21 +11,26 @@ final class RadioStationController {
   var stationIntro = "Ready to stream the backend radio queue."
   var isLoadingStation = false
   var errorMessage: String?
+  var memorySummaryText = "Local memory is ready."
+  var memoryEventCount = 0
 
   @ObservationIgnored private let playbackController: PlaybackController
   @ObservationIgnored private let stationClient: any RadioStationFetching
+  @ObservationIgnored private let memoryStore: any RadioMemoryStoring
   @ObservationIgnored private var history: [RadioQueueItem] = []
 
   init(
     playbackController: PlaybackController,
-    stationClient: any RadioStationFetching = RadioStationClient()
+    stationClient: any RadioStationFetching = RadioStationClient(),
+    memoryStore: any RadioMemoryStoring = RadioMemoryStore()
   ) {
     self.playbackController = playbackController
     self.stationClient = stationClient
+    self.memoryStore = memoryStore
 
     playbackController.onTrackFinished = { [weak self] in
       Task { @MainActor in
-        await self?.playNext()
+        await self?.playNext(reason: .automaticCompletion)
       }
     }
   }
@@ -55,11 +60,11 @@ final class RadioStationController {
     if queue.isEmpty {
       await loadCurrentStation(playImmediately: true)
     } else {
-      await playNext()
+      await playNext(reason: .stationStart)
     }
   }
 
-  func playNext() async {
+  func playNext(reason: RadioAdvanceReason = .manual) async {
     if queue.isEmpty {
       await loadCurrentStation()
     }
@@ -72,12 +77,14 @@ final class RadioStationController {
     }
 
     if let currentItem {
+      await recordMemoryEvent(type: reason == .automaticCompletion ? "complete" : "skip", track: currentItem.track)
       history.append(currentItem)
     }
 
     let nextItem = queue.removeFirst()
     currentItem = nextItem
     errorMessage = nil
+    await recordMemoryEvent(type: "play", track: nextItem.track)
     playbackController.play(track: nextItem.track)
   }
 
@@ -90,6 +97,10 @@ final class RadioStationController {
 
     currentItem = previousItem
     errorMessage = nil
+    Task {
+      try? await memoryStore.record(RadioMemoryEvent(type: "replay", track: previousItem.track))
+      await refreshMemoryStatus()
+    }
     playbackController.play(track: previousItem.track)
   }
 
@@ -104,17 +115,26 @@ final class RadioStationController {
     errorMessage = nil
 
     do {
-      let station = try await stationClient.fetchCurrentStation()
+      await refreshMemoryStatus()
+      let memoryContext = (try? await memoryStore.buildContext()) ?? RadioMemoryContext()
+      let generationContext = RadioStationGenerationContext(
+        seedTracks: stationSeeds(),
+        catalogCandidates: stationCandidates(),
+        memoryContext: memoryContext
+      )
+      let result = try await stationClient.generateStation(context: generationContext)
+      let station = result.station
       self.station = station
       stationTitle = station.title
       stationIntro = station.subtitle
       currentItem = nil
       history = []
       queue = station.items
+      await recordMemoryEvent(type: "station_generate", track: station.items.first?.track)
 
       if playImmediately {
         isLoadingStation = false
-        await playNext()
+        await playNext(reason: .stationStart)
         return
       }
     } catch {
@@ -129,4 +149,57 @@ final class RadioStationController {
 
     isLoadingStation = false
   }
+
+  func refreshMemoryStatus() async {
+    guard let snapshot = try? await memoryStore.snapshot() else { return }
+    memoryEventCount = snapshot.eventCount
+    if !snapshot.tasteSummary.isEmpty {
+      memorySummaryText = snapshot.tasteSummary
+    } else if !snapshot.avoidSummary.isEmpty {
+      memorySummaryText = snapshot.avoidSummary
+    } else {
+      memorySummaryText = snapshot.eventCount == 0
+        ? "Local memory is ready."
+        : "Learning from \(snapshot.eventCount) recent radio events."
+    }
+  }
+
+  func clearMemory() async {
+    try? await memoryStore.clear()
+    await refreshMemoryStatus()
+  }
+
+  private func stationSeeds() -> [Track] {
+    let currentTracks = stationTracks
+    if !currentTracks.isEmpty {
+      return Array(currentTracks.prefix(6))
+    }
+    return MockCatalog.featuredTracks
+  }
+
+  private func stationCandidates() -> [Track] {
+    var candidates = MockCatalog.featuredTracks
+    for track in stationTracks where !candidates.contains(where: { $0.radioIdentity == track.radioIdentity }) {
+      candidates.append(track)
+    }
+    return candidates
+  }
+
+  private func recordMemoryEvent(type: String, track: Track?) async {
+    try? await memoryStore.record(RadioMemoryEvent(type: type, track: track))
+    await compressMemoryIfNeeded()
+    await refreshMemoryStatus()
+  }
+
+  private func compressMemoryIfNeeded() async {
+    guard let request = try? await memoryStore.compressionRequest() else { return }
+    guard let proposal = try? await stationClient.compressMemory(request) else { return }
+    try? await memoryStore.applyCompression(proposal)
+  }
+}
+
+enum RadioAdvanceReason {
+  case manual
+  case stationStart
+  case automaticCompletion
 }

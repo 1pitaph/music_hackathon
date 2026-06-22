@@ -2,6 +2,123 @@ import Foundation
 
 protocol RadioStationFetching {
   func fetchCurrentStation() async throws -> RadioStation
+  func generateStation(context: RadioStationGenerationContext) async throws -> RadioStationResult
+  func compressMemory(_ request: RadioMemoryCompressionRequest) async throws -> RadioCompressedMemory?
+}
+
+extension RadioStationFetching {
+  func generateStation(context: RadioStationGenerationContext) async throws -> RadioStationResult {
+    RadioStationResult(station: try await fetchCurrentStation())
+  }
+
+  func compressMemory(_ request: RadioMemoryCompressionRequest) async throws -> RadioCompressedMemory? {
+    nil
+  }
+}
+
+struct RadioStationResult: Equatable {
+  let station: RadioStation
+  var diagnostics: [String] = []
+  var memoryPatchProposals: [RadioMemoryPatchProposal] = []
+}
+
+struct RadioMemoryPatchProposal: Codable, Equatable {
+  let op: String
+  let type: String
+  let text: String
+  let confidence: Double
+  let source: String
+}
+
+struct RadioStationGenerationContext: Encodable, Equatable {
+  var action = "start"
+  var tuning = RadioTuningPayload()
+  var seedTracks: [RadioTrackPayload]
+  var catalogCandidates: [RadioTrackPayload]
+  var memory: RadioMemoryRequest
+  var memoryContext: RadioMemoryContext
+  var memoryMarkdown = ""
+  var limit = 12
+  var stationID = "airset-personal"
+  var title = "Airset Radio"
+
+  init(
+    seedTracks: [Track],
+    catalogCandidates: [Track],
+    memoryContext: RadioMemoryContext,
+    limit: Int = 12
+  ) {
+    self.seedTracks = seedTracks.map {
+      RadioTrackPayload(track: $0, playlistName: "Local memory seeds", sourceLane: "familiar_anchor")
+    }
+    self.catalogCandidates = catalogCandidates.map {
+      RadioTrackPayload(track: $0, source: "catalog", sourceLane: "candidate_pool")
+    }
+    self.memoryContext = memoryContext
+    self.limit = limit
+    memory = RadioMemoryRequest(
+      recentlyPlayedTrackKeys: memoryContext.recentlyPlayedTrackKeys,
+      likedTrackKeys: [],
+      skippedTrackKeys: [],
+      dislikedTrackKeys: []
+    )
+  }
+}
+
+struct RadioTuningPayload: Codable, Equatable {
+  var discoveryRatio = 0.3
+  var familiarity = 0.7
+  var energy = 0.5
+}
+
+struct RadioMemoryRequest: Codable, Equatable {
+  var recentlyPlayedTrackKeys: [String]
+  var likedTrackKeys: [String]
+  var skippedTrackKeys: [String]
+  var dislikedTrackKeys: [String]
+}
+
+struct RadioTrackPayload: Codable, Equatable {
+  let radioIdentity: String
+  let title: String
+  let artist: String
+  let album: String
+  let mood: String
+  let duration: TimeInterval
+  let artworkURL: URL?
+  let previewURL: URL?
+  let appleMusicID: String?
+  let isExplicit: Bool
+  let playlistName: String?
+  let source: String?
+  let sourceLane: String?
+  let sourceScore: Double?
+  let reasonSignals: [String]
+
+  init(
+    track: Track,
+    playlistName: String? = nil,
+    source: String? = nil,
+    sourceLane: String? = nil,
+    sourceScore: Double? = nil,
+    reasonSignals: [String] = []
+  ) {
+    radioIdentity = track.radioIdentity
+    title = track.title
+    artist = track.artist
+    album = track.album
+    mood = track.mood
+    duration = track.duration
+    artworkURL = track.artworkURL
+    previewURL = track.previewURL
+    appleMusicID = track.appleMusicID
+    isExplicit = track.isExplicit
+    self.playlistName = playlistName
+    self.source = source
+    self.sourceLane = sourceLane
+    self.sourceScore = sourceScore
+    self.reasonSignals = reasonSignals
+  }
 }
 
 struct RadioStationClient: RadioStationFetching {
@@ -11,16 +128,18 @@ struct RadioStationClient: RadioStationFetching {
   private let session: URLSession
   private let timeout: TimeInterval
   private let decoder: JSONDecoder
+  private let encoder: JSONEncoder
 
   init(
     baseURL: URL? = Self.defaultBaseURL,
     session: URLSession = .shared,
-    timeout: TimeInterval = 2.0
+    timeout: TimeInterval = 15.0
   ) {
     self.baseURL = baseURL
     self.session = session
     self.timeout = timeout
     decoder = JSONDecoder()
+    encoder = JSONEncoder()
   }
 
   func fetchCurrentStation() async throws -> RadioStation {
@@ -43,6 +162,56 @@ struct RadioStationClient: RadioStationFetching {
 
     let payload = try decoder.decode(RadioStationPayload.self, from: data)
     return try payload.station()
+  }
+
+  func generateStation(context: RadioStationGenerationContext) async throws -> RadioStationResult {
+    guard let baseURL else {
+      throw RadioStationClientError.disabled
+    }
+
+    let endpoint = baseURL.appending(path: "v1/radio/stations/generate")
+    var request = URLRequest(url: endpoint, timeoutInterval: timeout)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try encoder.encode(context)
+
+    do {
+      let payload: RadioStationPayload = try await decodedPayload(for: request)
+      return try payload.result()
+    } catch RadioStationClientError.serverStatus(404) {
+      return RadioStationResult(
+        station: try await fetchCurrentStation(),
+        diagnostics: ["Station generation endpoint is not deployed yet; used current station fallback."]
+      )
+    }
+  }
+
+  func compressMemory(_ requestPayload: RadioMemoryCompressionRequest) async throws -> RadioCompressedMemory? {
+    guard let baseURL else {
+      throw RadioStationClientError.disabled
+    }
+
+    let endpoint = baseURL.appending(path: "v1/radio/memory/compress")
+    var request = URLRequest(url: endpoint, timeoutInterval: timeout)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try encoder.encode(requestPayload)
+
+    let response: RadioMemoryCompressionPayload = try await decodedPayload(for: request)
+    return response.compressedMemoryProposal
+  }
+
+  private func decodedPayload<T: Decodable>(for request: URLRequest) async throws -> T {
+    let (data, response) = try await session.data(for: request)
+    guard let httpResponse = response as? HTTPURLResponse else {
+      throw RadioStationClientError.invalidResponse
+    }
+
+    guard (200..<300).contains(httpResponse.statusCode) else {
+      throw RadioStationClientError.serverStatus(httpResponse.statusCode)
+    }
+
+    return try decoder.decode(T.self, from: data)
   }
 }
 
@@ -74,6 +243,8 @@ private struct RadioStationPayload: Decodable {
   let title: String
   let subtitle: String
   let items: [RadioStationItemPayload]
+  let diagnostics: [String]
+  let memoryPatchProposals: [RadioMemoryPatchProposal]
 
   enum CodingKeys: String, CodingKey {
     case id
@@ -83,6 +254,8 @@ private struct RadioStationPayload: Decodable {
     case subtitle
     case intro
     case items
+    case diagnostics
+    case memoryPatchProposals
   }
 
   init(from decoder: Decoder) throws {
@@ -96,6 +269,8 @@ private struct RadioStationPayload: Decodable {
       ?? container.decodeIfPresent(String.self, forKey: .intro)
       ?? "Streaming from the backend station queue."
     items = try container.decode([RadioStationItemPayload].self, forKey: .items)
+    diagnostics = try container.decodeIfPresent([String].self, forKey: .diagnostics) ?? []
+    memoryPatchProposals = try container.decodeIfPresent([RadioMemoryPatchProposal].self, forKey: .memoryPatchProposals) ?? []
   }
 
   func station() throws -> RadioStation {
@@ -111,6 +286,18 @@ private struct RadioStationPayload: Decodable {
       items: queueItems
     )
   }
+
+  func result() throws -> RadioStationResult {
+    RadioStationResult(
+      station: try station(),
+      diagnostics: diagnostics,
+      memoryPatchProposals: memoryPatchProposals
+    )
+  }
+}
+
+private struct RadioMemoryCompressionPayload: Decodable {
+  let compressedMemoryProposal: RadioCompressedMemory
 }
 
 private struct RadioStationItemPayload: Decodable {

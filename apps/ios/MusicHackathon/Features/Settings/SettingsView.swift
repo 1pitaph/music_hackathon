@@ -9,10 +9,12 @@ struct SettingsView: View {
     List {
       appleMusicSection
       backendStationSection
+      localMemorySection
     }
     .listStyle(.insetGrouped)
     .task {
       await musicAuthorization.refreshAccessState()
+      await radioStation.refreshMemoryStatus()
     }
   }
 
@@ -71,6 +73,24 @@ struct SettingsView: View {
         Text(message)
           .font(.footnote)
           .foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  private var localMemorySection: some View {
+    Section("Local Radio Memory") {
+      LabeledContent("Recent events", value: "\(radioStation.memoryEventCount)")
+
+      Text(radioStation.memorySummaryText)
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+
+      Button(role: .destructive) {
+        Task {
+          await radioStation.clearMemory()
+        }
+      } label: {
+        Label("Clear Local Memory", systemImage: "trash")
       }
     }
   }

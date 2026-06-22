@@ -47,6 +47,48 @@ def test_generate_uses_mock_without_key(monkeypatch):
   assert [item["radioIdentity"] for item in body["items"]] == ["song-1", "song-2"]
 
 
+def test_generate_station_returns_ios_playable_payload(monkeypatch):
+  monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+  client = TestClient(app)
+
+  response = client.post("/v1/radio/stations/generate", json=_request_payload())
+
+  assert response.status_code == 200
+  body = response.json()
+  assert body["stationID"] == "airset-personal"
+  assert body["title"] == "Airset Radio"
+  assert body["subtitle"]
+  assert [item["id"] for item in body["items"]] == ["song-1", "song-2"]
+  assert body["items"][0]["appleMusicID"] == "1"
+  assert body["items"][1]["previewURL"] == "https://example.com/b.m4a"
+  assert body["memoryPatchProposals"]
+
+
+def test_compress_memory_uses_deterministic_fallback(monkeypatch):
+  monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+  client = TestClient(app)
+
+  response = client.post(
+    "/v1/radio/memory/compress",
+    json={
+      "existingSummary": {"tasteSummary": "Likes intimate pop."},
+      "newEvents": [
+        {"type": "like", "artist": "WRABEL", "mood": "Pop"},
+        {"type": "skip", "artist": "Artist B", "mood": "High Energy"},
+      ],
+      "pinnedNotes": ["Softer music at night."],
+    },
+  )
+
+  assert response.status_code == 200
+  body = response.json()
+  proposal = body["compressedMemoryProposal"]
+  assert "WRABEL" in proposal["likedArtistsTop"]
+  assert "High Energy" in proposal["skippedMoodsTop"]
+  assert "Softer music at night." in proposal["pinnedNotes"]
+  assert "Using deterministic memory compression." in body["diagnostics"]
+
+
 def test_empty_candidates_returns_explainable_fallback(monkeypatch):
   monkeypatch.delenv("OPENAI_API_KEY", raising=False)
   client = TestClient(app)
@@ -80,6 +122,7 @@ def _request_payload():
         "mood": "Pop",
         "duration": 210,
         "appleMusicID": "1",
+        "previewURL": "https://example.com/a.m4a",
         "playlistName": "Morning",
       }
     ],
@@ -92,6 +135,7 @@ def _request_payload():
         "mood": "Indie",
         "duration": 200,
         "appleMusicID": "2",
+        "previewURL": "https://example.com/b.m4a",
         "source": "catalog",
       }
     ],

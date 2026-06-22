@@ -10,7 +10,8 @@ final class RadioStationControllerTests: XCTestCase {
     ])
     let controller = RadioStationController(
       playbackController: PlaybackController(),
-      stationClient: MockStationClient(result: .success(station))
+      stationClient: MockStationClient(result: .success(station)),
+      memoryStore: MockMemoryStore()
     )
 
     await controller.loadCurrentStation()
@@ -30,7 +31,8 @@ final class RadioStationControllerTests: XCTestCase {
     let playbackController = PlaybackController()
     let controller = RadioStationController(
       playbackController: playbackController,
-      stationClient: MockStationClient(result: .success(station))
+      stationClient: MockStationClient(result: .success(station)),
+      memoryStore: MockMemoryStore()
     )
 
     await controller.startStation()
@@ -49,7 +51,8 @@ final class RadioStationControllerTests: XCTestCase {
     let playbackController = PlaybackController()
     let controller = RadioStationController(
       playbackController: playbackController,
-      stationClient: MockStationClient(result: .success(station))
+      stationClient: MockStationClient(result: .success(station)),
+      memoryStore: MockMemoryStore()
     )
 
     await controller.loadCurrentStation()
@@ -65,7 +68,8 @@ final class RadioStationControllerTests: XCTestCase {
   func testBackendFailureLeavesQueueEmptyWithoutFallback() async {
     let controller = RadioStationController(
       playbackController: PlaybackController(),
-      stationClient: MockStationClient(result: .failure(URLError(.cannotConnectToHost)))
+      stationClient: MockStationClient(result: .failure(URLError(.cannotConnectToHost))),
+      memoryStore: MockMemoryStore()
     )
 
     await controller.loadCurrentStation()
@@ -119,5 +123,37 @@ private struct MockStationClient: RadioStationFetching {
 
   func fetchCurrentStation() async throws -> RadioStation {
     try result.get()
+  }
+}
+
+private actor MockMemoryStore: RadioMemoryStoring {
+  var events: [RadioMemoryEvent] = []
+
+  func buildContext() async throws -> RadioMemoryContext {
+    RadioMemoryContext()
+  }
+
+  func record(_ event: RadioMemoryEvent) async throws {
+    events.append(event)
+  }
+
+  func compressionRequest() async throws -> RadioMemoryCompressionRequest? {
+    nil
+  }
+
+  func applyCompression(_ proposal: RadioCompressedMemory) async throws {}
+
+  func clear() async throws {
+    events = []
+  }
+
+  func snapshot() async throws -> RadioMemorySnapshot {
+    RadioMemorySnapshot(
+      eventCount: events.count,
+      uncompressedEventCount: events.count,
+      tasteSummary: "",
+      avoidSummary: "",
+      markdownPreview: ""
+    )
   }
 }

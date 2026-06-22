@@ -56,3 +56,19 @@ Create a Railway service from this GitHub repository and point it at the backend
 - Watch Paths: `/apps/radio-agent/**`
 
 Railway builds the service from `apps/radio-agent/Dockerfile`, starts it with `sh ./start.sh`, and uses `/` as its health check path. `OPENAI_API_KEY` is optional; without it, the agent returns deterministic mock recommendations.
+
+### Local-first radio memory
+
+The iOS app keeps Airset radio memory on device in Application Support as `memory.json` plus a generated, user-readable `memory.md`. The backend does not persist raw memory. When the app generates a station, it sends a trimmed structured memory context with playable candidate tracks to:
+
+```sh
+POST /v1/radio/stations/generate
+```
+
+The backend returns an iOS-ready station payload with track reasons and optional memory patch proposals. When local memory has enough new events to compact, the app can request a backend compression proposal:
+
+```sh
+POST /v1/radio/memory/compress
+```
+
+The app owns the final write back to local memory; model output is treated as a proposal, not a direct write.

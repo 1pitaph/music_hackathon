@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from radio_agent.schemas import RadioGenerateRequest, RadioGenerateResponse
+from radio_agent.graph import compress_radio_memory, generate_radio
+from radio_agent.schemas import (
+  RadioGenerateRequest,
+  RadioGenerateResponse,
+  RadioMemoryCompressionRequest,
+  RadioMemoryCompressionResponse,
+  RadioMemoryPatchProposal,
+  RadioStationGenerateRequest,
+  RadioStationGenerateResponse,
+  RadioStationItem,
+  RadioTrack,
+)
 
 app = FastAPI(title="Airset Radio Agent", version="0.1.0")
 
@@ -82,8 +93,106 @@ def current_station() -> dict:
   return CURRENT_STATION
 
 
+@app.post("/v1/radio/stations/generate", response_model=RadioStationGenerateResponse)
+def generate_station(request: RadioStationGenerateRequest) -> RadioStationGenerateResponse:
+  generation = generate_radio(request)
+  candidates = _candidate_map(request)
+  items = _station_items_from_generation(generation, candidates)
+
+  diagnostics = list(generation.diagnostics)
+  if len(items) < request.limit:
+    used = {item.id for item in items}
+    for track in [*request.seedTracks, *request.catalogCandidates]:
+      if track.radioIdentity in used or not _is_playable(track):
+        continue
+      items.append(_station_item(track, "Queued as a playable fallback from the candidate pool."))
+      used.add(track.radioIdentity)
+      if len(items) >= request.limit:
+        break
+
+  if not items:
+    diagnostics.append("No playable generated items; returning the public preview station.")
+    items = [RadioStationItem.model_validate(item) for item in CURRENT_STATION["items"]]
+
+  return RadioStationGenerateResponse(
+    stationID=request.stationID,
+    title=request.title,
+    subtitle=generation.stationIntro,
+    items=items[: request.limit],
+    mode=generation.mode,
+    diagnostics=diagnostics,
+    memoryPatchProposals=_memory_patch_proposals(request),
+  )
+
+
 @app.post("/v1/radio/generate", response_model=RadioGenerateResponse)
 def generate(request: RadioGenerateRequest) -> RadioGenerateResponse:
-  from radio_agent.graph import generate_radio
-
   return generate_radio(request)
+
+
+@app.post("/v1/radio/memory/compress", response_model=RadioMemoryCompressionResponse)
+def compress_memory(request: RadioMemoryCompressionRequest) -> RadioMemoryCompressionResponse:
+  return compress_radio_memory(request)
+
+
+def _candidate_map(request: RadioStationGenerateRequest) -> dict[str, RadioTrack]:
+  candidates: dict[str, RadioTrack] = {}
+  for track in [*request.seedTracks, *request.catalogCandidates]:
+    candidates.setdefault(track.radioIdentity, track)
+  return candidates
+
+
+def _station_items_from_generation(
+  generation: RadioGenerateResponse,
+  candidates: dict[str, RadioTrack],
+) -> list[RadioStationItem]:
+  items: list[RadioStationItem] = []
+  used: set[str] = set()
+  for generated_item in generation.items:
+    if generated_item.radioIdentity in used:
+      continue
+    track = candidates.get(generated_item.radioIdentity)
+    if track is None or not _is_playable(track):
+      continue
+    used.add(generated_item.radioIdentity)
+    items.append(_station_item(track, generated_item.reason, generated_item.source))
+  return items
+
+
+def _station_item(track: RadioTrack, reason: str, source: str | None = None) -> RadioStationItem:
+  return RadioStationItem(
+    id=track.radioIdentity,
+    title=track.title,
+    artist=track.artist,
+    album=track.album or "Backend Radio",
+    mood=track.mood or "Radio",
+    duration=track.duration,
+    artworkURL=track.artworkURL,
+    previewURL=track.previewURL,
+    appleMusicID=track.appleMusicID,
+    isExplicit=track.isExplicit,
+    sourceTitle=track.playlistName or track.sourceLane or source or track.source or "Backend station",
+    reason=reason,
+  )
+
+
+def _is_playable(track: RadioTrack) -> bool:
+  return bool(track.appleMusicID or track.previewURL)
+
+
+def _memory_patch_proposals(request: RadioStationGenerateRequest) -> list[RadioMemoryPatchProposal]:
+  if request.memoryContext.tasteSummary or request.memoryContext.likedArtistsTop:
+    return []
+
+  seed_artists = list(dict.fromkeys(track.artist for track in request.seedTracks if track.artist))
+  if not seed_artists:
+    return []
+
+  return [
+    RadioMemoryPatchProposal(
+      type="taste",
+      text=f"User is starting radio sessions from {', '.join(seed_artists[:3])}.",
+      confidence=0.35,
+      source="radio_generation",
+    )
+  ]
