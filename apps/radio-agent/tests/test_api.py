@@ -3,6 +3,15 @@ from fastapi.testclient import TestClient
 from radio_agent.api import app
 
 
+def test_root_health():
+  client = TestClient(app)
+
+  response = client.get("/")
+
+  assert response.status_code == 200
+  assert response.json() == {"status": "ok", "service": "airset-radio-agent"}
+
+
 def test_healthz():
   client = TestClient(app)
 

@@ -8,6 +8,11 @@ from radio_agent.schemas import RadioGenerateRequest, RadioGenerateResponse
 app = FastAPI(title="Airset Radio Agent", version="0.1.0")
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+  return {"status": "ok", "service": "airset-radio-agent"}
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
   return {"status": "ok"}
