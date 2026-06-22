@@ -95,6 +95,29 @@ def test_compress_memory_uses_deterministic_fallback(monkeypatch):
   assert "Using deterministic memory compression." in body["diagnostics"]
 
 
+def test_compress_memory_accepts_ios_event_id_extra_field(monkeypatch):
+  monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+  client = TestClient(app)
+
+  response = client.post(
+    "/v1/radio/memory/compress",
+    json={
+      "newEvents": [
+        {
+          "id": "event-1",
+          "type": "like",
+          "artist": "WRABEL",
+          "mood": "Pop",
+        }
+      ]
+    },
+  )
+
+  assert response.status_code == 200
+  proposal = response.json()["compressedMemoryProposal"]
+  assert proposal["likedArtistsTop"] == ["WRABEL"]
+
+
 def test_empty_candidates_returns_explainable_fallback(monkeypatch):
   monkeypatch.delenv("OPENAI_API_KEY", raising=False)
   client = TestClient(app)

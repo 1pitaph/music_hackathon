@@ -4,7 +4,7 @@ from radio_agent.graph import (
   validate_entry_copy,
   validate_transition_copy,
 )
-from radio_agent.schemas import RadioGenerateRequest, RadioTrack
+from radio_agent.schemas import RadioGenerateRequest, RadioGeneratedItem, RadioTrack
 
 
 def test_invalid_llm_json_falls_back_to_repaired_queue():
@@ -114,6 +114,120 @@ def test_transition_copy_drops_non_adjacent_pairs_and_fills_template():
   assert "Dropped transition copy for non-adjacent pair: song-2 -> song-1" in result["diagnostics"]
 
 
+def test_fenced_json_duplicate_items_and_non_numeric_score_are_repaired():
+  request = _request_with_three_tracks()
+  state = {
+    "request": request,
+    "candidates": request.seedTracks,
+    "candidateByID": {track.radioIdentity: track for track in request.seedTracks},
+    "mode": "llm",
+    "rawGeneration": """
+    ```json
+    {
+      "stationIntro": "A focused set.",
+      "items": [
+        {"radioIdentity": "song-1", "reason": "first", "role": "opener", "score": "high", "source": "playlist"},
+        {"radioIdentity": "song-1", "reason": "duplicate", "role": "bridge", "score": 88, "source": "playlist"}
+      ]
+    }
+    ```
+    """,
+    "diagnostics": [],
+  }
+
+  result = validate_and_repair(state)
+
+  response = result["response"]
+  assert response.mode == "llm"
+  assert response.stationIntro == "A focused set."
+  assert response.items[0].radioIdentity == "song-1"
+  assert {item.radioIdentity for item in response.items} == {"song-1", "song-2", "song-3"}
+  assert response.items[0].score == 90
+
+
+def test_valid_entry_copy_repairs_invalid_target_item():
+  state = {
+    "request": _request(),
+    "recommendedItems": [
+      RadioGeneratedItem(
+        radioIdentity="song-1",
+        reason="first",
+        role="opener",
+        score=99,
+        source="playlist",
+      )
+    ],
+    "rawEntryCopy": {
+      "id": "custom-intro",
+      "text": "Full host copy.",
+      "displayText": "Short host copy.",
+      "targetItemId": "made-up",
+      "agent": "test_agent",
+    },
+    "diagnostics": [],
+  }
+
+  result = validate_entry_copy(state)
+
+  assert result["entryCopy"].id == "custom-intro"
+  assert result["entryCopy"].displayText == "Short host copy."
+  assert result["entryCopy"].targetItemId == "song-1"
+  assert result["entryCopy"].agent == "test_agent"
+
+
+def test_transition_copy_keeps_valid_pairs_and_fills_missing_bridge():
+  request = _request_with_three_tracks()
+  state = {
+    "request": request,
+    "candidateByID": {track.radioIdentity: track for track in request.seedTracks},
+    "recommendedItems": [
+      RadioGeneratedItem(
+        radioIdentity="song-1",
+        reason="first",
+        role="opener",
+        score=99,
+        source="playlist",
+      ),
+      RadioGeneratedItem(
+        radioIdentity="song-2",
+        reason="second",
+        role="bridge",
+        score=90,
+        source="playlist",
+      ),
+      RadioGeneratedItem(
+        radioIdentity="song-3",
+        reason="third",
+        role="closer",
+        score=80,
+        source="playlist",
+      ),
+    ],
+    "rawTransitionCopy": {
+      "betweenTracks": [
+        {
+          "id": "custom-transition",
+          "fromItemId": "song-1",
+          "toItemId": "song-2",
+          "text": "Custom full bridge.",
+          "displayText": "Custom display bridge.",
+          "agent": "test_agent",
+        }
+      ]
+    },
+    "diagnostics": [],
+  }
+
+  result = validate_transition_copy(state)
+
+  assert len(result["transitionCopies"]) == 2
+  assert result["transitionCopies"][0].id == "custom-transition"
+  assert result["transitionCopies"][0].displayText == "Custom display bridge."
+  assert result["transitionCopies"][1].fromItemId == "song-2"
+  assert result["transitionCopies"][1].toItemId == "song-3"
+  assert result["transitionCopies"][1].displayText.startswith("Next:")
+
+
 def _request():
   return RadioGenerateRequest(
     action="start",
@@ -156,6 +270,27 @@ def _request_with_two_tracks():
         mood="Indie",
         duration=200,
         appleMusicID="2",
+        playlistName="Morning",
+      ),
+    ],
+  )
+
+
+def _request_with_three_tracks():
+  request = _request_with_two_tracks()
+  return RadioGenerateRequest(
+    action=request.action,
+    limit=3,
+    seedTracks=[
+      *request.seedTracks,
+      RadioTrack(
+        radioIdentity="song-3",
+        title="C",
+        artist="Artist C",
+        album="Album",
+        mood="Chill",
+        duration=205,
+        appleMusicID="3",
         playlistName="Morning",
       ),
     ],
