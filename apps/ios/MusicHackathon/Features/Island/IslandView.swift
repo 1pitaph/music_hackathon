@@ -3,6 +3,7 @@ import SwiftUI
 
 struct IslandView: View {
   @Environment(PlaybackController.self) private var playbackController
+  @Environment(RadioStationController.self) private var radioStation
 
   @State private var islands: [MusicIsland]
   @State private var selectedIslandID: UUID?
@@ -10,7 +11,6 @@ struct IslandView: View {
   @State private var coordinator = IslandSceneCoordinator()
   @State private var didResetInitialSelection = false
 
-  private let catalogService = AppleMusicCatalogService()
   private let mapGenerator = IslandMapGenerator(seed: 170342)
 
   init() {
@@ -70,6 +70,7 @@ struct IslandView: View {
     .toolbar(.hidden, for: .navigationBar)
     .onAppear {
       configureScene()
+      refreshIslands(from: visibleTracks)
 
       if !didResetInitialSelection {
         selectedIslandID = nil
@@ -77,8 +78,8 @@ struct IslandView: View {
         didResetInitialSelection = true
       }
     }
-    .task {
-      await loadAppleMusicIslands()
+    .onChange(of: radioStation.stationTrackSignature) { _, _ in
+      refreshIslands(from: visibleTracks)
     }
   }
 
@@ -87,11 +88,13 @@ struct IslandView: View {
     return islands.first { $0.id == selectedIslandID }
   }
 
-  private func loadAppleMusicIslands() async {
-    let enrichedTracks = await catalogService.enrich(MockCatalog.featuredTracks)
-    guard enrichedTracks.contains(where: { $0.isAppleMusicTrack }) else { return }
+  private var visibleTracks: [Track] {
+    let stationTracks = radioStation.stationTracks
+    return stationTracks.isEmpty ? MockCatalog.featuredTracks : Array(stationTracks.prefix(12))
+  }
 
-    let generatedIslands = mapGenerator.generate(from: enrichedTracks)
+  private func refreshIslands(from tracks: [Track]) {
+    let generatedIslands = mapGenerator.generate(from: tracks)
     islands = generatedIslands
     scene = IslandScene(islands: generatedIslands)
     selectedIslandID = nil
@@ -234,8 +237,10 @@ private struct IslandDetailCard: View {
 }
 
 #Preview {
+  let playbackController = PlaybackController()
   NavigationStack {
     IslandView()
   }
-  .environment(PlaybackController())
+  .environment(playbackController)
+  .environment(RadioStationController(playbackController: playbackController))
 }

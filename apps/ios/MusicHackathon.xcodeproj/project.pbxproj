@@ -28,7 +28,26 @@
 		D10000000000000000000004 /* IslandScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000004 /* IslandScene.swift */; };
 		E10000000000000000000001 /* AppleMusicCatalogService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000001 /* AppleMusicCatalogService.swift */; };
 		E10000000000000000000002 /* SpectrumAnalysisCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000002 /* SpectrumAnalysisCache.swift */; };
+		F10000000000000000000001 /* RadioModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001 /* RadioModels.swift */; };
+		F10000000000000000000002 /* AppleMusicLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000002 /* AppleMusicLibraryService.swift */; };
+		F10000000000000000000003 /* DJNarrationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000003 /* DJNarrationProvider.swift */; };
+		F10000000000000000000004 /* RadioRecommendationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000004 /* RadioRecommendationEngine.swift */; };
+		F10000000000000000000005 /* RadioContextBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000005 /* RadioContextBuilder.swift */; };
+		F10000000000000000000006 /* RadioStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000006 /* RadioStateStore.swift */; };
+		F10000000000000000000007 /* RadioStationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000007 /* RadioStationController.swift */; };
+		T10000000000000000000001 /* RadioRecommendationEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000001 /* RadioRecommendationEngineTests.swift */; };
+		T10000000000000000000002 /* RadioStateStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000002 /* RadioStateStoreTests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		T51000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A80000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A50000000000000000000001;
+			remoteInfo = MusicHackathon;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		A20000000000000000000001 /* MusicHackathonApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicHackathonApp.swift; sourceTree = "<group>"; };
@@ -53,6 +72,16 @@
 		D20000000000000000000004 /* IslandScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandScene.swift; sourceTree = "<group>"; };
 		E20000000000000000000001 /* AppleMusicCatalogService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicCatalogService.swift; sourceTree = "<group>"; };
 		E20000000000000000000002 /* SpectrumAnalysisCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpectrumAnalysisCache.swift; sourceTree = "<group>"; };
+		F20000000000000000000001 /* RadioModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioModels.swift; sourceTree = "<group>"; };
+		F20000000000000000000002 /* AppleMusicLibraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicLibraryService.swift; sourceTree = "<group>"; };
+		F20000000000000000000003 /* DJNarrationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DJNarrationProvider.swift; sourceTree = "<group>"; };
+		F20000000000000000000004 /* RadioRecommendationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioRecommendationEngine.swift; sourceTree = "<group>"; };
+		F20000000000000000000005 /* RadioContextBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioContextBuilder.swift; sourceTree = "<group>"; };
+		F20000000000000000000006 /* RadioStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStateStore.swift; sourceTree = "<group>"; };
+		F20000000000000000000007 /* RadioStationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationController.swift; sourceTree = "<group>"; };
+		T20000000000000000000001 /* RadioRecommendationEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioRecommendationEngineTests.swift; sourceTree = "<group>"; };
+		T20000000000000000000002 /* RadioStateStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStateStoreTests.swift; sourceTree = "<group>"; };
+		T20000000000000000000003 /* MusicHackathonTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MusicHackathonTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -64,6 +93,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		T30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -71,6 +107,7 @@
 			isa = PBXGroup;
 			children = (
 				A40000000000000000000002 /* MusicHackathon */,
+				T40000000000000000000001 /* MusicHackathonTests */,
 				A40000000000000000000010 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -114,6 +151,7 @@
 			children = (
 				A20000000000000000000004 /* Track.swift */,
 				A20000000000000000000005 /* MockCatalog.swift */,
+				F20000000000000000000001 /* RadioModels.swift */,
 				D20000000000000000000001 /* MusicIsland.swift */,
 				D20000000000000000000002 /* IslandMapGenerator.swift */,
 			);
@@ -126,6 +164,12 @@
 				A20000000000000000000006 /* PlaybackController.swift */,
 				A20000000000000000000007 /* MusicAuthorizationService.swift */,
 				E20000000000000000000001 /* AppleMusicCatalogService.swift */,
+				F20000000000000000000002 /* AppleMusicLibraryService.swift */,
+				F20000000000000000000003 /* DJNarrationProvider.swift */,
+				F20000000000000000000004 /* RadioRecommendationEngine.swift */,
+				F20000000000000000000005 /* RadioContextBuilder.swift */,
+				F20000000000000000000006 /* RadioStateStore.swift */,
+				F20000000000000000000007 /* RadioStationController.swift */,
 				E20000000000000000000002 /* SpectrumAnalysisCache.swift */,
 				A20000000000000000000015 /* AudioSpectrumAnalyzer.swift */,
 			);
@@ -146,6 +190,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000013 /* MusicHackathon.app */,
+				T20000000000000000000003 /* MusicHackathonTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -199,6 +244,15 @@
 			path = Island;
 			sourceTree = "<group>";
 		};
+		T40000000000000000000001 /* MusicHackathonTests */ = {
+			isa = PBXGroup;
+			children = (
+				T20000000000000000000001 /* RadioRecommendationEngineTests.swift */,
+				T20000000000000000000002 /* RadioStateStoreTests.swift */,
+			);
+			path = MusicHackathonTests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -221,6 +275,26 @@
 			productName = MusicHackathon;
 			productReference = A20000000000000000000013 /* MusicHackathon.app */;
 			productType = "com.apple.product-type.application";
+		};
+		T50000000000000000000001 /* MusicHackathonTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = T90000000000000000000001 /* Build configuration list for PBXNativeTarget "MusicHackathonTests" */;
+			buildPhases = (
+				T60000000000000000000001 /* Sources */,
+				T30000000000000000000001 /* Frameworks */,
+				T70000000000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				T52000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = MusicHackathonTests;
+			packageProductDependencies = (
+			);
+			productName = MusicHackathonTests;
+			productReference = T20000000000000000000003 /* MusicHackathonTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -254,6 +328,7 @@
 			projectRoot = "";
 			targets = (
 				A50000000000000000000001 /* MusicHackathon */,
+				T50000000000000000000001 /* MusicHackathonTests */,
 			);
 		};
 /* End PBXProject section */
@@ -265,6 +340,13 @@
 			files = (
 				C10000000000000000000001 /* AppIcon.icon in Resources */,
 				A10000000000000000000012 /* featured-preview.m4a in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		T70000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -280,6 +362,7 @@
 				A10000000000000000000003 /* AppTab.swift in Sources */,
 				A10000000000000000000004 /* Track.swift in Sources */,
 				A10000000000000000000005 /* MockCatalog.swift in Sources */,
+				F10000000000000000000001 /* RadioModels.swift in Sources */,
 				A10000000000000000000006 /* PlaybackController.swift in Sources */,
 				A10000000000000000000007 /* MusicAuthorizationService.swift in Sources */,
 				A10000000000000000000013 /* AudioSpectrumAnalyzer.swift in Sources */,
@@ -288,6 +371,12 @@
 				D10000000000000000000004 /* IslandScene.swift in Sources */,
 				A10000000000000000000009 /* LibraryView.swift in Sources */,
 				E10000000000000000000001 /* AppleMusicCatalogService.swift in Sources */,
+				F10000000000000000000002 /* AppleMusicLibraryService.swift in Sources */,
+				F10000000000000000000003 /* DJNarrationProvider.swift in Sources */,
+				F10000000000000000000004 /* RadioRecommendationEngine.swift in Sources */,
+				F10000000000000000000005 /* RadioContextBuilder.swift in Sources */,
+				F10000000000000000000006 /* RadioStateStore.swift in Sources */,
+				F10000000000000000000007 /* RadioStationController.swift in Sources */,
 				E10000000000000000000002 /* SpectrumAnalysisCache.swift in Sources */,
 				A10000000000000000000010 /* PlayerView.swift in Sources */,
 				A10000000000000000000011 /* SettingsView.swift in Sources */,
@@ -296,7 +385,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		T60000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				T10000000000000000000001 /* RadioRecommendationEngineTests.swift in Sources */,
+				T10000000000000000000002 /* RadioStateStoreTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		T52000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A50000000000000000000001 /* MusicHackathon */;
+			targetProxy = T51000000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		AA0000000000000000000001 /* Debug */ = {
@@ -469,6 +575,52 @@
 			};
 			name = Release;
 		};
+		TAA000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 24XGLNT76L;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.1pitaph.music.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MusicHackathon.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MusicHackathon";
+			};
+			name = Debug;
+		};
+		TAA000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 24XGLNT76L;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.1pitaph.music.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MusicHackathon.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MusicHackathon";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -486,6 +638,15 @@
 			buildConfigurations = (
 				AA0000000000000000000003 /* Debug */,
 				AA0000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		T90000000000000000000001 /* Build configuration list for PBXNativeTarget "MusicHackathonTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				TAA000000000000000000001 /* Debug */,
+				TAA000000000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -84,7 +84,9 @@ private struct AppBackdrop: View {
 }
 
 #Preview {
+  let playbackController = PlaybackController()
   AppView()
-    .environment(PlaybackController())
+    .environment(playbackController)
+    .environment(RadioStationController(playbackController: playbackController))
     .environment(MusicAuthorizationService())
 }

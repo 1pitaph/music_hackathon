@@ -2,18 +2,17 @@ import SwiftUI
 
 struct DiscoverView: View {
   @Environment(PlaybackController.self) private var playbackController
-
-  @State private var featuredTracks: [Track] = MockCatalog.featuredTracks
-  @State private var isLoadingCatalog = false
-
-  private let catalogService = AppleMusicCatalogService()
+  @Environment(RadioStationController.self) private var radioStation
+  @Environment(MusicAuthorizationService.self) private var musicAuthorization
 
   var body: some View {
     GeometryReader { proxy in
       ScrollView(.vertical, showsIndicators: false) {
         VStack(spacing: 0) {
           RadioHeaderCard(
-            track: featuredTrack,
+            track: displayTrack,
+            stationTitle: stationTitle,
+            subtitle: radioStation.stationIntro,
             state: playbackController.state,
             elapsedTimeText: playbackController.elapsedTimeText
           )
@@ -21,58 +20,135 @@ struct DiscoverView: View {
             .padding(.top, 28)
 
           NowPlayingSetCard(
-            track: featuredTrack,
-            tracks: featuredTracks,
+            track: displayTrack,
+            currentItem: radioStation.currentItem,
+            queueItems: radioStation.upNextItems,
+            status: panelStatus,
             isPlaying: playbackController.state == .playing,
-            isLoading: playbackController.state == .loading || isLoadingCatalog,
+            isLoading: playbackController.state == .loading || radioStation.isBuildingStation || radioStation.isSyncingLibrary,
             elapsedTimeText: playbackController.elapsedTimeText,
-            playAction: toggleFeaturedTrack
+            tuning: radioStation.tuning,
+            primaryAction: primaryRadioAction,
+            skipAction: skipCurrent,
+            likeAction: radioStation.likeCurrent,
+            dislikeAction: dislikeCurrent,
+            refreshAction: refreshRecommendations,
+            tuningAction: updateTuning
           )
           .padding(.horizontal, 10)
-          .offset(y: -20)
+          .offset(y: -44)
         }
-        .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
-        .clipped()
+        .padding(.bottom, 96)
+        .frame(width: proxy.size.width, alignment: .top)
+        .frame(minHeight: proxy.size.height, alignment: .top)
       }
       .scrollBounceBehavior(.always, axes: .vertical)
     }
     .background(.clear)
     .task {
-      await loadAppleMusicTracks()
-    }
-  }
-
-  private var featuredTrack: Track {
-    playbackController.currentTrack ?? featuredTracks[0]
-  }
-
-  private func toggleFeaturedTrack() {
-    if playbackController.currentTrack == nil {
-      playbackController.play(track: featuredTrack)
-    } else {
-      playbackController.togglePlayback()
-    }
-  }
-
-  private func loadAppleMusicTracks() async {
-    guard !isLoadingCatalog else { return }
-
-    isLoadingCatalog = true
-    defer { isLoadingCatalog = false }
-
-    do {
-      let appleMusicTracks = try await catalogService.featuredTracks()
-      if !appleMusicTracks.isEmpty {
-        featuredTracks = Array(appleMusicTracks.prefix(3))
+      await musicAuthorization.refreshAccessState()
+      if musicAuthorization.status == .authorized, radioStation.playlists.isEmpty {
+        await radioStation.refreshLibrary()
       }
-    } catch {
-      featuredTracks = await catalogService.enrich(MockCatalog.featuredTracks)
+    }
+  }
+
+  private var displayTrack: Track {
+    playbackController.currentTrack
+      ?? radioStation.currentItem?.track
+      ?? radioStation.queue.first?.track
+      ?? MockCatalog.featuredTracks[0]
+  }
+
+  private var stationTitle: String {
+    let selectedNames = radioStation.selectedPlaylists.map(\.name)
+    if selectedNames.count == 1, let name = selectedNames.first {
+      return "\(name) Radio"
+    }
+    return "Airset Radio"
+  }
+
+  private var panelStatus: RadioPanelStatus {
+    if musicAuthorization.status != .authorized {
+      return .needsAuthorization
+    }
+
+    if !radioStation.hasSelectedPlaylists {
+      return .needsSelection
+    }
+
+    if radioStation.currentItem == nil, radioStation.queue.isEmpty {
+      return .ready
+    }
+
+    return .onAir
+  }
+
+  private func primaryRadioAction() {
+    switch panelStatus {
+    case .needsAuthorization:
+      Task {
+        await musicAuthorization.requestAccess()
+        if musicAuthorization.status == .authorized {
+          await radioStation.refreshLibrary()
+        }
+      }
+    case .needsSelection:
+      Task {
+        await radioStation.refreshLibrary()
+      }
+    case .ready:
+      Task {
+        await radioStation.startStation()
+      }
+    case .onAir:
+      if radioStation.currentItem == nil {
+        Task {
+          await radioStation.playNext()
+        }
+      } else {
+        playbackController.togglePlayback()
+      }
+    }
+  }
+
+  private func skipCurrent() {
+    Task {
+      await radioStation.skipCurrent()
+    }
+  }
+
+  private func dislikeCurrent() {
+    radioStation.dislikeCurrent()
+    Task {
+      await radioStation.skipCurrent()
+    }
+  }
+
+  private func refreshRecommendations() {
+    Task {
+      await radioStation.refreshRecommendations()
+    }
+  }
+
+  private func updateTuning(_ tuning: RadioTuning) {
+    Task {
+      await radioStation.setTuning(tuning)
     }
   }
 }
 
+private enum RadioPanelStatus {
+  case needsAuthorization
+  case needsSelection
+  case ready
+  case onAir
+}
+
 private struct RadioHeaderCard: View {
   let track: Track
+  let stationTitle: String
+  let subtitle: String
   let state: PlaybackState
   let elapsedTimeText: String
 
@@ -80,9 +156,11 @@ private struct RadioHeaderCard: View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(alignment: .top) {
         VStack(alignment: .leading, spacing: 4) {
-          Text("\(track.artist.uppercased()) Radio")
+          Text(stationTitle)
             .font(.system(size: 24, weight: .heavy, design: .rounded))
             .foregroundStyle(.white)
+            .lineLimit(1)
+            .minimumScaleFactor(0.76)
 
           Text(statusText)
             .font(.system(size: 20, weight: .heavy, design: .rounded))
@@ -108,11 +186,17 @@ private struct RadioHeaderCard: View {
       )
       .frame(height: 118)
       .offset(y: -18)
+
+      Text(subtitle)
+        .font(.system(size: 15, weight: .bold, design: .rounded))
+        .foregroundStyle(.white.opacity(0.58))
+        .lineLimit(2)
+        .offset(y: -34)
     }
     .padding(.horizontal, 24)
     .padding(.top, 22)
     .padding(.bottom, 28)
-    .frame(maxWidth: .infinity, minHeight: 238, alignment: .topLeading)
+    .frame(maxWidth: .infinity, minHeight: 224, alignment: .topLeading)
     .background(
       LinearGradient(
         colors: [
@@ -146,28 +230,39 @@ private struct RadioHeaderCard: View {
 
 private struct NowPlayingSetCard: View {
   let track: Track
-  let tracks: [Track]
+  let currentItem: RadioQueueItem?
+  let queueItems: [RadioQueueItem]
+  let status: RadioPanelStatus
   let isPlaying: Bool
   let isLoading: Bool
   let elapsedTimeText: String
-  let playAction: () -> Void
+  let tuning: RadioTuning
+  let primaryAction: () -> Void
+  let skipAction: () -> Void
+  let likeAction: () -> Void
+  let dislikeAction: () -> Void
+  let refreshAction: () -> Void
+  let tuningAction: (RadioTuning) -> Void
 
   private var upNextText: String {
-    let nextTracks = tracks
-      .filter { $0.id != track.id }
-      .prefix(2)
+    guard !queueItems.isEmpty else { return status.emptyQueueText }
+    return queueItems
+      .prefix(3)
       .enumerated()
-    return nextTracks
-      .map { "\($0.offset + 2). \($0.element.title)" }
+      .map { "\($0.offset + 1). \($0.element.track.title)" }
       .joined(separator: "  ")
   }
 
   private var sourceText: String {
-    track.isAppleMusicTrack ? "Apple Music" : "Local preview"
+    currentItem?.source.displayName ?? (track.isAppleMusicTrack ? "Apple Music" : "Local preview")
+  }
+
+  private var reasonText: String {
+    currentItem?.reason ?? status.reasonText
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 18) {
+    VStack(alignment: .leading, spacing: 14) {
       HStack(alignment: .top) {
         VStack(alignment: .leading, spacing: 6) {
           Text(track.album)
@@ -198,10 +293,10 @@ private struct NowPlayingSetCard: View {
         }
       }
 
-      VStack(alignment: .leading, spacing: 14) {
+      VStack(alignment: .leading, spacing: 10) {
         FeedLine(
-          source: "MusicDiscover",
-          message: "\(track.artist) sets the tone with \(track.mood.lowercased()) color, ready for your Apple Music queue.",
+          source: "Radio Brain",
+          message: reasonText,
           lineLimit: 3
         )
 
@@ -251,7 +346,7 @@ private struct NowPlayingSetCard: View {
 
         Spacer(minLength: 4)
 
-        Button(action: playAction) {
+        Button(action: primaryAction) {
           Image(systemName: playButtonSystemImage)
             .font(.system(size: 31, weight: .bold))
             .foregroundStyle(.white)
@@ -261,9 +356,19 @@ private struct NowPlayingSetCard: View {
         .disabled(isLoading)
         .accessibilityLabel(playButtonAccessibilityLabel)
       }
+
+      HStack(spacing: 12) {
+        RadioActionButton(systemImage: "backward.end.fill", label: "Dislike", action: dislikeAction)
+        RadioActionButton(systemImage: "hand.thumbsup.fill", label: "Like", action: likeAction)
+        RadioActionButton(systemImage: "forward.end.fill", label: "Skip", action: skipAction)
+        RadioActionButton(systemImage: "arrow.clockwise", label: "Refresh", action: refreshAction)
+      }
+      .disabled(status != .onAir && status != .ready)
+
+      RadioTuningControls(tuning: tuning, action: tuningAction)
     }
     .padding(.horizontal, 20)
-    .padding(.top, 48)
+    .padding(.top, 36)
     .padding(.bottom, 14)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(
@@ -288,7 +393,16 @@ private struct NowPlayingSetCard: View {
       return "hourglass"
     }
 
-    return isPlaying ? "pause.fill" : "play.fill"
+    switch status {
+    case .needsAuthorization:
+      return "person.badge.key.fill"
+    case .needsSelection:
+      return "music.note.list"
+    case .ready:
+      return "dot.radiowaves.left.and.right"
+    case .onAir:
+      return isPlaying ? "pause.fill" : "play.fill"
+    }
   }
 
   private var playButtonAccessibilityLabel: String {
@@ -296,7 +410,132 @@ private struct NowPlayingSetCard: View {
       return "Loading"
     }
 
-    return isPlaying ? "Pause" : "Play"
+    switch status {
+    case .needsAuthorization:
+      return "Connect Apple Music"
+    case .needsSelection:
+      return "Sync playlists"
+    case .ready:
+      return "Start radio"
+    case .onAir:
+      return isPlaying ? "Pause" : "Play"
+    }
+  }
+}
+
+private extension RadioPanelStatus {
+  var reasonText: String {
+    switch self {
+    case .needsAuthorization:
+      "Connect Apple Music so Airset can read your playlists and tune a station."
+    case .needsSelection:
+      "Choose playlists in Mine. Airset will use them as radio seed material."
+    case .ready:
+      "Your selected playlists are ready. Start radio to build a living queue."
+    case .onAir:
+      "The station is listening to your feedback and preparing the next set."
+    }
+  }
+
+  var emptyQueueText: String {
+    switch self {
+    case .needsAuthorization:
+      "Connect Apple Music"
+    case .needsSelection:
+      "Pick playlists in Mine"
+    case .ready:
+      "Tap start to build the queue"
+    case .onAir:
+      "Refreshing queue"
+    }
+  }
+}
+
+private struct RadioActionButton: View {
+  let systemImage: String
+  let label: String
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      Image(systemName: systemImage)
+        .font(.system(size: 17, weight: .bold))
+        .foregroundStyle(.black)
+        .frame(maxWidth: .infinity)
+        .frame(height: 44)
+        .background(.black.opacity(0.07), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+    .accessibilityLabel(label)
+  }
+}
+
+private struct RadioTuningControls: View {
+  let tuning: RadioTuning
+  let action: (RadioTuning) -> Void
+
+  var body: some View {
+    VStack(spacing: 10) {
+      RadioSliderRow(
+        title: "Discovery",
+        value: tuning.discoveryRatio,
+        leading: "Safe",
+        trailing: "Fresh"
+      ) { value in
+        var next = tuning
+        next.discoveryRatio = value
+        action(next)
+      }
+
+      RadioSliderRow(
+        title: "Familiar",
+        value: tuning.familiarity,
+        leading: "Wide",
+        trailing: "Close"
+      ) { value in
+        var next = tuning
+        next.familiarity = value
+        action(next)
+      }
+    }
+    .padding(.top, 2)
+  }
+}
+
+private struct RadioSliderRow: View {
+  let title: String
+  let value: Double
+  let leading: String
+  let trailing: String
+  let action: (Double) -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 5) {
+      HStack {
+        Text(title)
+          .font(.system(size: 15, weight: .heavy, design: .rounded))
+        Spacer()
+        Text("\(Int(value * 100))%")
+          .font(.system(size: 13, weight: .bold, design: .rounded))
+          .foregroundStyle(.black.opacity(0.44))
+      }
+
+      Slider(
+        value: Binding(
+          get: { value },
+          set: action
+        ),
+        in: 0...1
+      )
+      .tint(.black)
+
+      HStack {
+        Text(leading)
+        Spacer()
+        Text(trailing)
+      }
+      .font(.system(size: 12, weight: .bold, design: .rounded))
+      .foregroundStyle(.black.opacity(0.38))
+    }
   }
 }
 
@@ -435,8 +674,11 @@ private enum SpectrumBarPresets {
 }
 
 #Preview {
+  let playbackController = PlaybackController()
   NavigationStack {
     DiscoverView()
   }
-  .environment(PlaybackController())
+  .environment(playbackController)
+  .environment(RadioStationController(playbackController: playbackController))
+  .environment(MusicAuthorizationService())
 }

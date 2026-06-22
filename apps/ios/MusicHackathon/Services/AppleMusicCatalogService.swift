@@ -1,7 +1,7 @@
 import Foundation
 import MusicKit
 
-struct AppleMusicPlaylistSummary: Identifiable, Hashable {
+struct AppleMusicPlaylistSummary: Identifiable, Hashable, Codable {
   let id: String
   let name: String
   let curatorName: String?
@@ -36,6 +36,31 @@ struct AppleMusicCatalogService {
   func tracks(matching term: String, limit: Int = 10) async throws -> [Track] {
     let songs = try await songs(matching: term, limit: limit)
     return songs.map { Self.track(from: $0) }
+  }
+
+  func relatedTracks(for seedTracks: [Track], limit: Int = 18) async -> [Track] {
+    let terms = relatedSearchTerms(for: seedTracks)
+    var result: [Track] = []
+    var seenKeys: Set<String> = []
+
+    for term in terms {
+      guard result.count < limit else { break }
+
+      do {
+        let tracks = try await tracks(matching: term, limit: max(4, min(8, limit - result.count)))
+        for track in tracks where !seenKeys.contains(track.radioIdentity) {
+          seenKeys.insert(track.radioIdentity)
+          result.append(track)
+          if result.count >= limit {
+            break
+          }
+        }
+      } catch {
+        continue
+      }
+    }
+
+    return result
   }
 
   func song(for track: Track) async throws -> Song {
@@ -105,7 +130,7 @@ struct AppleMusicCatalogService {
     } ?? songs.first
   }
 
-  private static func track(from song: Song, fallback: Track? = nil) -> Track {
+  static func track(from song: Song, fallback: Track? = nil) -> Track {
     Track(
       id: fallback?.id ?? stableID(for: song.id.rawValue),
       title: song.title,
@@ -127,6 +152,28 @@ struct AppleMusicCatalogService {
     }
     let tail = String(format: "%012llX", hash & 0xFFFFFFFFFFFF)
     return UUID(uuidString: "A11E0000-0000-4000-8000-\(tail)") ?? UUID()
+  }
+
+  private func relatedSearchTerms(for seedTracks: [Track]) -> [String] {
+    var terms: [String] = []
+    var seen: Set<String> = []
+
+    func add(_ term: String) {
+      let cleaned = term.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard cleaned.count > 2 else { return }
+      let key = cleaned.lowercased()
+      guard !seen.contains(key) else { return }
+      seen.insert(key)
+      terms.append(cleaned)
+    }
+
+    for track in seedTracks.prefix(8) {
+      add("\(track.artist) \(track.mood)")
+      add("\(track.artist) \(track.album)")
+      add(track.artist)
+    }
+
+    return terms
   }
 }
 

@@ -21,6 +21,7 @@ final class PlaybackController {
   var elapsedSeconds: TimeInterval = 0
   var elapsedTimeText: String = "0:00"
   var activeBackend: PlaybackBackend = .none
+  var onTrackFinished: (() -> Void)?
 
   @ObservationIgnored private let previewPlayer = AVPlayer()
   @ObservationIgnored private let musicPlayer = ApplicationMusicPlayer.shared
@@ -29,6 +30,7 @@ final class PlaybackController {
   @ObservationIgnored private var endObserverToken: NSObjectProtocol?
   @ObservationIgnored private var musicProgressTask: Task<Void, Never>?
   @ObservationIgnored private var playbackTask: Task<Void, Never>?
+  @ObservationIgnored private var didNotifyTrackFinished = false
 
   init() {
     configureAudioSession()
@@ -138,6 +140,7 @@ final class PlaybackController {
   }
 
   private func startAppleMusicPlayback(for track: Track) async throws {
+    didNotifyTrackFinished = false
     let authorizedStatus = MusicAuthorization.currentStatus == .authorized
       ? MusicAuthorization.currentStatus
       : await MusicAuthorization.request()
@@ -162,6 +165,7 @@ final class PlaybackController {
   }
 
   private func startPreviewPlayback(for track: Track, previewURL: URL) {
+    didNotifyTrackFinished = false
     let item = AVPlayerItem(url: previewURL)
     previewPlayer.replaceCurrentItem(with: item)
     addPeriodicTimeObserver()
@@ -211,6 +215,7 @@ final class PlaybackController {
     musicPlayer.stop()
 
     activeBackend = .none
+    didNotifyTrackFinished = false
     state = .idle
     if clearCurrentTrack {
       currentTrack = nil
@@ -262,6 +267,12 @@ final class PlaybackController {
 
   private func restartFinishedPreviewIfNeeded() {
     guard state == .playing else { return }
+
+    if let onTrackFinished {
+      didNotifyTrackFinished = true
+      onTrackFinished()
+      return
+    }
 
     previewPlayer.seek(to: .zero)
     resetPlaybackProgress()
@@ -325,6 +336,11 @@ final class PlaybackController {
     }
 
     playbackProgress = min(max(elapsedSeconds / duration, 0), 1)
+
+    if playbackProgress >= 0.995, !didNotifyTrackFinished {
+      didNotifyTrackFinished = true
+      onTrackFinished?()
+    }
   }
 
   private func resetPlaybackProgress() {
