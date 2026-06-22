@@ -58,6 +58,11 @@ final class RadioStationClientTests: XCTestCase {
       XCTAssertEqual(body?["stationID"] as? String, "airset-personal")
       let memoryContext = body?["memoryContext"] as? [String: Any]
       XCTAssertEqual(memoryContext?["tasteSummary"] as? String, "Likes intimate pop.")
+      let catalogCandidates = body?["catalogCandidates"] as? [[String: Any]]
+      XCTAssertEqual(catalogCandidates?.first?["playlistName"] as? String, "Virtual Library: Warm Starts")
+      XCTAssertEqual(catalogCandidates?.first?["source"] as? String, "virtual_music_library_json")
+      XCTAssertEqual(catalogCandidates?.first?["sourceLane"] as? String, "familiar_anchor")
+      XCTAssertEqual(catalogCandidates?.first?["reasonSignals"] as? [String], ["warm opener", "intimate vocal"])
 
       let data = """
       {
@@ -66,6 +71,25 @@ final class RadioStationClientTests: XCTestCase {
         "subtitle": "Generated from local memory.",
         "mode": "mock",
         "diagnostics": ["ok"],
+        "speech": {
+          "stationIntro": {
+            "id": "station-intro",
+            "text": "Welcome into this generated station.",
+            "displayText": "Welcome into this generated station.",
+            "targetItemId": "item-1",
+            "agent": "entry_copy_agent"
+          },
+          "betweenTracks": [
+            {
+              "id": "transition-1",
+              "fromItemId": "previous-item",
+              "toItemId": "item-1",
+              "text": "From the opener, Airset is moving into Signal.",
+              "displayText": "Next: Signal by Artist A.",
+              "agent": "transition_copy_agent"
+            }
+          ]
+        },
         "memoryPatchProposals": [
           {
             "op": "upsert",
@@ -80,7 +104,8 @@ final class RadioStationClientTests: XCTestCase {
             "id": "item-1",
             "title": "Signal",
             "artist": "Artist A",
-            "previewURL": "https://example.com/preview.m4a"
+            "previewURL": "https://example.com/preview.m4a",
+            "handoffText": "Next: Signal by Artist A."
           }
         ]
       }
@@ -90,7 +115,15 @@ final class RadioStationClientTests: XCTestCase {
     let client = RadioStationClient(baseURL: URL(string: "http://station.test")!, session: session)
     let context = RadioStationGenerationContext(
       seedTracks: [makeTrack(title: "Seed")],
-      catalogCandidates: [makeTrack(title: "Candidate")],
+      catalogCandidates: [
+        makeTrack(
+          title: "Candidate",
+          playlistName: "Virtual Library: Warm Starts",
+          source: "virtual_music_library_json",
+          sourceLane: "familiar_anchor",
+          reasonSignals: ["warm opener", "intimate vocal"]
+        )
+      ],
       memoryContext: RadioMemoryContext(tasteSummary: "Likes intimate pop.")
     )
 
@@ -98,6 +131,9 @@ final class RadioStationClientTests: XCTestCase {
 
     XCTAssertEqual(result.station.id, "airset-personal")
     XCTAssertEqual(result.station.subtitle, "Generated from local memory.")
+    XCTAssertEqual(result.station.speech?.stationIntro?.displayText, "Welcome into this generated station.")
+    XCTAssertEqual(result.station.speech?.betweenTracks.first?.toItemId, "item-1")
+    XCTAssertEqual(result.station.items.first?.handoffText, "Next: Signal by Artist A.")
     XCTAssertEqual(result.diagnostics, ["ok"])
     XCTAssertEqual(result.memoryPatchProposals.first?.type, "taste")
   }
@@ -254,7 +290,13 @@ final class RadioStationClientTests: XCTestCase {
     return URLSession(configuration: configuration)
   }
 
-  private func makeTrack(title: String) -> Track {
+  private func makeTrack(
+    title: String,
+    playlistName: String? = nil,
+    source: String? = nil,
+    sourceLane: String? = nil,
+    reasonSignals: [String]? = nil
+  ) -> Track {
     Track(
       title: title,
       artist: "WRABEL",
@@ -262,7 +304,11 @@ final class RadioStationClientTests: XCTestCase {
       mood: "Pop",
       duration: 200,
       artworkSystemName: "music.note",
-      previewURL: URL(string: "https://example.com/\(title).m4a")
+      previewURL: URL(string: "https://example.com/\(title).m4a"),
+      playlistName: playlistName,
+      source: source,
+      sourceLane: sourceLane,
+      reasonSignals: reasonSignals
     )
   }
 

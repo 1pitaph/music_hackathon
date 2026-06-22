@@ -178,7 +178,7 @@ final class RadioStationController {
   }
 
   private func stationCandidates() -> [Track] {
-    var candidates = MockCatalog.featuredTracks
+    var candidates = MockCatalog.radioCandidates
     for track in stationTracks where !candidates.contains(where: { $0.radioIdentity == track.radioIdentity }) {
       candidates.append(track)
     }

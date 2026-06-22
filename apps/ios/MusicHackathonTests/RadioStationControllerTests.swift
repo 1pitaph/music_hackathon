@@ -5,7 +5,7 @@ import XCTest
 final class RadioStationControllerTests: XCTestCase {
   func testLoadCurrentStationUsesBackendQueue() async {
     let station = makeStation(items: [
-      makeQueueItem(title: "One", appleMusicID: "one"),
+      makeQueueItem(title: "One", appleMusicID: "one", handoffText: "Welcome into One."),
       makeQueueItem(title: "Two", appleMusicID: "two")
     ])
     let controller = RadioStationController(
@@ -25,7 +25,7 @@ final class RadioStationControllerTests: XCTestCase {
 
   func testStartStationPlaysFirstBackendTrackAndKeepsUpNext() async {
     let station = makeStation(items: [
-      makeQueueItem(title: "One", appleMusicID: "one"),
+      makeQueueItem(title: "One", appleMusicID: "one", handoffText: "Welcome into One."),
       makeQueueItem(title: "Two", appleMusicID: "two")
     ])
     let playbackController = PlaybackController()
@@ -39,6 +39,7 @@ final class RadioStationControllerTests: XCTestCase {
     await waitForPlayback(playbackController, title: "One")
 
     XCTAssertEqual(controller.currentItem?.track.title, "One")
+    XCTAssertEqual(controller.currentItem?.handoffText, "Welcome into One.")
     XCTAssertEqual(controller.queue.map(\.track.title), ["Two"])
     XCTAssertEqual(playbackController.currentTrack?.title, "One")
   }
@@ -90,7 +91,7 @@ final class RadioStationControllerTests: XCTestCase {
     )
   }
 
-  private func makeQueueItem(title: String, appleMusicID: String) -> RadioQueueItem {
+  private func makeQueueItem(title: String, appleMusicID: String, handoffText: String? = nil) -> RadioQueueItem {
     RadioQueueItem(
       id: appleMusicID,
       track: Track(
@@ -103,7 +104,8 @@ final class RadioStationControllerTests: XCTestCase {
         appleMusicID: appleMusicID
       ),
       sourceTitle: "Backend",
-      reason: "Programmed by backend."
+      reason: "Programmed by backend.",
+      handoffText: handoffText
     )
   }
 

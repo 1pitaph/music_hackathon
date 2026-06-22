@@ -74,10 +74,33 @@ class RadioGeneratedItem(BaseModel):
   source: str
 
 
+class RadioEntryCopy(BaseModel):
+  id: str = "station-intro"
+  text: str
+  displayText: str
+  targetItemId: str | None = None
+  agent: str = "entry_copy_agent"
+
+
+class RadioTransitionCopy(BaseModel):
+  id: str
+  fromItemId: str
+  toItemId: str
+  text: str
+  displayText: str
+  agent: str = "transition_copy_agent"
+
+
+class RadioSpeech(BaseModel):
+  stationIntro: RadioEntryCopy | None = None
+  betweenTracks: list[RadioTransitionCopy] = Field(default_factory=list)
+
+
 class RadioGenerateResponse(BaseModel):
   mode: Literal["llm", "mock", "fallback"]
   stationIntro: str
   items: list[RadioGeneratedItem]
+  speech: RadioSpeech | None = None
   diagnostics: list[str] = Field(default_factory=list)
 
 
@@ -100,6 +123,7 @@ class RadioStationItem(BaseModel):
   isExplicit: bool = False
   sourceTitle: str = "Backend station"
   reason: str = "Queued by the backend station."
+  handoffText: str | None = None
 
 
 class RadioMemoryPatchProposal(BaseModel):
@@ -116,6 +140,7 @@ class RadioStationGenerateResponse(BaseModel):
   subtitle: str
   items: list[RadioStationItem]
   mode: Literal["llm", "mock", "fallback"]
+  speech: RadioSpeech | None = None
   diagnostics: list[str] = Field(default_factory=list)
   memoryPatchProposals: list[RadioMemoryPatchProposal] = Field(default_factory=list)
 

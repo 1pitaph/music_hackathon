@@ -25,12 +25,15 @@
 		E10000000000000000000001 /* AppleMusicCatalogService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000001 /* AppleMusicCatalogService.swift */; };
 		E10000000000000000000002 /* SpectrumAnalysisCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000002 /* SpectrumAnalysisCache.swift */; };
 		F10000000000000000000001 /* RadioModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001 /* RadioModels.swift */; };
+		I10000000000000000000001 /* VirtualMusicLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = I20000000000000000000001 /* VirtualMusicLibrary.swift */; };
+		I10000000000000000000002 /* virtual-music-library.json in Resources */ = {isa = PBXBuildFile; fileRef = I20000000000000000000002 /* virtual-music-library.json */; };
 			F10000000000000000000007 /* RadioStationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000007 /* RadioStationController.swift */; };
 			G10000000000000000000001 /* RadioStationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = G20000000000000000000001 /* RadioStationClient.swift */; };
 			H10000000000000000000001 /* RadioMemoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = H20000000000000000000001 /* RadioMemoryStore.swift */; };
 			T10000000000000000000003 /* RadioStationClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000004 /* RadioStationClientTests.swift */; };
 			T10000000000000000000004 /* RadioStationControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000005 /* RadioStationControllerTests.swift */; };
 			T10000000000000000000005 /* RadioMemoryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000006 /* RadioMemoryStoreTests.swift */; };
+			T10000000000000000000006 /* VirtualMusicLibraryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000007 /* VirtualMusicLibraryTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,6 +66,8 @@
 		E20000000000000000000001 /* AppleMusicCatalogService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicCatalogService.swift; sourceTree = "<group>"; };
 		E20000000000000000000002 /* SpectrumAnalysisCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpectrumAnalysisCache.swift; sourceTree = "<group>"; };
 		F20000000000000000000001 /* RadioModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioModels.swift; sourceTree = "<group>"; };
+		I20000000000000000000001 /* VirtualMusicLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualMusicLibrary.swift; sourceTree = "<group>"; };
+		I20000000000000000000002 /* virtual-music-library.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "virtual-music-library.json"; sourceTree = "<group>"; };
 			F20000000000000000000007 /* RadioStationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationController.swift; sourceTree = "<group>"; };
 			G20000000000000000000001 /* RadioStationClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationClient.swift; sourceTree = "<group>"; };
 			H20000000000000000000001 /* RadioMemoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioMemoryStore.swift; sourceTree = "<group>"; };
@@ -70,6 +75,7 @@
 			T20000000000000000000004 /* RadioStationClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationClientTests.swift; sourceTree = "<group>"; };
 		T20000000000000000000005 /* RadioStationControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationControllerTests.swift; sourceTree = "<group>"; };
 		T20000000000000000000006 /* RadioMemoryStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioMemoryStoreTests.swift; sourceTree = "<group>"; };
+		T20000000000000000000007 /* VirtualMusicLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualMusicLibraryTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -139,6 +145,7 @@
 				A20000000000000000000004 /* Track.swift */,
 				A20000000000000000000005 /* MockCatalog.swift */,
 				F20000000000000000000001 /* RadioModels.swift */,
+				I20000000000000000000001 /* VirtualMusicLibrary.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -162,6 +169,7 @@
 			isa = PBXGroup;
 			children = (
 				A40000000000000000000015 /* Audio */,
+				I40000000000000000000001 /* VirtualMusicLibrary */,
 				C20000000000000000000001 /* AppIcon.icon */,
 				A20000000000000000000012 /* Info.plist */,
 			);
@@ -217,12 +225,21 @@
 			path = Audio;
 			sourceTree = "<group>";
 		};
+		I40000000000000000000001 /* VirtualMusicLibrary */ = {
+			isa = PBXGroup;
+			children = (
+				I20000000000000000000002 /* virtual-music-library.json */,
+			);
+			path = VirtualMusicLibrary;
+			sourceTree = "<group>";
+		};
 		T40000000000000000000001 /* MusicHackathonTests */ = {
 			isa = PBXGroup;
 			children = (
 					T20000000000000000000004 /* RadioStationClientTests.swift */,
 					T20000000000000000000005 /* RadioStationControllerTests.swift */,
 					T20000000000000000000006 /* RadioMemoryStoreTests.swift */,
+					T20000000000000000000007 /* VirtualMusicLibraryTests.swift */,
 			);
 			path = MusicHackathonTests;
 			sourceTree = "<group>";
@@ -314,6 +331,7 @@
 			files = (
 				C10000000000000000000001 /* AppIcon.icon in Resources */,
 				A10000000000000000000012 /* featured-preview.m4a in Resources */,
+				I10000000000000000000002 /* virtual-music-library.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -337,6 +355,7 @@
 				A10000000000000000000004 /* Track.swift in Sources */,
 				A10000000000000000000005 /* MockCatalog.swift in Sources */,
 				F10000000000000000000001 /* RadioModels.swift in Sources */,
+				I10000000000000000000001 /* VirtualMusicLibrary.swift in Sources */,
 				A10000000000000000000006 /* PlaybackController.swift in Sources */,
 				A10000000000000000000007 /* MusicAuthorizationService.swift in Sources */,
 				A10000000000000000000013 /* AudioSpectrumAnalyzer.swift in Sources */,
@@ -359,6 +378,7 @@
 					T10000000000000000000003 /* RadioStationClientTests.swift in Sources */,
 				T10000000000000000000004 /* RadioStationControllerTests.swift in Sources */,
 				T10000000000000000000005 /* RadioMemoryStoreTests.swift in Sources */,
+				T10000000000000000000006 /* VirtualMusicLibraryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

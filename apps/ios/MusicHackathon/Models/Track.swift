@@ -12,6 +12,11 @@ struct Track: Identifiable, Hashable, Codable {
   let previewURL: URL?
   let appleMusicID: String?
   let isExplicit: Bool
+  let playlistName: String?
+  let source: String?
+  let sourceLane: String?
+  let sourceScore: Double?
+  let reasonSignals: [String]?
 
   init(
     id: UUID = UUID(),
@@ -24,7 +29,12 @@ struct Track: Identifiable, Hashable, Codable {
     artworkURL: URL? = nil,
     previewURL: URL? = nil,
     appleMusicID: String? = nil,
-    isExplicit: Bool = false
+    isExplicit: Bool = false,
+    playlistName: String? = nil,
+    source: String? = nil,
+    sourceLane: String? = nil,
+    sourceScore: Double? = nil,
+    reasonSignals: [String]? = nil
   ) {
     self.id = id
     self.title = title
@@ -37,6 +47,11 @@ struct Track: Identifiable, Hashable, Codable {
     self.previewURL = previewURL
     self.appleMusicID = appleMusicID
     self.isExplicit = isExplicit
+    self.playlistName = playlistName
+    self.source = source
+    self.sourceLane = sourceLane
+    self.sourceScore = sourceScore
+    self.reasonSignals = reasonSignals
   }
 
   var isAppleMusicTrack: Bool {
@@ -70,7 +85,12 @@ struct Track: Identifiable, Hashable, Codable {
       artworkURL: artworkURL ?? self.artworkURL,
       previewURL: previewURL ?? self.previewURL,
       appleMusicID: appleMusicID,
-      isExplicit: isExplicit
+      isExplicit: isExplicit,
+      playlistName: playlistName,
+      source: source,
+      sourceLane: sourceLane,
+      sourceScore: sourceScore,
+      reasonSignals: reasonSignals
     )
   }
 }

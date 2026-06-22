@@ -207,13 +207,25 @@ private struct NowPlayingSetCard: View {
   let nextAction: () -> Void
   let refreshAction: () -> Void
 
-  private var upNextText: String {
-    guard !queueItems.isEmpty else { return status.emptyQueueText }
-    return queueItems
-      .prefix(3)
-      .enumerated()
-      .map { "\($0.offset + 1). \($0.element.track.title)" }
-      .joined(separator: "  ")
+  private var nextItem: RadioQueueItem? {
+    queueItems.first
+  }
+
+  private var upNextTitle: String {
+    nextItem?.track.title ?? status.emptyQueueText
+  }
+
+  private var upNextDetail: String? {
+    guard let track = nextItem?.track else { return nil }
+    return "\(track.artist) • \(track.album)"
+  }
+
+  private var queueMetaTitle: String {
+    nextItem?.track.durationText ?? "Radio set"
+  }
+
+  private var queueMetaDetail: String {
+    nextItem == nil ? "Awaiting queue" : "Next up"
   }
 
   private var sourceText: String {
@@ -221,7 +233,7 @@ private struct NowPlayingSetCard: View {
   }
 
   private var reasonText: String {
-    errorMessage ?? currentItem?.reason ?? status.reasonText
+    errorMessage ?? currentItem?.handoffText ?? currentItem?.reason ?? status.reasonText
   }
 
   private var trackFeedSource: String {
@@ -260,13 +272,13 @@ private struct NowPlayingSetCard: View {
         Spacer(minLength: 18)
 
         VStack(alignment: .trailing, spacing: 6) {
-          Text("15 min set")
+          Text(queueMetaTitle)
             .font(.system(size: 25, weight: .heavy, design: .rounded))
             .foregroundStyle(.black)
             .lineLimit(1)
             .minimumScaleFactor(0.7)
 
-          Text("2026/06/16")
+          Text(queueMetaDetail)
             .font(.system(size: 18, weight: .bold, design: .rounded))
             .foregroundStyle(.black.opacity(0.36))
         }
@@ -290,11 +302,19 @@ private struct NowPlayingSetCard: View {
             .font(.system(size: 16, weight: .heavy, design: .rounded))
             .foregroundStyle(.black.opacity(0.38))
 
-          Text(upNextText)
+          Text(upNextTitle)
             .font(.system(size: 19, weight: .heavy, design: .rounded))
             .foregroundStyle(.black)
             .lineLimit(1)
             .minimumScaleFactor(0.58)
+
+          if let upNextDetail {
+            Text(upNextDetail)
+              .font(.system(size: 14, weight: .bold, design: .rounded))
+              .foregroundStyle(.black.opacity(0.46))
+              .lineLimit(1)
+              .minimumScaleFactor(0.72)
+          }
         }
       }
       .padding(.horizontal, 16)

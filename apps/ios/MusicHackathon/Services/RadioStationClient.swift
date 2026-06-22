@@ -52,7 +52,11 @@ struct RadioStationGenerationContext: Encodable, Equatable {
       RadioTrackPayload(track: $0, playlistName: "Local memory seeds", sourceLane: "familiar_anchor")
     }
     self.catalogCandidates = catalogCandidates.map {
-      RadioTrackPayload(track: $0, source: "catalog", sourceLane: "candidate_pool")
+      RadioTrackPayload(
+        track: $0,
+        source: $0.source ?? "catalog",
+        sourceLane: $0.sourceLane ?? "candidate_pool"
+      )
     }
     self.memoryContext = memoryContext
     self.limit = limit
@@ -113,11 +117,11 @@ struct RadioTrackPayload: Codable, Equatable {
     previewURL = track.previewURL
     appleMusicID = track.appleMusicID
     isExplicit = track.isExplicit
-    self.playlistName = playlistName
-    self.source = source
-    self.sourceLane = sourceLane
-    self.sourceScore = sourceScore
-    self.reasonSignals = reasonSignals
+    self.playlistName = playlistName ?? track.playlistName
+    self.source = source ?? track.source
+    self.sourceLane = sourceLane ?? track.sourceLane
+    self.sourceScore = sourceScore ?? track.sourceScore
+    self.reasonSignals = reasonSignals.isEmpty ? (track.reasonSignals ?? []) : reasonSignals
   }
 }
 
@@ -243,6 +247,7 @@ private struct RadioStationPayload: Decodable {
   let title: String
   let subtitle: String
   let items: [RadioStationItemPayload]
+  let speech: RadioSpeech?
   let diagnostics: [String]
   let memoryPatchProposals: [RadioMemoryPatchProposal]
 
@@ -254,6 +259,7 @@ private struct RadioStationPayload: Decodable {
     case subtitle
     case intro
     case items
+    case speech
     case diagnostics
     case memoryPatchProposals
   }
@@ -269,6 +275,7 @@ private struct RadioStationPayload: Decodable {
       ?? container.decodeIfPresent(String.self, forKey: .intro)
       ?? "Streaming from the backend station queue."
     items = try container.decode([RadioStationItemPayload].self, forKey: .items)
+    speech = try container.decodeIfPresent(RadioSpeech.self, forKey: .speech)
     diagnostics = try container.decodeIfPresent([String].self, forKey: .diagnostics) ?? []
     memoryPatchProposals = try container.decodeIfPresent([RadioMemoryPatchProposal].self, forKey: .memoryPatchProposals) ?? []
   }
@@ -283,7 +290,8 @@ private struct RadioStationPayload: Decodable {
       id: stationID,
       title: title,
       subtitle: subtitle,
-      items: queueItems
+      items: queueItems,
+      speech: speech
     )
   }
 
@@ -315,6 +323,7 @@ private struct RadioStationItemPayload: Decodable {
   let sourceTitle: String?
   let source: String?
   let reason: String?
+  let handoffText: String?
 
   enum CodingKeys: String, CodingKey {
     case id
@@ -336,6 +345,7 @@ private struct RadioStationItemPayload: Decodable {
     case sourceTitle
     case source
     case reason
+    case handoffText
   }
 
   init(from decoder: Decoder) throws {
@@ -359,6 +369,7 @@ private struct RadioStationItemPayload: Decodable {
     sourceTitle = try container.decodeIfPresent(String.self, forKey: .sourceTitle)
     source = try container.decodeIfPresent(String.self, forKey: .source)
     reason = try container.decodeIfPresent(String.self, forKey: .reason)
+    handoffText = try container.decodeIfPresent(String.self, forKey: .handoffText)
   }
 
   func queueItem() throws -> RadioQueueItem {
@@ -383,7 +394,8 @@ private struct RadioStationItemPayload: Decodable {
       id: id ?? track.radioIdentity,
       track: track,
       sourceTitle: sourceTitle ?? source ?? "Backend station",
-      reason: reason ?? "Queued by the backend station."
+      reason: reason ?? "Queued by the backend station.",
+      handoffText: handoffText
     )
   }
 }

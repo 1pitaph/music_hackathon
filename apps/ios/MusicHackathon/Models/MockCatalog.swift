@@ -1,7 +1,17 @@
 import Foundation
 
 enum MockCatalog {
-  static let featuredTracks: [Track] = [
+  static var featuredTracks: [Track] {
+    let virtualTracks = VirtualMusicLibrary.featuredTracks
+    return virtualTracks.isEmpty ? fallbackFeaturedTracks : virtualTracks
+  }
+
+  static var radioCandidates: [Track] {
+    let virtualTracks = VirtualMusicLibrary.tracks
+    return virtualTracks.isEmpty ? fallbackFeaturedTracks : virtualTracks
+  }
+
+  private static let fallbackFeaturedTracks: [Track] = [
     Track(
       title: "future",
       artist: "WRABEL",

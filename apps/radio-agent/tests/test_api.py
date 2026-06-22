@@ -44,7 +44,10 @@ def test_generate_uses_mock_without_key(monkeypatch):
   body = response.json()
   assert body["mode"] == "mock"
   assert body["stationIntro"]
+  assert body["speech"]["stationIntro"]["displayText"] == body["stationIntro"]
   assert [item["radioIdentity"] for item in body["items"]] == ["song-1", "song-2"]
+  assert body["speech"]["betweenTracks"][0]["fromItemId"] == "song-1"
+  assert body["speech"]["betweenTracks"][0]["toItemId"] == "song-2"
 
 
 def test_generate_station_returns_ios_playable_payload(monkeypatch):
@@ -61,6 +64,9 @@ def test_generate_station_returns_ios_playable_payload(monkeypatch):
   assert [item["id"] for item in body["items"]] == ["song-1", "song-2"]
   assert body["items"][0]["appleMusicID"] == "1"
   assert body["items"][1]["previewURL"] == "https://example.com/b.m4a"
+  assert body["speech"]["stationIntro"]["displayText"] == body["subtitle"]
+  assert body["speech"]["betweenTracks"][0]["toItemId"] == "song-2"
+  assert body["items"][1]["handoffText"] == body["speech"]["betweenTracks"][0]["displayText"]
   assert body["memoryPatchProposals"]
 
 

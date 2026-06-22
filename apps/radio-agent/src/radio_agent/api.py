@@ -117,9 +117,10 @@ def generate_station(request: RadioStationGenerateRequest) -> RadioStationGenera
   return RadioStationGenerateResponse(
     stationID=request.stationID,
     title=request.title,
-    subtitle=generation.stationIntro,
+    subtitle=generation.speech.stationIntro.displayText if generation.speech and generation.speech.stationIntro else generation.stationIntro,
     items=items[: request.limit],
     mode=generation.mode,
+    speech=generation.speech,
     diagnostics=diagnostics,
     memoryPatchProposals=_memory_patch_proposals(request),
   )
@@ -148,6 +149,10 @@ def _station_items_from_generation(
 ) -> list[RadioStationItem]:
   items: list[RadioStationItem] = []
   used: set[str] = set()
+  handoff_by_to_item = {
+    copy.toItemId: copy.displayText
+    for copy in (generation.speech.betweenTracks if generation.speech else [])
+  }
   for generated_item in generation.items:
     if generated_item.radioIdentity in used:
       continue
@@ -155,11 +160,21 @@ def _station_items_from_generation(
     if track is None or not _is_playable(track):
       continue
     used.add(generated_item.radioIdentity)
-    items.append(_station_item(track, generated_item.reason, generated_item.source))
+    items.append(_station_item(
+      track,
+      generated_item.reason,
+      generated_item.source,
+      handoff_by_to_item.get(generated_item.radioIdentity),
+    ))
   return items
 
 
-def _station_item(track: RadioTrack, reason: str, source: str | None = None) -> RadioStationItem:
+def _station_item(
+  track: RadioTrack,
+  reason: str,
+  source: str | None = None,
+  handoff_text: str | None = None,
+) -> RadioStationItem:
   return RadioStationItem(
     id=track.radioIdentity,
     title=track.title,
@@ -173,6 +188,7 @@ def _station_item(track: RadioTrack, reason: str, source: str | None = None) -> 
     isExplicit=track.isExplicit,
     sourceTitle=track.playlistName or track.sourceLane or source or track.source or "Backend station",
     reason=reason,
+    handoffText=handoff_text,
   )
 
 
