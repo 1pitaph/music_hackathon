@@ -8,29 +8,22 @@ struct SettingsView: View {
   var body: some View {
     List {
       appleMusicSection
-      playlistSection
-      radioMemorySection
+      backendStationSection
     }
     .listStyle(.insetGrouped)
     .task {
       await musicAuthorization.refreshAccessState()
-      if musicAuthorization.status == .authorized, radioStation.playlists.isEmpty {
-        await radioStation.refreshLibrary()
-      }
     }
   }
 
   private var appleMusicSection: some View {
-    Section("Apple Music") {
+    Section("Apple Music Playback") {
       LabeledContent("Authorization", value: musicAuthorization.statusText)
       LabeledContent("Subscription", value: musicAuthorization.subscriptionText)
 
       Button {
         Task {
           await musicAuthorization.requestAccess()
-          if musicAuthorization.status == .authorized {
-            await radioStation.refreshLibrary()
-          }
         }
       } label: {
         Label(
@@ -43,14 +36,13 @@ struct SettingsView: View {
       Button {
         Task {
           await musicAuthorization.refreshAccessState()
-          await radioStation.refreshLibrary()
         }
       } label: {
-        Label(radioStation.isSyncingLibrary ? "Syncing" : "Sync Playlists", systemImage: "arrow.triangle.2.circlepath")
+        Label("Refresh Playback Access", systemImage: "arrow.triangle.2.circlepath")
       }
-      .disabled(musicAuthorization.status != .authorized || radioStation.isSyncingLibrary)
+      .disabled(musicAuthorization.isRequestingAccess)
 
-      if let message = musicAuthorization.lastErrorMessage ?? radioStation.errorMessage {
+      if let message = musicAuthorization.lastErrorMessage {
         Text(message)
           .font(.footnote)
           .foregroundStyle(.secondary)
@@ -58,70 +50,27 @@ struct SettingsView: View {
     }
   }
 
-  private var playlistSection: some View {
-    Section {
-      if musicAuthorization.status != .authorized {
-        ContentUnavailableView(
-          "Connect Apple Music",
-          systemImage: "music.note.house",
-          description: Text("Your playlists become the seed material for Airset Radio.")
-        )
-        .listRowBackground(Color.clear)
-      } else if radioStation.isSyncingLibrary {
-        HStack {
-          ProgressView()
-          Text("Syncing playlists")
-            .foregroundStyle(.secondary)
+  private var backendStationSection: some View {
+    Section("Backend Station") {
+      LabeledContent("Current station", value: radioStation.stationTitle)
+      LabeledContent("Queued tracks", value: "\(radioStation.stationTracks.count)")
+
+      Button {
+        Task {
+          await radioStation.refreshStation()
         }
-      } else if radioStation.playlists.isEmpty {
-        ContentUnavailableView(
-          "No Playlists Yet",
-          systemImage: "music.note.list",
-          description: Text("Sync Apple Music to choose playlists for your station.")
+      } label: {
+        Label(
+          radioStation.isLoadingStation ? "Loading" : "Refresh Station",
+          systemImage: "dot.radiowaves.left.and.right"
         )
-        .listRowBackground(Color.clear)
-      } else {
-        ForEach(radioStation.playlists) { playlist in
-          Toggle(isOn: playlistBinding(for: playlist.id)) {
-            VStack(alignment: .leading, spacing: 4) {
-              Text(playlist.name)
-              Text(playlist.curatorName ?? "Apple Music library")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-          }
-        }
       }
-    } header: {
-      Text("Radio Seeds")
-    } footer: {
-      Text("\(radioStation.selectedPlaylistIDs.count) selected • Last sync: \(radioStation.lastSyncText)")
-    }
-  }
+      .disabled(radioStation.isLoadingStation)
 
-  private var radioMemorySection: some View {
-    Section("Radio Engine") {
-      Label("Personal queue uses selected playlists", systemImage: "music.note.list")
-      Label("Catalog discovery mix defaults to 30%", systemImage: "sparkles")
-      Label("Likes, skips, and dislikes are remembered", systemImage: "brain.head.profile")
-      Label("DJ narration adapter is local for now", systemImage: "quote.bubble")
-    }
-    .foregroundStyle(.secondary)
-  }
-
-  private func playlistBinding(for playlistID: String) -> Binding<Bool> {
-    Binding {
-      radioStation.selectedPlaylistIDs.contains(playlistID)
-    } set: { isSelected in
-      var nextIDs = radioStation.selectedPlaylistIDs
-      if isSelected {
-        nextIDs.insert(playlistID)
-      } else {
-        nextIDs.remove(playlistID)
-      }
-
-      Task {
-        await radioStation.setSelectedPlaylistIDs(nextIDs)
+      if let message = radioStation.errorMessage {
+        Text(message)
+          .font(.footnote)
+          .foregroundStyle(.secondary)
       }
     }
   }
