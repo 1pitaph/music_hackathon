@@ -21,6 +21,19 @@ def test_healthz():
   assert response.json() == {"status": "ok"}
 
 
+def test_current_station_returns_playable_ios_payload():
+  client = TestClient(app)
+
+  response = client.get("/v1/radio/stations/current")
+
+  assert response.status_code == 200
+  body = response.json()
+  assert body["stationID"] == "airset-live"
+  assert body["title"] == "Airset Radio"
+  assert body["items"]
+  assert all(item["previewURL"].startswith("https://") for item in body["items"])
+
+
 def test_generate_uses_mock_without_key(monkeypatch):
   monkeypatch.delenv("OPENAI_API_KEY", raising=False)
   client = TestClient(app)

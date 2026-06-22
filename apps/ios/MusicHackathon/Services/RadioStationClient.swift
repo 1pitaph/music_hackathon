@@ -5,11 +5,7 @@ protocol RadioStationFetching {
 }
 
 struct RadioStationClient: RadioStationFetching {
-  #if DEBUG
-  static let defaultBaseURL = URL(string: "http://127.0.0.1:8000")
-  #else
-  static let defaultBaseURL: URL? = nil
-  #endif
+  static let defaultBaseURL = URL(string: "https://musichackathon-production.up.railway.app")
 
   private let baseURL: URL?
   private let session: URLSession
