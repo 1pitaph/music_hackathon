@@ -14,42 +14,36 @@ import { WaveformBar } from '@/components/WaveformBar';
 import { ThemedText } from '@/components/themed-text';
 import { AppleColors, AppleType } from '@/constants/theme';
 import { STATION_COLORS } from '@/data/stations';
-import { Song, Station } from '@/types/station';
+import { Station } from '@/types/station';
 
-function mockDuration(song: Song): number {
-  let h = 0;
-  for (let i = 0; i < song.id.length; i++) h = (h * 31 + song.id.charCodeAt(i)) & 0xffff;
-  return 180 + (h % 121);
-}
+const MOCK_STATION_DURATION = 25 * 60; // 25分钟模拟电台时长
 
 interface Props {
   visible: boolean;
   station: Station;
-  songIndex: number;
   isPlaying: boolean;
   onClose: () => void;
   onTogglePlay: () => void;
-  onPrevSong: () => void;
-  onNextSong: () => void;
+  /** 切到上一个电台 */
+  onPrevStation: () => void;
+  /** 切到下一个电台 */
+  onNextStation: () => void;
   onSeek: (progress: number) => void;
   progress: number;
   isFavorited: boolean;
   onToggleFavorite: () => void;
 }
 
-/** 全屏播放器 — 封面占满上半屏 + 透明背景控件 */
+/** 全屏播放器 — 电台为主体，上一首/下一首切换电台 */
 export function NowPlaying({
-  visible, station, songIndex, isPlaying,
-  onClose, onTogglePlay, onPrevSong, onNextSong, onSeek,
+  visible, station, isPlaying,
+  onClose, onTogglePlay, onPrevStation, onNextStation, onSeek,
   progress, isFavorited, onToggleFavorite,
 }: Props) {
   const { width: sw, height: sh } = useWindowDimensions();
   const translateY = useSharedValue(sh);
 
-  const song = station.songs[songIndex] ?? { id: '0', title: station.title, artist: station.hostName };
-  const duration = mockDuration(song);
   const color = STATION_COLORS[station.id] ?? '#8C7355';
-
   const COVER_MARGIN = 26;
   const coverW = sw - COVER_MARGIN * 2;
   const coverH = coverW * 0.92;
@@ -86,7 +80,7 @@ export function NowPlaying({
         </Pressable>
       </View>
 
-      <View style={[styles.coverWrap, { marginTop: 18, marginBottom: 24 }]}>
+      <View style={[styles.coverWrap, { marginTop: 18, marginBottom: 16 }]}>
         <View style={[styles.coverShadow, { width: coverW, height: coverH, borderRadius: 14, backgroundColor: color + '1A' }]} />
         <View style={[styles.cover, { width: coverW, height: coverH, borderRadius: 14 }]}>
           <LinearGradient
@@ -100,16 +94,14 @@ export function NowPlaying({
       </View>
 
       <View style={styles.lower}>
+        {/* 电台信息 — 两行：电台名 + host */}
         <View style={styles.info}>
-          <ThemedText style={styles.tag} numberOfLines={1} lightColor={AppleColors.tertiaryLabel} darkColor={AppleColors.tertiaryLabel}>
+          <ThemedText style={styles.stationName} numberOfLines={1} lightColor={AppleColors.label} darkColor={AppleColors.label}>
             {station.title}
-          </ThemedText>
-          <ThemedText style={styles.songTitle} numberOfLines={1} lightColor={AppleColors.label} darkColor={AppleColors.label}>
-            {song.title}
           </ThemedText>
           <View style={styles.byRow}>
             <ThemedText style={styles.by} lightColor={AppleColors.secondaryLabel} darkColor={AppleColors.secondaryLabel}>
-              by {song.artist}
+              by {station.hostName}
             </ThemedText>
             <Pressable onPress={onToggleFavorite} hitSlop={8} style={({ pressed }) => [pressed && { opacity: 0.5 }]}>
               <IconSymbol size={16} name={isFavorited ? 'heart.fill' : 'heart'} color={isFavorited ? AppleColors.accent : AppleColors.tertiaryLabel} />
@@ -117,16 +109,18 @@ export function NowPlaying({
           </View>
         </View>
 
+        {/* 进度条 — 电台级时长 */}
         <WaveformBar
-          seed={songIndex * 100 + station.songs.length}
+          seed={parseInt(station.id, 10) || 1}
           progress={progress}
-          duration={duration}
+          duration={MOCK_STATION_DURATION}
           onSeek={onSeek}
           marginH={COVER_MARGIN}
         />
 
+        {/* 控件 — 切换电台 */}
         <View style={styles.controls}>
-          <Pressable onPress={onPrevSong} hitSlop={14} style={({ pressed }) => [pressed && { opacity: 0.4 }]}>
+          <Pressable onPress={onPrevStation} hitSlop={14} style={({ pressed }) => [pressed && { opacity: 0.4 }]}>
             <IconSymbol size={36} name="backward.fill" color={AppleColors.label} />
           </Pressable>
 
@@ -138,7 +132,7 @@ export function NowPlaying({
             />
           </Pressable>
 
-          <Pressable onPress={onNextSong} hitSlop={14} style={({ pressed }) => [pressed && { opacity: 0.4 }]}>
+          <Pressable onPress={onNextStation} hitSlop={14} style={({ pressed }) => [pressed && { opacity: 0.4 }]}>
             <IconSymbol size={36} name="forward.fill" color={AppleColors.label} />
           </Pressable>
         </View>
@@ -168,8 +162,7 @@ const styles = StyleSheet.create({
   cvHL: { position: 'absolute', backgroundColor: 'rgba(255,255,255,0.08)', transform: [{ scaleY: 0.4 }], left: '22.5%' },
   lower: { flex: 1, justifyContent: 'space-evenly' },
   info: { alignItems: 'center', paddingHorizontal: 24 },
-  tag: { ...AppleType.caption1, letterSpacing: 0.04, marginBottom: 6 },
-  songTitle: { ...AppleType.title1, fontWeight: '500' as const, textAlign: 'center', letterSpacing: -0.01, marginBottom: 4 },
+  stationName: { ...AppleType.title1, fontWeight: '500' as const, textAlign: 'center', letterSpacing: -0.01, marginBottom: 4 },
   byRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   by: { ...AppleType.subhead },
   controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-evenly', paddingHorizontal: 48 },

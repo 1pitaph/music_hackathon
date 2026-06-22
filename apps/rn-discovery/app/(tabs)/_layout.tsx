@@ -20,9 +20,9 @@ export default function TabLayout() {
         tabBarIconStyle: styles.ic,
       }}
     >
-      <Tabs.Screen name="radio"   options={{ title: '电台', tabBarIcon: ({ color }) => <IconSymbol size={22} name="antenna.radiowaves.left.and.right" color={color} /> }} />
-      <Tabs.Screen name="index"   options={{ title: '发现', tabBarIcon: ({ color }) => <IconSymbol size={22} name="music.note.list" color={color} /> }} />
-      <Tabs.Screen name="profile" options={{ title: '我的', tabBarIcon: ({ color }) => <IconSymbol size={22} name="person.crop.circle" color={color} /> }} />
+      <Tabs.Screen name="radio"   options={{ title: '电台', tabBarIcon: ({ color }) => <IconSymbol size={27} name="antenna.radiowaves.left.and.right" color={color} /> }} />
+      <Tabs.Screen name="index"   options={{ title: '发现', tabBarIcon: ({ color }) => <IconSymbol size={27} name="music.note.list" color={color} /> }} />
+      <Tabs.Screen name="profile" options={{ title: '我的', tabBarIcon: ({ color }) => <IconSymbol size={27} name="person.crop.circle" color={color} /> }} />
     </Tabs>
   );
 }
@@ -32,9 +32,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(21,18,15,0.88)',
     borderTopColor: 'rgba(245,240,232,0.08)',
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 6,
-    height: Platform.OS === 'ios' ? 86 : 62,
+    paddingTop: 8,
+    height: Platform.OS === 'ios' ? 90 : 66,
   },
-  lb: { fontSize: 10, letterSpacing: 0.02, marginTop: 2 },
+  lb: { fontSize: 11, letterSpacing: 0.02, marginTop: 2, fontWeight: '500' as const },
   ic: { marginBottom: -2 },
 });

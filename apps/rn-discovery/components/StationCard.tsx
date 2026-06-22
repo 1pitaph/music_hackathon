@@ -6,7 +6,7 @@ import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSequence, with
 import { ExpandableDrawer } from '@/components/ExpandableDrawer';
 import { ThemedText } from '@/components/themed-text';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { AppleColors, AppleRadius, AppleType, Spacing } from '@/constants/theme';
+import { AppleColors, AppleType, Spacing } from '@/constants/theme';
 import { STATION_COLORS } from '@/data/stations';
 import { Station } from '@/types/station';
 
@@ -25,7 +25,6 @@ export function StationCard({ station, isActive, isPlaying, onPlayToggle }: Prop
   const [fav, setFav] = useState(false);
   const [open, setOpen] = useState(false);
   const sc = useSharedValue(1);
-  const aS = useAnimatedStyle(() => ({ transform: [{ scale: sc.value }] }));
 
   const press = () => {
     if (!isActive) return;
@@ -33,55 +32,122 @@ export function StationCard({ station, isActive, isPlaying, onPlayToggle }: Prop
     runOnJS(onPlayToggle)();
   };
 
+  const handleToggle = () => setOpen(o => !o);
+
   const c = STATION_COLORS[station.id] ?? '#8C7355';
   const g = glowHex(c);
 
   return (
-    <View style={[styles.card, isActive && styles.cardSh]}>
-      {/* 封面渐变区 */}
-      <AP style={[styles.art, aS]} onPress={press}>
-        <View style={[styles.gl, { backgroundColor: g }, isPlaying && styles.glOn]} />
-        <LinearGradient colors={[c, c + 'CC', c + '99']} start={{ x: 0.2, y: 0 }} end={{ x: 0.8, y: 1 }} style={styles.gr} />
-        <View style={styles.hl} />
-      </AP>
+    <View style={[styles.wrap, isActive && styles.wrapActive]}>
+      {/* ── 主卡 ── */}
+      <View style={styles.main}>
+        {/* 封面 */}
+        <AP style={styles.art} onPress={press}>
+          <View style={[styles.gl, { backgroundColor: g }, isPlaying && styles.glOn]} />
+          <LinearGradient colors={[c, c + 'CC', c + '99']} start={{ x: 0.2, y: 0 }} end={{ x: 0.8, y: 1 }} style={styles.gr} />
+          <View style={styles.hl} />
+        </AP>
 
-      {/* 信息区 */}
-      <View style={styles.infoBg}>
-        <View style={styles.info}>
-          <View style={styles.txt}>
-            <ThemedText style={styles.tt} numberOfLines={1} lightColor={AppleColors.label} darkColor={AppleColors.label}>{station.title}</ThemedText>
-            <ThemedText style={styles.sh} numberOfLines={1} lightColor={AppleColors.secondaryLabel} darkColor={AppleColors.secondaryLabel}>{station.hostName}</ThemedText>
+        {/* 信息区 */}
+        <View style={styles.infoBg}>
+          <View style={styles.info}>
+            <View style={styles.txt}>
+              <ThemedText style={styles.tt} numberOfLines={1} lightColor={AppleColors.label} darkColor={AppleColors.label}>{station.title}</ThemedText>
+              <ThemedText style={styles.sh} numberOfLines={1} lightColor={AppleColors.secondaryLabel} darkColor={AppleColors.secondaryLabel}>{station.hostName}</ThemedText>
+            </View>
+            <Pressable onPress={() => setFav(f => !f)} hitSlop={10} style={({ pressed }) => [styles.fb, pressed && { opacity: 0.5 }]}>
+              <IconSymbol size={24} name={fav ? 'heart.fill' : 'heart'} color={fav ? AppleColors.accent : AppleColors.tertiaryLabel} />
+            </Pressable>
           </View>
-          <Pressable onPress={() => setFav(f => !f)} hitSlop={10} style={({ pressed }) => [styles.fb, pressed && { opacity: 0.5 }]}>
-            <IconSymbol size={19} name={fav ? 'heart.fill' : 'heart'} color={fav ? AppleColors.accent : AppleColors.tertiaryLabel} />
-          </Pressable>
-        </View>
 
-        {/* briefIntro — 卡片非展开态的一句话简介 */}
-        <ThemedText style={styles.desc} numberOfLines={1} lightColor={AppleColors.tertiaryLabel} darkColor={AppleColors.tertiaryLabel}>
-          {station.briefIntro}
-        </ThemedText>
+          <ThemedText style={styles.desc} numberOfLines={1} lightColor={AppleColors.tertiaryLabel} darkColor={AppleColors.tertiaryLabel}>
+            {station.briefIntro}
+          </ThemedText>
+        </View>
       </View>
 
-      {/* 抽屉 — 展开后显示 description */}
-      {isActive && <ExpandableDrawer station={station} expanded={open} onToggle={() => setOpen(o => !o)} />}
+      {/* ── Handle — 点击展开/收起 ── */}
+      {isActive && (
+        <View style={styles.handleWrap}>
+          <Pressable onPress={handleToggle} style={styles.handleBar}>
+            <View style={styles.handlePill} />
+          </Pressable>
+        </View>
+      )}
+
+      {/* ── 抽屉 — 向下展开 ── */}
+      {isActive && (
+        <ExpandableDrawer
+          station={station}
+          expanded={open}
+          onToggle={handleToggle}
+        />
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: AppleColors.surface, borderRadius: AppleRadius.card },
-  cardSh: { shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.45, shadowRadius: 28, elevation: 16 },
-  art: { position: 'relative', height: 310, overflow: 'hidden', borderTopLeftRadius: AppleRadius.card, borderTopRightRadius: AppleRadius.card },
+  wrap: {
+    backgroundColor: '#15120F',
+  },
+  wrapActive: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 25 },
+    shadowOpacity: 0.50,
+    shadowRadius: 60,
+    elevation: 20,
+  },
+
+  main: {
+    borderRadius: 22,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(36,34,30,0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+
+  art: {
+    position: 'relative',
+    height: 370,
+    overflow: 'hidden',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+  },
   gr: { ...StyleSheet.absoluteFillObject },
   gl: { position: 'absolute', top: -20, left: -20, right: -20, bottom: -20, borderRadius: 48, opacity: 0.35 },
   glOn: { opacity: 0.65 },
-  hl: { position: 'absolute', top: 16, left: '20%', width: '60%', height: '50%', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 999, transform: [{ scaleY: 0.4 }] },
-  infoBg: { backgroundColor: AppleColors.surface },
+  hl: {
+    position: 'absolute',
+    top: 16, left: '20%', width: '60%', height: '50%',
+    backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 999,
+    transform: [{ scaleY: 0.4 }],
+  },
+
+  infoBg: { backgroundColor: 'rgba(36,34,30,0.75)' },
   info: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.xl, paddingTop: Spacing.lg },
   txt: { flex: 1, gap: 3 },
   tt: { ...AppleType.title2 },
   sh: { ...AppleType.subhead },
   fb: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  desc: { ...AppleType.footnote, paddingHorizontal: Spacing.xl, paddingBottom: Spacing.lg, paddingTop: Spacing.xs },
+  desc: { ...AppleType.footnote, paddingHorizontal: Spacing.xl, paddingBottom: Spacing.sm, paddingTop: Spacing.xs },
+
+  // Handle
+  handleWrap: {
+    backgroundColor: 'rgba(36,34,30,0.75)',
+    paddingBottom: Spacing.md,
+    borderBottomLeftRadius: 22,
+    borderBottomRightRadius: 22,
+  },
+  handleBar: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 44,
+  },
+  handlePill: {
+    width: 36,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.42)',
+  },
 });

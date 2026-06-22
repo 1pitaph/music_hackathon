@@ -24,6 +24,8 @@ const MAPPING = {
   'backward.fill': 'skip-previous',
   'forward.fill': 'skip-next',
   'ellipsis': 'more-horiz',
+  'magnifyingglass': 'search',
+  'bell': 'notifications-none',
 } as IconMapping;
 
 export function IconSymbol({ name, size = 24, color, style }: {

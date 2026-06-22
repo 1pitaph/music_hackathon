@@ -13,9 +13,8 @@ const EASE_OUT = Easing.out(Easing.cubic);
 
 /** 叠卡 carousel — 主卡在流内自然撑高, peek 卡片绝对定位露出侧面 */
 export function CardStack({ stations, currentIndex, isPlaying, onPlayToggle, onPrev, onNext }: Props) {
-  const { width: sw, height: sh } = useWindowDimensions();
-  const cardW = sw * 0.86;
-  const minH = sh * 0.62;
+  const { width: sw } = useWindowDimensions();
+  const cardW = sw - 32;
   const tx = useSharedValue(0);
   const dragging = useSharedValue(false);
   const thresh = sw * SWIPE_RATIO;
@@ -45,7 +44,7 @@ export function CardStack({ stations, currentIndex, isPlaying, onPlayToggle, onP
   }));
 
   return (
-    <View style={[styles.con, { minHeight: minH }]}>
+    <View style={styles.con}>
       {/* 左 peek — 略往下偏移，适应更高的 header */}
       <View style={[styles.peek, styles.peekL, { width: cardW }]}>
         <StationCard station={stations[pi]} isActive={false} isPlaying={false} onPlayToggle={() => {}} />
