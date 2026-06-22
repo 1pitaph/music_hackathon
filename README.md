@@ -46,3 +46,13 @@ Run backend tests:
 cd apps/radio-agent
 pytest
 ```
+
+### Railway deployment
+
+Create a Railway service from this GitHub repository and point it at the backend app:
+
+- Root Directory: `/apps/radio-agent`
+- Config File: `/apps/radio-agent/railway.json`
+- Watch Paths: `/apps/radio-agent/**`
+
+The service starts with `python -m uvicorn radio_agent.api:app --host 0.0.0.0 --port ${PORT:-8000}` and uses `/healthz` as its health check. `OPENAI_API_KEY` is optional; without it, the agent returns deterministic mock recommendations.
