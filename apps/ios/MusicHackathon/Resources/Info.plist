@@ -24,6 +24,11 @@
 	<true/>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Airset uses Apple Music access to help you discover and manage music.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSMediaLibraryUsageDescription</key>
 	<string>Airset uses your media library access for playlist and library features.</string>
 	<key>NSMicrophoneUsageDescription</key>

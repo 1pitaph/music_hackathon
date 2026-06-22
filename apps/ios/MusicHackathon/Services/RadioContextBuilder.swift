@@ -1,6 +1,15 @@
 import Foundation
 
-struct RadioContextBuilder {
+protocol RadioContextBuilding {
+  func build(
+    seedTracks: [RadioSeedTrack],
+    memory: RadioMemory,
+    tuning: RadioTuning,
+    action: RadioRuntimeAction
+  ) async -> RadioRuntimeContext
+}
+
+struct RadioContextBuilder: RadioContextBuilding {
   private let catalogService: AppleMusicCatalogService
 
   init(catalogService: AppleMusicCatalogService = AppleMusicCatalogService()) {

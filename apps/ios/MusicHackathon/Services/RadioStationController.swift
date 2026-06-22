@@ -18,18 +18,20 @@ final class RadioStationController {
 
   @ObservationIgnored private let playbackController: PlaybackController
   @ObservationIgnored private let libraryService: AppleMusicLibraryService
-  @ObservationIgnored private let contextBuilder: RadioContextBuilder
+  @ObservationIgnored private let contextBuilder: any RadioContextBuilding
   @ObservationIgnored private let recommendationEngine: RadioRecommendationEngine
   @ObservationIgnored private let narrationProvider: DJNarrationProvider
+  @ObservationIgnored private let agentClient: any RadioAgentGenerating
   @ObservationIgnored private let stateStore: RadioStateStore
   @ObservationIgnored private var memory: RadioMemory
 
   init(
     playbackController: PlaybackController,
     libraryService: AppleMusicLibraryService = AppleMusicLibraryService(),
-    contextBuilder: RadioContextBuilder = RadioContextBuilder(),
+    contextBuilder: any RadioContextBuilding = RadioContextBuilder(),
     recommendationEngine: RadioRecommendationEngine = RadioRecommendationEngine(),
     narrationProvider: DJNarrationProvider = LocalDJNarrationProvider(),
+    agentClient: any RadioAgentGenerating = RadioAgentClient(),
     stateStore: RadioStateStore = RadioStateStore()
   ) {
     self.playbackController = playbackController
@@ -37,6 +39,7 @@ final class RadioStationController {
     self.contextBuilder = contextBuilder
     self.recommendationEngine = recommendationEngine
     self.narrationProvider = narrationProvider
+    self.agentClient = agentClient
     self.stateStore = stateStore
 
     let loadedMemory = stateStore.loadMemory()
@@ -211,7 +214,7 @@ final class RadioStationController {
     await refreshRecommendations(action: .tune, keepExistingQueue: currentItem != nil)
   }
 
-  private func refreshRecommendations(
+  func refreshRecommendations(
     action: RadioRuntimeAction,
     keepExistingQueue: Bool = false
   ) async {
@@ -227,9 +230,8 @@ final class RadioStationController {
       tuning: tuning,
       action: action
     )
-    stationIntro = narrationProvider.stationIntro(for: context)
 
-    let newQueue = recommendationEngine.makeQueue(from: context, limit: 14)
+    let newQueue = await makeQueue(from: context, limit: 14)
     if keepExistingQueue {
       let existingKeys = Set(queue.map { $0.track.radioIdentity })
       queue.append(contentsOf: newQueue.filter { !existingKeys.contains($0.track.radioIdentity) })
@@ -238,6 +240,75 @@ final class RadioStationController {
     }
 
     isBuildingStation = false
+  }
+
+  private func makeQueue(from context: RadioRuntimeContext, limit: Int) async -> [RadioQueueItem] {
+    do {
+      let generation = try await agentClient.generateQueue(from: context, limit: limit)
+      let agentQueue = try queue(from: generation, context: context)
+      stationIntro = generation.stationIntro
+      return agentQueue
+    } catch {
+      stationIntro = narrationProvider.stationIntro(for: context)
+      return recommendationEngine.makeQueue(from: context, limit: limit)
+    }
+  }
+
+  private func queue(
+    from generation: RadioAgentGeneration,
+    context: RadioRuntimeContext
+  ) throws -> [RadioQueueItem] {
+    guard !generation.items.isEmpty else {
+      throw RadioAgentMappingError.emptyQueue
+    }
+
+    let candidates = candidateItems(for: context)
+    var result: [RadioQueueItem] = []
+    var seenKeys: Set<String> = []
+
+    for generatedItem in generation.items {
+      guard let candidate = candidates[generatedItem.radioIdentity] else {
+        throw RadioAgentMappingError.unknownTrack(generatedItem.radioIdentity)
+      }
+
+      guard !seenKeys.contains(generatedItem.radioIdentity) else { continue }
+      seenKeys.insert(generatedItem.radioIdentity)
+      result.append(
+        RadioQueueItem(
+          track: candidate.track,
+          source: candidate.source,
+          score: generatedItem.score,
+          reason: generatedItem.reason
+        )
+      )
+    }
+
+    guard !result.isEmpty else {
+      throw RadioAgentMappingError.emptyQueue
+    }
+
+    return result
+  }
+
+  private func candidateItems(for context: RadioRuntimeContext) -> [String: RadioQueueItem] {
+    var result: [String: RadioQueueItem] = [:]
+
+    for seedTrack in context.seedTracks {
+      let key = seedTrack.track.radioIdentity
+      guard result[key] == nil else { continue }
+      result[key] = RadioQueueItem(
+        track: seedTrack.track,
+        source: .playlist(id: seedTrack.playlistID, name: seedTrack.playlistName),
+        score: 0,
+        reason: ""
+      )
+    }
+
+    for candidate in context.catalogCandidates where result[candidate.track.radioIdentity] == nil {
+      result[candidate.track.radioIdentity] = candidate
+    }
+
+    return result
   }
 
   private func loadSeedTracks() async throws {
@@ -250,4 +321,9 @@ final class RadioStationController {
 
     seedTracks = try await libraryService.seedTracks(for: selected)
   }
+}
+
+private enum RadioAgentMappingError: Error {
+  case emptyQueue
+  case unknownTrack(String)
 }

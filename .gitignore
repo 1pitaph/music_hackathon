@@ -10,6 +10,12 @@ DerivedData/
 .build/
 .swiftpm/
 
+# Python
+__pycache__/
+.pytest_cache/
+*.egg-info/
+.venv/
+
 # JavaScript workspaces, when web/admin apps are added later.
 node_modules/
 .turbo/

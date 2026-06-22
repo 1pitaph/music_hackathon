@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "radio-agent"
+version = "0.1.0"
+description = "LangGraph radio generation agent for Music Hackathon"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.116.0",
+  "httpx>=0.28.0",
+  "langchain-openai>=0.3.0",
+  "langgraph>=1.0.0",
+  "pydantic>=2.11.0",
+  "python-dotenv>=1.1.0",
+  "uvicorn>=0.35.0",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.4.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
