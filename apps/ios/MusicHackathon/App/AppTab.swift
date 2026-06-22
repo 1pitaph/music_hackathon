@@ -2,7 +2,6 @@ import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable {
   case radio
-  case island
   case mine
 
   var id: String { rawValue }
@@ -11,8 +10,6 @@ enum AppTab: String, CaseIterable, Identifiable {
     switch self {
     case .radio:
       "Radio"
-    case .island:
-      "Island"
     case .mine:
       "Mine"
     }
@@ -20,7 +17,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 
   var prefersHiddenNavigationBar: Bool {
     switch self {
-    case .radio, .island:
+    case .radio:
       true
     case .mine:
       false
@@ -32,8 +29,6 @@ enum AppTab: String, CaseIterable, Identifiable {
     switch self {
     case .radio:
       DiscoverView()
-    case .island:
-      IslandView()
     case .mine:
       SettingsView()
     }
@@ -44,8 +39,6 @@ enum AppTab: String, CaseIterable, Identifiable {
     switch self {
     case .radio:
       Label("Radio", systemImage: "dot.radiowaves.left.and.right")
-    case .island:
-      Label("Island", systemImage: "map.fill")
     case .mine:
       Label("Mine", systemImage: "person.crop.circle")
     }

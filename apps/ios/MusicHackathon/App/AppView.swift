@@ -7,7 +7,7 @@ struct AppView: View {
   var body: some View {
     tabView
       .tint(.cyan)
-      .preferredColorScheme(selectedTab == .island ? .light : .dark)
+      .preferredColorScheme(.dark)
   }
 
   @ViewBuilder
