@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from radio_agent.graph import generate_radio
 from radio_agent.schemas import RadioGenerateRequest, RadioGenerateResponse
 
 app = FastAPI(title="Airset Radio Agent", version="0.1.0")
@@ -20,4 +19,6 @@ def healthz() -> dict[str, str]:
 
 @app.post("/v1/radio/generate", response_model=RadioGenerateResponse)
 def generate(request: RadioGenerateRequest) -> RadioGenerateResponse:
+  from radio_agent.graph import generate_radio
+
   return generate_radio(request)
