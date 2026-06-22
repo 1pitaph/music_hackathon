@@ -55,4 +55,4 @@ Create a Railway service from this GitHub repository and point it at the backend
 - Config File: `/apps/radio-agent/railway.json`
 - Watch Paths: `/apps/radio-agent/**`
 
-The service starts with `python -m uvicorn radio_agent.api:app --host 0.0.0.0 --port ${PORT:-8000}` and uses `/healthz` as its health check. `OPENAI_API_KEY` is optional; without it, the agent returns deterministic mock recommendations.
+Railway builds the service from `apps/radio-agent/Dockerfile`, starts it with `sh ./start.sh`, and uses `/` as its health check path. `OPENAI_API_KEY` is optional; without it, the agent returns deterministic mock recommendations.
