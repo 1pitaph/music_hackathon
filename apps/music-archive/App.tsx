@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -9,14 +9,22 @@ import MineScreen from './src/screens/MineScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import MiniPlayer from './src/components/player/MiniPlayer';
 import BottomTabBar, { TabKey } from './src/components/navigation/BottomTabBar';
-import { mockUserProfile, UserProfile } from './src/data/mockData';
+import { UserProfile } from './src/data/mockData';
+import { getUserProfile } from './src/services/musicService';
 
 type ViewState = 'main' | 'settings';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabKey>('mine');
   const [view, setView] = useState<ViewState>('main');
-  const [profile, setProfile] = useState<UserProfile>(mockUserProfile);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+
+  useEffect(() => {
+    getUserProfile().then(setProfile);
+  }, []);
+
+  // Wait for profile to load (mock data resolves instantly — no visible flash)
+  if (!profile) return null;
 
   // Settings takes over the full screen
   if (view === 'settings') {
