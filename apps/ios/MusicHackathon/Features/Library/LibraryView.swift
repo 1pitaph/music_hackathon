@@ -2,33 +2,28 @@ import SwiftUI
 
 struct LibraryView: View {
   @Environment(MusicAuthorizationService.self) private var musicAuthorization
-
-  @State private var playlists: [AppleMusicPlaylistSummary] = []
-  @State private var isLoadingPlaylists = false
-  @State private var errorMessage: String?
-
-  private let catalogService = AppleMusicCatalogService()
+  @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
 
   var body: some View {
     List {
       Section("Playlists") {
-        if playlists.isEmpty {
-          ForEach(MockCatalog.playlists, id: \.self) { playlist in
-            NavigationLink {
-              PlaylistDetailView(title: playlist, subtitle: "Connect Apple Music to load this playlist.")
-            } label: {
-              Label(playlist, systemImage: "music.note.list")
-            }
-          }
+        if appleMusicLibrary.playlists.isEmpty {
+          libraryStateRow
         } else {
-          ForEach(playlists) { playlist in
+          ForEach(appleMusicLibrary.playlists) { playlist in
             NavigationLink {
-              PlaylistDetailView(
-                title: playlist.name,
-                subtitle: playlist.curatorName ?? "Apple Music library"
-              )
+              PlaylistDetailView(playlist: playlist)
             } label: {
-              Label(playlist.name, systemImage: "music.note.list")
+              HStack(spacing: 12) {
+                PlaylistArtworkThumbnail(playlist: playlist, size: 42)
+
+                VStack(alignment: .leading, spacing: 3) {
+                  Text(playlist.name)
+                  Text(playlist.curatorName ?? "\(playlist.tracks.count) songs")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+              }
             }
           }
         }
@@ -45,7 +40,7 @@ struct LibraryView: View {
         Button {
           Task {
             await musicAuthorization.requestAccess()
-            await loadPlaylists()
+            await appleMusicLibrary.refresh(authorizationStatus: musicAuthorization.status)
           }
         } label: {
           Label(
@@ -57,14 +52,14 @@ struct LibraryView: View {
 
         Button {
           Task {
-            await loadPlaylists()
+            await refreshLibrary()
           }
         } label: {
-          Label(isLoadingPlaylists ? "Loading" : "Refresh Playlists", systemImage: "arrow.clockwise")
+          Label(appleMusicLibrary.state.isLoading ? "Loading" : "Refresh Playlists", systemImage: "arrow.clockwise")
         }
-        .disabled(isLoadingPlaylists)
+        .disabled(appleMusicLibrary.state.isLoading)
 
-        if let errorMessage {
+        if let errorMessage = appleMusicLibrary.lastErrorMessage {
           Text(errorMessage)
             .font(.footnote)
             .foregroundStyle(.secondary)
@@ -74,37 +69,163 @@ struct LibraryView: View {
     .listStyle(.insetGrouped)
     .task {
       await musicAuthorization.refreshAccessState()
-      await loadPlaylists()
+      await appleMusicLibrary.loadIfNeeded(authorizationStatus: musicAuthorization.status)
     }
   }
 
-  private func loadPlaylists() async {
-    guard !isLoadingPlaylists else { return }
-    guard musicAuthorization.status == .authorized else { return }
-
-    isLoadingPlaylists = true
-    errorMessage = nil
-
-    do {
-      playlists = try await catalogService.libraryPlaylists()
-    } catch {
-      errorMessage = error.localizedDescription
+  @ViewBuilder
+  private var libraryStateRow: some View {
+    switch appleMusicLibrary.state {
+    case .idle, .loading:
+      ProgressView("Loading Apple Music")
+    case .needsAuthorization:
+      Label("Connect Apple Music to load playlists", systemImage: "person.badge.key")
+    case .empty:
+      Label("No Apple Music playlists found", systemImage: "music.note.list")
+    case let .failed(message):
+      Label(message, systemImage: "exclamationmark.triangle")
+    case .loaded:
+      Label("No playlists with playable songs found", systemImage: "music.note.list")
     }
+  }
 
-    isLoadingPlaylists = false
+  private func refreshLibrary() async {
+    await musicAuthorization.refreshAccessState()
+    await appleMusicLibrary.refresh(authorizationStatus: musicAuthorization.status)
   }
 }
 
 private struct PlaylistDetailView: View {
-  let title: String
-  let subtitle: String
+  let playlist: AppleMusicPlaylistSnapshot
 
   var body: some View {
-    ContentUnavailableView(
-      title,
-      systemImage: "music.note.list",
-      description: Text(subtitle)
-    )
+    List {
+      Section {
+        HStack(spacing: 14) {
+          PlaylistArtworkThumbnail(playlist: playlist, size: 72)
+
+          VStack(alignment: .leading, spacing: 5) {
+            Text(playlist.name)
+              .font(.headline)
+            Text(playlist.curatorName ?? "Apple Music library")
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+            Text("\(playlist.tracks.count) songs")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+          }
+        }
+        .padding(.vertical, 8)
+      }
+
+      Section("Songs") {
+        if playlist.tracks.isEmpty {
+          ContentUnavailableView(
+            "No songs loaded",
+            systemImage: "music.note",
+            description: Text("Refresh Apple Music to load playable tracks.")
+          )
+        } else {
+          ForEach(playlist.tracks) { track in
+            HStack(spacing: 12) {
+              TrackArtworkThumbnail(track: track, size: 40)
+
+              VStack(alignment: .leading, spacing: 3) {
+                Text(track.title)
+                Text("\(track.artist) • \(track.album)")
+                  .font(.footnote)
+                  .foregroundStyle(.secondary)
+                  .lineLimit(1)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+private struct PlaylistArtworkThumbnail: View {
+  let playlist: AppleMusicPlaylistSnapshot
+  let size: CGFloat
+
+  var body: some View {
+    Group {
+      if let artworkURL = playlist.artworkURL ?? playlist.tracks.first?.artworkURL {
+        AsyncImage(url: artworkURL) { phase in
+          switch phase {
+          case let .success(image):
+            image
+              .resizable()
+              .scaledToFill()
+          case .empty:
+            fallback
+              .overlay {
+                ProgressView()
+              }
+          case .failure:
+            fallback
+          @unknown default:
+            fallback
+          }
+        }
+      } else {
+        fallback
+      }
+    }
+    .frame(width: size, height: size)
+    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    .accessibilityHidden(true)
+  }
+
+  private var fallback: some View {
+    ZStack {
+      Color(hex: ArchiveStationItem.colorHex(for: playlist.id))
+      Image(systemName: "music.note.list")
+        .foregroundStyle(.white.opacity(0.7))
+    }
+  }
+}
+
+private struct TrackArtworkThumbnail: View {
+  let track: Track
+  let size: CGFloat
+
+  var body: some View {
+    Group {
+      if let artworkURL = track.artworkURL {
+        AsyncImage(url: artworkURL) { phase in
+          switch phase {
+          case let .success(image):
+            image
+              .resizable()
+              .scaledToFill()
+          case .empty:
+            fallback
+              .overlay {
+                ProgressView()
+              }
+          case .failure:
+            fallback
+          @unknown default:
+            fallback
+          }
+        }
+      } else {
+        fallback
+      }
+    }
+    .frame(width: size, height: size)
+    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+    .accessibilityHidden(true)
+  }
+
+  private var fallback: some View {
+    ZStack {
+      Color(hex: ArchiveStationItem.colorHex(for: track.radioIdentity))
+      Image(systemName: track.artworkSystemName)
+        .foregroundStyle(.white.opacity(0.7))
+    }
   }
 }
 
@@ -114,4 +235,5 @@ private struct PlaylistDetailView: View {
       .navigationTitle("Library")
   }
   .environment(MusicAuthorizationService())
+  .environment(AppleMusicLibraryStore())
 }

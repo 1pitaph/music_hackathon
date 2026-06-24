@@ -5,11 +5,21 @@ struct MusicHackathonApp: App {
   @State private var playbackController: PlaybackController
   @State private var radioStationController: RadioStationController
   @State private var musicAuthorization = MusicAuthorizationService()
+  @State private var appleMusicLibraryStore: AppleMusicLibraryStore
 
   init() {
     let playbackController = PlaybackController()
+    let appleMusicLibraryStore = AppleMusicLibraryStore()
     _playbackController = State(initialValue: playbackController)
-    _radioStationController = State(initialValue: RadioStationController(playbackController: playbackController))
+    _appleMusicLibraryStore = State(initialValue: appleMusicLibraryStore)
+    _radioStationController = State(
+      initialValue: RadioStationController(
+        playbackController: playbackController,
+        libraryTrackProvider: {
+          appleMusicLibraryStore.candidateTracksForRadio()
+        }
+      )
+    )
   }
 
   var body: some Scene {
@@ -18,6 +28,7 @@ struct MusicHackathonApp: App {
         .environment(playbackController)
         .environment(radioStationController)
         .environment(musicAuthorization)
+        .environment(appleMusicLibraryStore)
     }
   }
 }

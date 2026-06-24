@@ -5,6 +5,8 @@ struct SettingsView: View {
   @Environment(MusicAuthorizationService.self) private var musicAuthorization
   @Environment(RadioStationController.self) private var radioStation
 
+  @AppStorage(RadioHostVoiceSettings.speakerIDKey) private var selectedHostSpeakerID = ""
+
   @State private var autoPlayNextStation = false
   @State private var backgroundPlay = false
   @State private var publicStation = false
@@ -15,6 +17,7 @@ struct SettingsView: View {
       appleMusicSection
       playbackSection
       backendStationSection
+      speechVoiceSection
       dataSourceSection
       privacySection
       localMemorySection
@@ -24,6 +27,7 @@ struct SettingsView: View {
     .task {
       await musicAuthorization.refreshAccessState()
       await radioStation.refreshMemoryStatus()
+      await loadSpeechVoicesIfNeeded()
     }
   }
 
@@ -94,6 +98,50 @@ struct SettingsView: View {
     }
   }
 
+  private var speechVoiceSection: some View {
+    Section("主持人声音") {
+      LabeledContent("当前声音", value: selectedHostVoiceName)
+
+      if let catalog = radioStation.speechVoiceCatalog, !catalog.voices.isEmpty {
+        Picker("声音", selection: $selectedHostSpeakerID) {
+          ForEach(catalog.voices) { voice in
+            Text(voice.name).tag(voice.id)
+          }
+
+          if !selectedHostSpeakerID.isEmpty,
+             catalog.voice(for: selectedHostSpeakerID) == nil {
+            Text(selectedHostSpeakerID).tag(selectedHostSpeakerID)
+          }
+        }
+
+        if let voice = selectedSpeechVoice {
+          LabeledContent("风格", value: voice.style.isEmpty ? "默认" : voice.style)
+          LabeledContent("模型", value: voice.model)
+        }
+      } else if radioStation.isLoadingSpeechVoices {
+        ProgressView("加载可用声音")
+      }
+
+      Button {
+        Task {
+          await loadSpeechVoices()
+        }
+      } label: {
+        Label(
+          radioStation.isLoadingSpeechVoices ? "刷新中" : "刷新可用声音",
+          systemImage: "arrow.triangle.2.circlepath"
+        )
+      }
+      .disabled(radioStation.isLoadingSpeechVoices)
+
+      if let message = radioStation.speechVoicesErrorMessage {
+        Text(message)
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+
   private var dataSourceSection: some View {
     Section("数据来源") {
       LabeledContent("本 App 播放记录", value: "\(radioStation.memoryEventCount) 条")
@@ -140,6 +188,43 @@ struct SettingsView: View {
       LabeledContent("版本", value: "Music Archive v1.0.0")
       LabeledContent("隐私政策", value: "准备中")
       LabeledContent("用户协议", value: "准备中")
+    }
+  }
+
+  private var selectedSpeechVoice: RadioSpeechVoice? {
+    guard let catalog = radioStation.speechVoiceCatalog else { return nil }
+    if let voice = catalog.voice(for: selectedHostSpeakerID) {
+      return voice
+    }
+    return catalog.voice(for: catalog.defaultSpeaker)
+  }
+
+  private var selectedHostVoiceName: String {
+    if let voice = selectedSpeechVoice {
+      return voice.name
+    }
+    if !selectedHostSpeakerID.isEmpty {
+      return selectedHostSpeakerID
+    }
+    return "后端默认"
+  }
+
+  private func loadSpeechVoicesIfNeeded() async {
+    guard radioStation.speechVoiceCatalog == nil else { return }
+    await loadSpeechVoices()
+  }
+
+  private func loadSpeechVoices() async {
+    await radioStation.refreshSpeechVoices()
+    syncSelectedHostSpeaker()
+  }
+
+  private func syncSelectedHostSpeaker() {
+    guard let catalog = radioStation.speechVoiceCatalog, !catalog.voices.isEmpty else { return }
+    if selectedHostSpeakerID.isEmpty {
+      selectedHostSpeakerID = catalog.defaultSpeaker
+    } else if catalog.voice(for: selectedHostSpeakerID) == nil {
+      selectedHostSpeakerID = catalog.defaultSpeaker
     }
   }
 }

@@ -7,7 +7,7 @@ import json
 import os
 import tempfile
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import httpx
@@ -18,6 +18,7 @@ from radio_agent.schemas import (
   RadioSpeechSegment,
   RadioSpeechSynthesisResult,
 )
+from radio_agent.voices import resolve_speech_speaker
 
 DEFAULT_OPENAI_SPEECH_MODEL = "gpt-4o-mini-tts"
 DEFAULT_OPENAI_SPEECH_VOICE = "coral"
@@ -81,6 +82,9 @@ def synthesize_speech_segments(
   elif not _speech_is_configured():
     diagnostics.append("Speech synthesis is not configured; returning text-only speech metadata.")
   elif context.provider == "volcengine":
+    speaker, speaker_diagnostics = resolve_speech_speaker(context.voice)
+    context = replace(context, voice=speaker)
+    diagnostics.extend(speaker_diagnostics)
     volcengine_settings, settings_diagnostics = _volcengine_settings(context)
     diagnostics.extend(settings_diagnostics)
   else:

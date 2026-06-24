@@ -105,6 +105,23 @@ class RadioSpeechAudioConfig(BaseModel):
   emotion: str | None = None
 
 
+class RadioSpeechVoice(BaseModel):
+  id: str
+  name: str
+  language: str = "zh-cn"
+  gender: str = ""
+  style: str = ""
+  resourceId: str = ""
+  model: str = ""
+
+
+class RadioSpeechVoiceCatalog(BaseModel):
+  defaultSpeaker: str
+  resourceId: str = "seed-tts-2.0"
+  model: str = "seed-tts-2.0-standard"
+  voices: list[RadioSpeechVoice] = Field(default_factory=list)
+
+
 class RadioEntryCopy(BaseModel):
   id: str = "station-intro"
   text: str

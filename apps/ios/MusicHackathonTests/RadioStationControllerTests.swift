@@ -23,6 +23,77 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertNil(controller.errorMessage)
   }
 
+  func testLoadCurrentStationSendsSelectedHostSpeaker() async {
+    let station = makeStation(items: [
+      makeQueueItem(title: "One", appleMusicID: "one")
+    ])
+    let stationClient = CapturingStationClient(station: station)
+    let controller = RadioStationController(
+      playbackController: MockPlaybackController(),
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore(),
+      hostSpeakerIDProvider: { "zh_female_xiaohe_uranus_bigtts" }
+    )
+
+    await controller.loadCurrentStation()
+
+    XCTAssertEqual(stationClient.capturedContext?.speechAudio.provider, "volcengine")
+    XCTAssertEqual(stationClient.capturedContext?.speechAudio.speaker, "zh_female_xiaohe_uranus_bigtts")
+    XCTAssertEqual(stationClient.capturedContext?.speechAudio.resourceId, "seed-tts-2.0")
+  }
+
+  func testLoadCurrentStationUsesLibraryTracksForGenerationCandidates() async {
+    let station = makeStation(items: [
+      makeQueueItem(title: "Generated", appleMusicID: "generated")
+    ])
+    let stationClient = CapturingStationClient(station: station)
+    let libraryTrack = makeTrack(title: "Library Candidate", appleMusicID: "library-candidate")
+    let controller = RadioStationController(
+      playbackController: MockPlaybackController(),
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore(),
+      libraryTrackProvider: { [libraryTrack] }
+    )
+
+    await controller.loadCurrentStation()
+
+    XCTAssertEqual(stationClient.capturedContext?.seedTracks.first?.title, "Library Candidate")
+    XCTAssertEqual(stationClient.capturedContext?.catalogCandidates.first?.appleMusicID, "library-candidate")
+  }
+
+  func testRefreshSpeechVoicesStoresCatalog() async {
+    let stationClient = CapturingStationClient(
+      station: makeStation(items: [makeQueueItem(title: "One", appleMusicID: "one")]),
+      voices: RadioSpeechVoiceCatalog(
+        defaultSpeaker: "voice-a",
+        resourceId: "seed-tts-2.0",
+        model: "seed-tts-2.0-standard",
+        voices: [
+          RadioSpeechVoice(
+            id: "voice-a",
+            name: "Voice A",
+            language: "zh-cn",
+            gender: "female",
+            style: "Host",
+            resourceId: "seed-tts-2.0",
+            model: "seed-tts-2.0-standard"
+          )
+        ]
+      )
+    )
+    let controller = RadioStationController(
+      playbackController: MockPlaybackController(),
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.refreshSpeechVoices()
+
+    XCTAssertEqual(controller.speechVoiceCatalog?.defaultSpeaker, "voice-a")
+    XCTAssertEqual(controller.speechVoiceCatalog?.voices.first?.name, "Voice A")
+    XCTAssertNil(controller.speechVoicesErrorMessage)
+  }
+
   func testStartStationPlaysFirstBackendTrackAndKeepsUpNext() async {
     let station = makeStation(items: [
       makeQueueItem(title: "One", appleMusicID: "one", handoffText: "Welcome into One."),
@@ -244,18 +315,22 @@ final class RadioStationControllerTests: XCTestCase {
   private func makeQueueItem(title: String, appleMusicID: String, handoffText: String? = nil) -> RadioQueueItem {
     RadioQueueItem(
       id: appleMusicID,
-      track: Track(
-        title: title,
-        artist: "Artist",
-        album: "Album",
-        mood: "Radio",
-        duration: 210,
-        artworkSystemName: "music.note",
-        appleMusicID: appleMusicID
-      ),
+      track: makeTrack(title: title, appleMusicID: appleMusicID),
       sourceTitle: "Backend",
       reason: "Programmed by backend.",
       handoffText: handoffText
+    )
+  }
+
+  private func makeTrack(title: String, appleMusicID: String) -> Track {
+    Track(
+      title: title,
+      artist: "Artist",
+      album: "Album",
+      mood: "Radio",
+      duration: 210,
+      artworkSystemName: "music.note",
+      appleMusicID: appleMusicID
     )
   }
 
@@ -310,6 +385,30 @@ private struct MockStationClient: RadioStationFetching {
 
   func fetchCurrentStation() async throws -> RadioStation {
     try result.get()
+  }
+}
+
+private final class CapturingStationClient: RadioStationFetching {
+  let station: RadioStation
+  let voices: RadioSpeechVoiceCatalog
+  var capturedContext: RadioStationGenerationContext?
+
+  init(station: RadioStation, voices: RadioSpeechVoiceCatalog = .fallback) {
+    self.station = station
+    self.voices = voices
+  }
+
+  func fetchCurrentStation() async throws -> RadioStation {
+    station
+  }
+
+  func generateStation(context: RadioStationGenerationContext) async throws -> RadioStationResult {
+    capturedContext = context
+    return RadioStationResult(station: station)
+  }
+
+  func fetchSpeechVoices() async throws -> RadioSpeechVoiceCatalog {
+    voices
   }
 }
 

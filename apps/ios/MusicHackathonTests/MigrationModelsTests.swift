@@ -30,4 +30,85 @@ final class MigrationModelsTests: XCTestCase {
     XCTAssertEqual(first, second)
     XCTAssertTrue(ArchiveStationItem.coverPalette.contains(first))
   }
+
+  func testArchiveProfileBuildsMineDataFromAppleMusicLibrary() {
+    let artworkURL = URL(string: "https://example.com/artwork.jpg")!
+    let firstTrack = makeTrack(
+      appleMusicID: "song-1",
+      title: "First Song",
+      artist: "Artist A",
+      album: "Album A",
+      duration: 240,
+      artworkURL: artworkURL
+    )
+    let secondTrack = makeTrack(
+      appleMusicID: "song-2",
+      title: "Second Song",
+      artist: "Artist B",
+      album: "Album B",
+      duration: 300,
+      artworkURL: nil
+    )
+    let playlist = AppleMusicPlaylistSnapshot(
+      id: "playlist-1",
+      name: "Road Trip",
+      curatorName: "Apple Music",
+      artworkURL: artworkURL,
+      tracks: [firstTrack, secondTrack]
+    )
+
+    let profile = ArchiveProfile.appleMusic(
+      base: .empty,
+      playlists: [playlist],
+      tracks: [firstTrack]
+    )
+
+    XCTAssertEqual(profile.stats.stationsCount, 1)
+    XCTAssertEqual(profile.stats.likesCount, 2)
+    XCTAssertEqual(profile.published.map(\.name), ["Road Trip"])
+    XCTAssertEqual(profile.published.first?.artworkURL, artworkURL)
+    XCTAssertEqual(profile.published.first?.tracks.map(\.title), ["First Song", "Second Song"])
+    XCTAssertEqual(profile.recentlyPlayed.map(\.name), ["First Song", "Second Song"])
+    XCTAssertEqual(profile.saved.map(\.name), ["Artist A", "Artist B"])
+    XCTAssertTrue(profile.bio.contains("2 首歌"))
+  }
+
+  func testArchiveProfileUsesLibrarySummaryWhenNoPlaylistsExist() {
+    let track = makeTrack(
+      appleMusicID: "song-1",
+      title: "Loose Song",
+      artist: "Artist A",
+      album: "Singles",
+      duration: 180,
+      artworkURL: URL(string: "https://example.com/song.jpg")
+    )
+
+    let profile = ArchiveProfile.appleMusic(base: .empty, playlists: [], tracks: [track])
+
+    XCTAssertEqual(profile.stats.stationsCount, 0)
+    XCTAssertEqual(profile.stats.likesCount, 1)
+    XCTAssertEqual(profile.published.first?.name, "Apple Music Library")
+    XCTAssertEqual(profile.published.first?.artworkURL, track.artworkURL)
+    XCTAssertEqual(profile.recentlyPlayed.first?.name, "Loose Song")
+  }
+
+  private func makeTrack(
+    appleMusicID: String,
+    title: String,
+    artist: String,
+    album: String,
+    duration: TimeInterval,
+    artworkURL: URL?
+  ) -> Track {
+    Track(
+      title: title,
+      artist: artist,
+      album: album,
+      mood: "Library",
+      duration: duration,
+      artworkSystemName: "music.note",
+      artworkURL: artworkURL,
+      appleMusicID: appleMusicID
+    )
+  }
 }

@@ -137,6 +137,61 @@ def test_synthesize_speech_endpoint_returns_matching_segment_audio(monkeypatch):
   assert all(segment["audio"]["cacheKey"].startswith("speech_") for segment in body["segments"])
 
 
+def test_speech_voices_returns_configured_catalog(monkeypatch):
+  monkeypatch.setenv("VOLCENGINE_TTS_RESOURCE_ID", "seed-tts-2.0")
+  monkeypatch.setenv("VOLCENGINE_TTS_MODEL", "seed-tts-2.0-standard")
+  monkeypatch.setenv("VOLCENGINE_TTS_SPEAKER", "voice-b")
+  monkeypatch.setenv("VOLCENGINE_TTS_ALLOWED_SPEAKERS", "voice-b,voice-c")
+  monkeypatch.setenv("VOLCENGINE_TTS_VOICES_JSON", json.dumps([
+    {
+      "id": "voice-a",
+      "name": "Voice A",
+      "language": "zh-cn",
+      "gender": "female",
+      "style": "Not allowed",
+      "resourceId": "seed-tts-2.0",
+      "model": "seed-tts-2.0-standard",
+    },
+    {
+      "id": "voice-b",
+      "name": "Voice B",
+      "language": "zh-cn",
+      "gender": "male",
+      "style": "Host",
+      "resourceId": "seed-tts-2.0",
+      "model": "seed-tts-2.0-standard",
+    },
+  ]))
+  client = TestClient(app)
+
+  response = client.get("/v1/radio/speech/voices")
+
+  assert response.status_code == 200
+  body = response.json()
+  assert body["defaultSpeaker"] == "voice-b"
+  assert body["resourceId"] == "seed-tts-2.0"
+  assert [voice["id"] for voice in body["voices"]] == ["voice-b", "voice-c"]
+  assert body["voices"][0]["name"] == "Voice B"
+  assert body["voices"][1]["style"] == "自定义音色"
+
+
+def test_speech_voices_ignores_legacy_openai_model(monkeypatch):
+  monkeypatch.delenv("VOLCENGINE_TTS_MODEL", raising=False)
+  monkeypatch.setenv("SPEECH_MODEL", "gpt-4o-mini-tts")
+  monkeypatch.setenv("VOLCENGINE_TTS_CLUSTER", "seed-tts-2.0")
+  monkeypatch.setenv("VOLCENGINE_TTS_VOICE_TYPE", "voice-legacy")
+  client = TestClient(app)
+
+  response = client.get("/v1/radio/speech/voices")
+
+  assert response.status_code == 200
+  body = response.json()
+  assert body["defaultSpeaker"] == "voice-legacy"
+  assert body["resourceId"] == "seed-tts-2.0"
+  assert body["model"] == "seed-tts-2.0-standard"
+  assert body["voices"][0]["id"] == "voice-legacy"
+
+
 def test_volcengine_speech_synthesis_writes_audio_and_reuses_cache(monkeypatch, tmp_path):
   _configure_volcengine_env(monkeypatch, tmp_path)
   audio_bytes = b"ID3fake-mp3"
@@ -210,6 +265,45 @@ def test_volcengine_speech_synthesis_writes_audio_and_reuses_cache(monkeypatch, 
   assert cached_results[0].audio.audioURL == audio.audioURL
 
 
+def test_volcengine_speech_synthesis_rejects_unallowed_speaker(monkeypatch, tmp_path):
+  _configure_volcengine_env(monkeypatch, tmp_path)
+  monkeypatch.setenv("VOLCENGINE_TTS_ALLOWED_SPEAKERS", "zh_female_test")
+  audio_bytes = b"ID3safe-speaker"
+  calls = []
+
+  def fake_stream(method, url, *, headers, json, timeout):
+    calls.append(json)
+    return _FakeVolcengineStream(
+      200,
+      [
+        {"code": 0, "data": base64.b64encode(audio_bytes).decode("ascii")},
+        {"code": 20000000, "message": "finished"},
+      ],
+    )
+
+  monkeypatch.setattr(speech.httpx, "stream", fake_stream)
+
+  results, diagnostics = speech.synthesize_speech_segments(
+    [
+      RadioSpeechSegment(
+        id="station-intro",
+        kind="stationIntro",
+        text="Welcome in.",
+        displayText="Welcome in.",
+      )
+    ],
+    RadioSpeechAudioConfig(
+      enabled=True,
+      provider="volcengine",
+      speaker="not_allowed_speaker",
+    ),
+  )
+
+  assert results[0].audio.status == "ready"
+  assert calls[0]["req_params"]["speaker"] == "zh_female_test"
+  assert "Requested speech speaker 'not_allowed_speaker' is not allowed" in " ".join(diagnostics)
+
+
 def test_volcengine_speech_synthesis_failure_does_not_leak_secret(monkeypatch, tmp_path):
   _configure_volcengine_env(monkeypatch, tmp_path)
 
@@ -267,7 +361,6 @@ def test_volcengine_speech_synthesis_reports_missing_configuration(monkeypatch, 
   assert results[0].audio.status == "unavailable"
   assert "Volcengine TTS is missing required configuration" in " ".join(diagnostics)
   assert "VOLCENGINE_TTS_API_KEY" in " ".join(diagnostics)
-  assert "VOLCENGINE_TTS_SPEAKER" in " ".join(diagnostics)
 
 
 def test_generate_station_can_attach_volcengine_speech_audio(monkeypatch, tmp_path):

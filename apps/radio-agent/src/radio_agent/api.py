@@ -13,6 +13,7 @@ from radio_agent.schemas import (
   RadioSpeech,
   RadioSpeechAudioConfig,
   RadioSpeechSegment,
+  RadioSpeechVoiceCatalog,
   RadioSpeechSynthesisRequest,
   RadioSpeechSynthesisResponse,
   RadioStationGenerateRequest,
@@ -20,6 +21,7 @@ from radio_agent.schemas import (
   RadioStationItem,
   RadioTrack,
 )
+from radio_agent.voices import speech_voice_catalog
 from radio_agent.speech import (
   speech_audio_file_path,
   speech_audio_mime_type,
@@ -151,6 +153,11 @@ def generate(request: RadioGenerateRequest) -> RadioGenerateResponse:
 def synthesize_speech(request: RadioSpeechSynthesisRequest) -> RadioSpeechSynthesisResponse:
   results, diagnostics = synthesize_speech_segments(request.segments, request.speechAudio)
   return RadioSpeechSynthesisResponse(segments=results, diagnostics=diagnostics)
+
+
+@app.get("/v1/radio/speech/voices", response_model=RadioSpeechVoiceCatalog)
+def speech_voices() -> RadioSpeechVoiceCatalog:
+  return speech_voice_catalog()
 
 
 @app.get("/v1/radio/speech/audio/{file_name}")

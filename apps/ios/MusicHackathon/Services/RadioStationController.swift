@@ -13,21 +13,30 @@ final class RadioStationController {
   var errorMessage: String?
   var memorySummaryText = "Local memory is ready."
   var memoryEventCount = 0
+  var speechVoiceCatalog: RadioSpeechVoiceCatalog?
+  var isLoadingSpeechVoices = false
+  var speechVoicesErrorMessage: String?
 
   @ObservationIgnored private let playbackController: any RadioPlaybackControlling
   @ObservationIgnored private let stationClient: any RadioStationFetching
   @ObservationIgnored private let memoryStore: any RadioMemoryStoring
+  @ObservationIgnored private let hostSpeakerIDProvider: () -> String?
+  @ObservationIgnored private let libraryTrackProvider: @MainActor () -> [Track]
   @ObservationIgnored private var history: [RadioQueueItem] = []
   @ObservationIgnored private var hasPlayedStationIntro = false
 
   init(
     playbackController: any RadioPlaybackControlling,
     stationClient: any RadioStationFetching = RadioStationClient(),
-    memoryStore: any RadioMemoryStoring = RadioMemoryStore()
+    memoryStore: any RadioMemoryStoring = RadioMemoryStore(),
+    hostSpeakerIDProvider: @escaping () -> String? = { RadioHostVoiceSettings.selectedSpeakerID() },
+    libraryTrackProvider: @escaping @MainActor () -> [Track] = { [] }
   ) {
     self.playbackController = playbackController
     self.stationClient = stationClient
     self.memoryStore = memoryStore
+    self.hostSpeakerIDProvider = hostSpeakerIDProvider
+    self.libraryTrackProvider = libraryTrackProvider
 
     playbackController.onPlaybackFinished = { [weak self] kind in
       Task { @MainActor in
@@ -160,7 +169,8 @@ final class RadioStationController {
       let generationContext = RadioStationGenerationContext(
         seedTracks: stationSeeds(),
         catalogCandidates: stationCandidates(),
-        memoryContext: memoryContext
+        memoryContext: memoryContext,
+        hostSpeakerID: hostSpeakerIDProvider()
       )
       let result = try await stationClient.generateStation(context: generationContext)
       let station = result.station
@@ -192,6 +202,21 @@ final class RadioStationController {
     isLoadingStation = false
   }
 
+  func refreshSpeechVoices() async {
+    guard !isLoadingSpeechVoices else { return }
+
+    isLoadingSpeechVoices = true
+    speechVoicesErrorMessage = nil
+
+    do {
+      speechVoiceCatalog = try await stationClient.fetchSpeechVoices()
+    } catch {
+      speechVoicesErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+
+    isLoadingSpeechVoices = false
+  }
+
   func refreshMemoryStatus() async {
     guard let snapshot = try? await memoryStore.snapshot() else { return }
     memoryEventCount = snapshot.eventCount
@@ -216,11 +241,19 @@ final class RadioStationController {
     if !currentTracks.isEmpty {
       return Array(currentTracks.prefix(6))
     }
+    let libraryTracks = libraryTrackProvider().filter(\.isPlayable)
+    if !libraryTracks.isEmpty {
+      return Array(libraryTracks.prefix(6))
+    }
     return MockCatalog.featuredTracks
   }
 
   private func stationCandidates() -> [Track] {
-    var candidates = MockCatalog.radioCandidates
+    var candidates = libraryTrackProvider().filter(\.isPlayable)
+    if candidates.isEmpty {
+      candidates = MockCatalog.radioCandidates
+    }
+
     for track in stationTracks where !candidates.contains(where: { $0.radioIdentity == track.radioIdentity }) {
       candidates.append(track)
     }

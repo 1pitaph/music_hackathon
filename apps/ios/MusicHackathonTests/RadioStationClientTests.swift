@@ -60,7 +60,11 @@ final class RadioStationClientTests: XCTestCase {
       XCTAssertEqual(memoryContext?["tasteSummary"] as? String, "Likes intimate pop.")
       let speechAudio = body?["speechAudio"] as? [String: Any]
       XCTAssertEqual(speechAudio?["enabled"] as? Bool, true)
-      XCTAssertEqual(speechAudio?["voice"] as? String, "coral")
+      XCTAssertEqual(speechAudio?["provider"] as? String, "volcengine")
+      XCTAssertEqual(speechAudio?["speaker"] as? String, "zh_female_xiaohe_uranus_bigtts")
+      XCTAssertEqual(speechAudio?["resourceId"] as? String, "seed-tts-2.0")
+      XCTAssertEqual(speechAudio?["model"] as? String, "seed-tts-2.0-standard")
+      XCTAssertEqual(speechAudio?["format"] as? String, "mp3")
       let catalogCandidates = body?["catalogCandidates"] as? [[String: Any]]
       XCTAssertEqual(catalogCandidates?.first?["playlistName"] as? String, "Virtual Library: Warm Starts")
       XCTAssertEqual(catalogCandidates?.first?["source"] as? String, "virtual_music_library_json")
@@ -145,7 +149,8 @@ final class RadioStationClientTests: XCTestCase {
           reasonSignals: ["warm opener", "intimate vocal"]
         )
       ],
-      memoryContext: RadioMemoryContext(tasteSummary: "Likes intimate pop.")
+      memoryContext: RadioMemoryContext(tasteSummary: "Likes intimate pop."),
+      hostSpeakerID: "zh_female_xiaohe_uranus_bigtts"
     )
 
     let result = try await client.generateStation(context: context)
@@ -201,6 +206,54 @@ final class RadioStationClientTests: XCTestCase {
       result.diagnostics,
       ["Station generation endpoint is not deployed yet; used current station fallback."]
     )
+  }
+
+  func testFetchSpeechVoicesDecodesCatalog() async throws {
+    let session = makeSession { request in
+      XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/speech/voices")
+      XCTAssertEqual(request.httpMethod, "GET")
+
+      let data = """
+      {
+        "defaultSpeaker": "zh_female_xiaohe_uranus_bigtts",
+        "resourceId": "seed-tts-2.0",
+        "model": "seed-tts-2.0-standard",
+        "voices": [
+          {
+            "id": "zh_female_xiaohe_uranus_bigtts",
+            "name": "小何2.0",
+            "language": "zh-cn",
+            "gender": "female",
+            "style": "通用主持",
+            "resourceId": "seed-tts-2.0",
+            "model": "seed-tts-2.0-standard"
+          }
+        ]
+      }
+      """.data(using: .utf8)!
+      return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+    }
+    let client = RadioStationClient(baseURL: URL(string: "http://station.test")!, session: session)
+
+    let catalog = try await client.fetchSpeechVoices()
+
+    XCTAssertEqual(catalog.defaultSpeaker, "zh_female_xiaohe_uranus_bigtts")
+    XCTAssertEqual(catalog.resourceId, "seed-tts-2.0")
+    XCTAssertEqual(catalog.voices.first?.name, "小何2.0")
+    XCTAssertEqual(catalog.voices.first?.style, "通用主持")
+  }
+
+  func testFetchSpeechVoicesFallsBackWhenEndpointIsMissing() async throws {
+    let session = makeSession { request in
+      let data = Data("{}".utf8)
+      return (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, data)
+    }
+    let client = RadioStationClient(baseURL: URL(string: "http://station.test")!, session: session)
+
+    let catalog = try await client.fetchSpeechVoices()
+
+    XCTAssertEqual(catalog.defaultSpeaker, RadioSpeechVoiceCatalog.fallback.defaultSpeaker)
+    XCTAssertFalse(catalog.voices.isEmpty)
   }
 
   func testCompressMemoryPostsRequestAndDecodesProposal() async throws {

@@ -1,17 +1,26 @@
 import SwiftUI
 
 struct MineView: View {
-  @State private var profile = ArchiveProfile.mock
+  @Environment(MusicAuthorizationService.self) private var musicAuthorization
+  @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
+
+  @State private var profile = ArchiveProfile.empty
   @State private var recentlyPlayedExpanded = true
   @State private var savedExpanded = true
 
   var body: some View {
+    let currentProfile = displayProfile
+
     ScrollView(.vertical, showsIndicators: false) {
       VStack(spacing: 26) {
-        identityHeader
-        recentArchiveSection
-        stationPanel(title: "Recently Played", items: profile.recentlyPlayed, isExpanded: $recentlyPlayedExpanded)
-        stationPanel(title: "Saved", items: profile.saved, isExpanded: $savedExpanded)
+        identityHeader(profile: currentProfile)
+        libraryStatusSection
+
+        if hasLibraryContent {
+          recentArchiveSection(profile: currentProfile)
+          stationPanel(title: "Songs", items: currentProfile.recentlyPlayed, isExpanded: $recentlyPlayedExpanded)
+          stationPanel(title: "Artists", items: currentProfile.saved, isExpanded: $savedExpanded)
+        }
       }
       .padding(.horizontal, 20)
       .padding(.top, 18)
@@ -32,8 +41,8 @@ struct MineView: View {
         SettingsView()
           .navigationTitle("设置")
       case .archive:
-        ArchiveGridPage(profile: profile)
-          .navigationTitle("Archive")
+        ArchiveGridPage(profile: currentProfile)
+          .navigationTitle("Apple Music")
       case let .station(station):
         ArchiveStationDetailPage(station: station)
           .navigationTitle(station.name)
@@ -42,9 +51,26 @@ struct MineView: View {
           .navigationTitle("个人电台")
       }
     }
+    .task {
+      await refreshLibraryIfNeeded()
+    }
   }
 
-  private var identityHeader: some View {
+  private var displayProfile: ArchiveProfile {
+    guard hasLibraryContent else { return profile }
+
+    return ArchiveProfile.appleMusic(
+      base: profile,
+      playlists: appleMusicLibrary.playlists,
+      tracks: appleMusicLibrary.tracks
+    )
+  }
+
+  private var hasLibraryContent: Bool {
+    !appleMusicLibrary.playlists.isEmpty || !appleMusicLibrary.tracks.isEmpty
+  }
+
+  private func identityHeader(profile: ArchiveProfile) -> some View {
     VStack(spacing: 16) {
       NavigationLink(value: MineRoute.profile) {
         ZStack {
@@ -78,18 +104,73 @@ struct MineView: View {
 
       HStack(spacing: 0) {
         statItem(value: "\(profile.stats.listeningHours)", label: "Hours")
-        statItem(value: "\(profile.stats.stationsCount)", label: "Stations")
-        statItem(value: profile.stats.likesCount.formatted(), label: "Likes")
+        statItem(value: "\(profile.stats.stationsCount)", label: "Playlists")
+        statItem(value: profile.stats.likesCount.formatted(), label: "Songs")
       }
       .padding(.top, 4)
     }
     .frame(maxWidth: .infinity)
   }
 
-  private var recentArchiveSection: some View {
+  @ViewBuilder
+  private var libraryStatusSection: some View {
+    switch appleMusicLibrary.state {
+    case .idle, .loading:
+      if !hasLibraryContent {
+        MineLibraryStatusPanel(
+          iconSystemName: "music.note.list",
+          title: "正在读取 Apple Music",
+          message: "资料库加载完成后，这里会显示你的真实歌单、歌曲和封面。",
+          isLoading: true,
+          actionTitle: nil,
+          action: nil
+        )
+      }
+    case .needsAuthorization:
+      MineLibraryStatusPanel(
+        iconSystemName: "person.badge.key",
+        title: "连接 Apple Music",
+        message: "授权后会读取你的资料库歌单和歌曲，不再显示占位内容。",
+        isLoading: musicAuthorization.isRequestingAccess,
+        actionTitle: musicAuthorization.isRequestingAccess ? "连接中" : "连接 Apple Music"
+      ) {
+        Task {
+          await connectAppleMusic()
+        }
+      }
+    case .empty:
+      MineLibraryStatusPanel(
+        iconSystemName: "music.note",
+        title: "没有找到资料库歌曲",
+        message: "确认 Apple Music 资料库中已有歌曲或歌单后，可以重新刷新。",
+        isLoading: false,
+        actionTitle: "刷新"
+      ) {
+        Task {
+          await refreshLibrary()
+        }
+      }
+    case let .failed(message):
+      MineLibraryStatusPanel(
+        iconSystemName: "exclamationmark.triangle",
+        title: "无法读取 Apple Music",
+        message: message,
+        isLoading: false,
+        actionTitle: "重试"
+      ) {
+        Task {
+          await refreshLibrary()
+        }
+      }
+    case .loaded:
+      EmptyView()
+    }
+  }
+
+  private func recentArchiveSection(profile: ArchiveProfile) -> some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack {
-        Label("Radio Archive", systemImage: "dot.radiowaves.left.and.right")
+        Label("Playlists", systemImage: "music.note.list")
           .font(.system(size: 15, weight: .bold, design: .rounded))
           .foregroundStyle(.white)
 
@@ -114,7 +195,7 @@ struct MineView: View {
                   .foregroundStyle(.white)
                   .lineLimit(1)
 
-                Text(station.relativeCreatedAt)
+                Text(station.displaySubtitle)
                   .font(.system(size: 11, weight: .medium, design: .rounded))
                   .foregroundStyle(.white.opacity(0.34))
                   .lineLimit(1)
@@ -127,6 +208,21 @@ struct MineView: View {
         .padding(.trailing, 20)
       }
     }
+  }
+
+  private func refreshLibraryIfNeeded() async {
+    await musicAuthorization.refreshAccessState()
+    await appleMusicLibrary.loadIfNeeded(authorizationStatus: musicAuthorization.status)
+  }
+
+  private func refreshLibrary() async {
+    await musicAuthorization.refreshAccessState()
+    await appleMusicLibrary.refresh(authorizationStatus: musicAuthorization.status)
+  }
+
+  private func connectAppleMusic() async {
+    await musicAuthorization.requestAccess()
+    await appleMusicLibrary.refresh(authorizationStatus: musicAuthorization.status)
   }
 
   private func stationPanel(title: String, items: [ArchiveStationItem], isExpanded: Binding<Bool>) -> some View {
@@ -166,10 +262,17 @@ struct MineView: View {
                 HStack(spacing: 12) {
                   ArchiveStationCover(station: station, size: 56)
 
-                  Text(station.name)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
+                  VStack(alignment: .leading, spacing: 4) {
+                    Text(station.name)
+                      .font(.system(size: 15, weight: .semibold, design: .rounded))
+                      .foregroundStyle(.white)
+                      .lineLimit(1)
+
+                    Text(station.displaySubtitle)
+                      .font(.system(size: 12, weight: .medium, design: .rounded))
+                      .foregroundStyle(.white.opacity(0.38))
+                      .lineLimit(1)
+                  }
 
                   Spacer()
                 }
@@ -205,6 +308,63 @@ struct MineView: View {
   }
 }
 
+private struct MineLibraryStatusPanel: View {
+  let iconSystemName: String
+  let title: String
+  let message: String
+  let isLoading: Bool
+  let actionTitle: String?
+  let action: (() -> Void)?
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      HStack(alignment: .top, spacing: 12) {
+        ZStack {
+          RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(.white.opacity(0.08))
+            .frame(width: 42, height: 42)
+
+          if isLoading {
+            ProgressView()
+          } else {
+            Image(systemName: iconSystemName)
+              .font(.system(size: 18, weight: .semibold))
+              .foregroundStyle(.white.opacity(0.72))
+          }
+        }
+
+        VStack(alignment: .leading, spacing: 6) {
+          Text(title)
+            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+
+          Text(message)
+            .font(.system(size: 13, weight: .medium, design: .rounded))
+            .foregroundStyle(.white.opacity(0.48))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+
+        Spacer(minLength: 0)
+      }
+
+      if let actionTitle, let action {
+        Button(action: action) {
+          Text(actionTitle)
+            .font(.system(size: 14, weight: .semibold, design: .rounded))
+            .foregroundStyle(Color(hex: "#121212"))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(isLoading)
+      }
+    }
+    .padding(16)
+    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+  }
+}
+
 private enum MineRoute: Hashable {
   case settings
   case archive
@@ -233,22 +393,44 @@ private struct ArchiveGridPage: View {
       ScrollView(.vertical, showsIndicators: false) {
         switch selectedTab {
         case .history:
-          stationGrid(stations: sortedPublished, showsGenres: true)
-        case .curated:
-          if profile.curatedStations.isEmpty {
-            emptyText("No curated stations yet")
+          if sortedPublished.isEmpty {
+            emptyText("No Apple Music playlists found")
           } else {
-            stationGrid(stations: profile.curatedStations, showsGenres: false)
+            stationGrid(stations: sortedPublished, showsGenres: false)
+          }
+        case .curated:
+          if profile.recentlyPlayed.isEmpty {
+            emptyText("No songs found")
+          } else {
+            stationGrid(stations: profile.recentlyPlayed, showsGenres: false)
           }
         case .artists:
-          artistGrid
+          if profile.saved.isEmpty {
+            emptyText("No artists found")
+          } else {
+            artistGrid
+          }
         }
       }
     }
   }
 
   private var sortedPublished: [ArchiveStationItem] {
-    profile.published.sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
+    profile.published
+      .enumerated()
+      .sorted { lhs, rhs in
+        switch (lhs.element.createdAt, rhs.element.createdAt) {
+        case let (lhsDate?, rhsDate?):
+          return lhsDate > rhsDate
+        case (.some, nil):
+          return true
+        case (nil, .some):
+          return false
+        case (nil, nil):
+          return lhs.offset < rhs.offset
+        }
+      }
+      .map(\.element)
   }
 
   private var archiveTabs: some View {
@@ -284,22 +466,19 @@ private struct ArchiveGridPage: View {
 
   private var artistGrid: some View {
     LazyVGrid(columns: artistColumns, spacing: 18) {
-      ForEach(profile.artists, id: \.self) { artist in
-        VStack(spacing: 9) {
-          Circle()
-            .fill(Color(hex: ArchiveStationItem.colorHex(for: artist)))
+      ForEach(profile.saved) { artist in
+        NavigationLink(value: MineRoute.station(artist)) {
+          VStack(spacing: 9) {
+            ArchiveStationCover(station: artist, size: nil)
             .aspectRatio(1, contentMode: .fit)
-            .overlay {
-              Text(String(artist.prefix(1)))
-                .font(.system(size: 34, weight: .black, design: .rounded))
-                .foregroundStyle(.white.opacity(0.68))
-            }
 
-          Text(artist)
-            .font(.system(size: 13, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white.opacity(0.62))
-            .lineLimit(1)
+            Text(artist.name)
+              .font(.system(size: 13, weight: .semibold, design: .rounded))
+              .foregroundStyle(.white.opacity(0.62))
+              .lineLimit(1)
+          }
         }
+        .buttonStyle(.plain)
       }
     }
     .padding(.horizontal, 20)
@@ -325,7 +504,7 @@ private struct ArchiveGridPage: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
 
-              Text(station.relativeCreatedAt)
+              Text(station.displaySubtitle)
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundStyle(.white.opacity(0.34))
                 .lineLimit(1)
@@ -373,9 +552,9 @@ private enum ArchiveGridTab: CaseIterable, Identifiable {
   var title: String {
     switch self {
     case .history:
-      "History"
+      "Playlists"
     case .curated:
-      "Curated"
+      "Songs"
     case .artists:
       "Artists"
     }
@@ -386,35 +565,66 @@ private struct ArchiveStationDetailPage: View {
   let station: ArchiveStationItem
 
   var body: some View {
-    VStack(spacing: 24) {
-      ArchiveStationCover(station: station, size: 122)
+    ScrollView(.vertical, showsIndicators: false) {
+      VStack(spacing: 24) {
+        ArchiveStationCover(station: station, size: 122)
 
-      VStack(spacing: 10) {
-        Text(station.name)
-          .font(.system(size: 23, weight: .bold, design: .rounded))
-          .foregroundStyle(.white)
-          .multilineTextAlignment(.center)
+        VStack(spacing: 10) {
+          Text(station.name)
+            .font(.system(size: 23, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .multilineTextAlignment(.center)
 
-        Text("播放功能开发中")
-          .font(.system(size: 14, weight: .medium, design: .rounded))
-          .foregroundStyle(.white.opacity(0.42))
+          Text(station.displaySubtitle)
+            .font(.system(size: 14, weight: .medium, design: .rounded))
+            .foregroundStyle(.white.opacity(0.42))
+            .multilineTextAlignment(.center)
+        }
+
+        if !station.tracks.isEmpty {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Songs")
+              .font(.system(size: 16, weight: .semibold, design: .rounded))
+              .foregroundStyle(.white)
+
+            VStack(spacing: 0) {
+              ForEach(Array(station.tracks.prefix(16))) { track in
+                HStack(spacing: 12) {
+                  MineTrackArtwork(track: track, size: 44)
+
+                  VStack(alignment: .leading, spacing: 3) {
+                    Text(track.title)
+                      .font(.system(size: 14, weight: .semibold, design: .rounded))
+                      .foregroundStyle(.white)
+                      .lineLimit(1)
+
+                    Text([track.artist, track.album].filter { !$0.isEmpty }.joined(separator: " • "))
+                      .font(.system(size: 12, weight: .medium, design: .rounded))
+                      .foregroundStyle(.white.opacity(0.4))
+                      .lineLimit(1)
+                  }
+
+                  Spacer()
+                }
+                .padding(.vertical, 9)
+
+                if track.id != station.tracks.prefix(16).last?.id {
+                  Divider()
+                    .background(.white.opacity(0.08))
+                    .padding(.leading, 56)
+                }
+              }
+            }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        Spacer(minLength: 0)
       }
-
-      Button {} label: {
-        Label("播放", systemImage: "play.fill")
-          .font(.system(size: 16, weight: .semibold, design: .rounded))
-          .foregroundStyle(.white.opacity(0.34))
-          .padding(.horizontal, 38)
-          .padding(.vertical, 14)
-          .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-      }
-      .buttonStyle(.plain)
-      .disabled(true)
-
-      Spacer()
+      .padding(.top, 42)
+      .padding(.horizontal, 20)
+      .padding(.bottom, 40)
     }
-    .padding(.top, 42)
-    .padding(.horizontal, 20)
   }
 }
 
@@ -527,14 +737,44 @@ private struct ArchiveStationCover: View {
   }
 
   var body: some View {
-    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-      .fill(Color(hex: station.colorHex))
-      .frame(width: size, height: size)
-      .overlay {
-        Text(String(station.name.prefix(1)))
-          .font(.system(size: fontSize, weight: .black, design: .rounded))
-          .foregroundStyle(.white.opacity(0.68))
+    Group {
+      if let artworkURL = station.artworkURL {
+        AsyncImage(url: artworkURL) { phase in
+          switch phase {
+          case let .success(image):
+            image
+              .resizable()
+              .scaledToFill()
+          case .empty:
+            fallback
+              .overlay {
+                ProgressView()
+              }
+          case .failure:
+            fallback
+          @unknown default:
+            fallback
+          }
+        }
+      } else {
+        fallback
       }
+    }
+    .aspectRatio(1, contentMode: .fit)
+    .frame(width: size, height: size)
+    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    .clipped()
+    .accessibilityHidden(true)
+  }
+
+  private var fallback: some View {
+    ZStack {
+      Color(hex: station.colorHex)
+
+      Text(String(station.name.prefix(1)))
+        .font(.system(size: fontSize, weight: .black, design: .rounded))
+        .foregroundStyle(.white.opacity(0.68))
+    }
   }
 
   private var cornerRadius: CGFloat {
@@ -554,6 +794,50 @@ private struct ArchiveStationCover: View {
   }
 }
 
+private struct MineTrackArtwork: View {
+  let track: Track
+  let size: CGFloat
+
+  var body: some View {
+    Group {
+      if let artworkURL = track.artworkURL {
+        AsyncImage(url: artworkURL) { phase in
+          switch phase {
+          case let .success(image):
+            image
+              .resizable()
+              .scaledToFill()
+          case .empty:
+            fallback
+              .overlay {
+                ProgressView()
+              }
+          case .failure:
+            fallback
+          @unknown default:
+            fallback
+          }
+        }
+      } else {
+        fallback
+      }
+    }
+    .frame(width: size, height: size)
+    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+    .accessibilityHidden(true)
+  }
+
+  private var fallback: some View {
+    ZStack {
+      Color(hex: ArchiveStationItem.colorHex(for: track.radioIdentity))
+
+      Image(systemName: track.artworkSystemName)
+        .font(.system(size: max(size * 0.34, 14), weight: .semibold))
+        .foregroundStyle(.white.opacity(0.7))
+    }
+  }
+}
+
 #Preview {
   let playbackController = PlaybackController()
   NavigationStack {
@@ -563,4 +847,5 @@ private struct ArchiveStationCover: View {
   .environment(playbackController)
   .environment(RadioStationController(playbackController: playbackController))
   .environment(MusicAuthorizationService())
+  .environment(AppleMusicLibraryStore())
 }

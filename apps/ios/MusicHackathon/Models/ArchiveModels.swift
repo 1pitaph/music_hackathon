@@ -13,6 +13,9 @@ struct ArchiveStationItem: Identifiable, Hashable {
   var isFeatured: Bool
   var genre: String
   var colorHex: String
+  var artworkURL: URL? = nil
+  var subtitle: String? = nil
+  var tracks: [Track] = []
 
   var relativeCreatedAt: String {
     guard let createdAt else { return "" }
@@ -35,6 +38,19 @@ struct ArchiveStationItem: Identifiable, Hashable {
     }
     return "\(days / 30) months ago"
   }
+
+  var displaySubtitle: String {
+    if let subtitle, !subtitle.isEmpty {
+      return subtitle
+    }
+
+    let relativeDateText = relativeCreatedAt
+    if !relativeDateText.isEmpty {
+      return relativeDateText
+    }
+
+    return genre
+  }
 }
 
 struct ArchiveProfile: Hashable {
@@ -50,9 +66,20 @@ struct ArchiveProfile: Hashable {
   var recentPublished: [ArchiveStationItem] {
     Array(
       published
+        .enumerated()
         .sorted { lhs, rhs in
-          (lhs.createdAt ?? .distantPast) > (rhs.createdAt ?? .distantPast)
+          switch (lhs.element.createdAt, rhs.element.createdAt) {
+          case let (lhsDate?, rhsDate?):
+            return lhsDate > rhsDate
+          case (.some, nil):
+            return true
+          case (nil, .some):
+            return false
+          case (nil, nil):
+            return lhs.offset < rhs.offset
+          }
         }
+        .map(\.element)
         .prefix(5)
     )
   }
@@ -81,6 +108,17 @@ extension ArchiveStationItem {
 }
 
 extension ArchiveProfile {
+  static let empty = ArchiveProfile(
+    nickname: "我的音乐",
+    avatarColorHex: "#2A2A2A",
+    bio: "连接 Apple Music 后显示你的资料库。",
+    stats: ArchiveStats(listeningHours: 0, stationsCount: 0, likesCount: 0),
+    published: [],
+    saved: [],
+    recentlyPlayed: [],
+    artists: []
+  )
+
   static let mock = ArchiveProfile(
     nickname: "Mine Radio",
     avatarColorHex: "#2A2A2A",
@@ -155,6 +193,37 @@ extension ArchiveProfile {
     ]
   )
 
+  static func appleMusic(
+    base: ArchiveProfile,
+    playlists: [AppleMusicPlaylistSnapshot],
+    tracks libraryTracks: [Track]
+  ) -> ArchiveProfile {
+    let allTracks = uniqueTracks(from: playlists.flatMap(\.tracks) + libraryTracks)
+    let playlistItems = playlists.map(archiveItem(from:))
+    let songItems = allTracks.prefix(24).map(archiveItem(from:))
+    let artistItems = archiveArtistItems(from: allTracks)
+    let totalDuration = allTracks.reduce(0) { $0 + $1.duration }
+
+    var profile = base
+    profile.stats = ArchiveStats(
+      listeningHours: Int(totalDuration / 3_600),
+      stationsCount: playlists.count,
+      likesCount: allTracks.count
+    )
+    profile.published = playlistItems.isEmpty && !allTracks.isEmpty
+      ? [archiveLibraryItem(from: allTracks)]
+      : playlistItems
+    profile.saved = artistItems
+    profile.recentlyPlayed = Array(songItems)
+    profile.artists = artistItems.map(\.name)
+
+    if profile.bio == ArchiveProfile.empty.bio {
+      profile.bio = "来自 Apple Music 资料库的 \(allTracks.count) 首歌和 \(playlists.count) 个歌单。"
+    }
+
+    return profile
+  }
+
   private static func station(id: String, name: String, genre: String) -> ArchiveStationItem {
     ArchiveStationItem(
       id: id,
@@ -164,5 +233,94 @@ extension ArchiveProfile {
       genre: genre,
       colorHex: ArchiveStationItem.colorHex(for: id)
     )
+  }
+
+  private static func archiveItem(from playlist: AppleMusicPlaylistSnapshot) -> ArchiveStationItem {
+    let trackCount = playlist.tracks.count
+    let subtitle = [
+      playlist.curatorName,
+      "\(trackCount) \(trackCount == 1 ? "song" : "songs")"
+    ]
+      .compactMap { $0 }
+      .joined(separator: " • ")
+
+    return ArchiveStationItem(
+      id: "playlist-\(playlist.id)",
+      name: playlist.name,
+      createdAt: nil,
+      isFeatured: trackCount > 0,
+      genre: "Playlist",
+      colorHex: ArchiveStationItem.colorHex(for: playlist.id),
+      artworkURL: playlist.artworkURL ?? playlist.tracks.first?.artworkURL,
+      subtitle: subtitle,
+      tracks: playlist.tracks
+    )
+  }
+
+  private static func archiveItem(from track: Track) -> ArchiveStationItem {
+    ArchiveStationItem(
+      id: "track-\(track.radioIdentity)",
+      name: track.title,
+      createdAt: nil,
+      isFeatured: false,
+      genre: track.artist,
+      colorHex: ArchiveStationItem.colorHex(for: track.radioIdentity),
+      artworkURL: track.artworkURL,
+      subtitle: [track.artist, track.album].filter { !$0.isEmpty }.joined(separator: " • "),
+      tracks: [track]
+    )
+  }
+
+  private static func archiveLibraryItem(from tracks: [Track]) -> ArchiveStationItem {
+    ArchiveStationItem(
+      id: "library-all-songs",
+      name: "Apple Music Library",
+      createdAt: nil,
+      isFeatured: true,
+      genre: "Library",
+      colorHex: ArchiveStationItem.colorHex(for: "library-all-songs"),
+      artworkURL: tracks.first?.artworkURL,
+      subtitle: "\(tracks.count) \(tracks.count == 1 ? "song" : "songs")",
+      tracks: tracks
+    )
+  }
+
+  private static func archiveArtistItems(from tracks: [Track]) -> [ArchiveStationItem] {
+    let groupedTracks = Dictionary(grouping: tracks) { $0.artist }
+
+    return groupedTracks.keys
+      .sorted { lhs, rhs in
+        let lhsCount = groupedTracks[lhs]?.count ?? 0
+        let rhsCount = groupedTracks[rhs]?.count ?? 0
+        if lhsCount == rhsCount {
+          return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+        }
+        return lhsCount > rhsCount
+      }
+      .prefix(18)
+      .compactMap { artist in
+        guard let artistTracks = groupedTracks[artist], !artist.isEmpty else { return nil }
+        return ArchiveStationItem(
+          id: "artist-\(artist)",
+          name: artist,
+          createdAt: nil,
+          isFeatured: false,
+          genre: "Artist",
+          colorHex: ArchiveStationItem.colorHex(for: artist),
+          artworkURL: artistTracks.first?.artworkURL,
+          subtitle: "\(artistTracks.count) \(artistTracks.count == 1 ? "song" : "songs")",
+          tracks: artistTracks
+        )
+      }
+  }
+
+  private static func uniqueTracks(from tracks: [Track]) -> [Track] {
+    var seen = Set<String>()
+    return tracks.filter { track in
+      let key = track.radioIdentity
+      guard !seen.contains(key) else { return false }
+      seen.insert(key)
+      return true
+    }
   }
 }

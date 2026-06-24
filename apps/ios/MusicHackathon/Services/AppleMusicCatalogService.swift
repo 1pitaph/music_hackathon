@@ -104,11 +104,16 @@ struct AppleMusicCatalogService {
     }
   }
 
-  func tracks(in playlist: Playlist) async throws -> [Track] {
+  func tracks(in playlist: Playlist, playlistName: String? = nil) async throws -> [Track] {
     let detailedPlaylist = try await playlist.with([.entries])
     return detailedPlaylist.entries?.compactMap { entry in
       guard case let .song(song) = entry.item else { return nil }
-      return Self.track(from: song)
+      return Self.track(
+        from: song,
+        playlistName: playlistName ?? playlist.name,
+        source: "apple_music_library",
+        sourceLane: "playlist_entry"
+      )
     } ?? []
   }
 
@@ -130,7 +135,13 @@ struct AppleMusicCatalogService {
     } ?? songs.first
   }
 
-  static func track(from song: Song, fallback: Track? = nil) -> Track {
+  static func track(
+    from song: Song,
+    fallback: Track? = nil,
+    playlistName: String? = nil,
+    source: String? = nil,
+    sourceLane: String? = nil
+  ) -> Track {
     Track(
       id: fallback?.id ?? stableID(for: song.id.rawValue),
       title: song.title,
@@ -142,7 +153,12 @@ struct AppleMusicCatalogService {
       artworkURL: song.artwork?.url(width: 512, height: 512) ?? fallback?.artworkURL,
       previewURL: song.previewAssets?.first?.url ?? fallback?.previewURL,
       appleMusicID: song.id.rawValue,
-      isExplicit: song.contentRating == .explicit
+      isExplicit: song.contentRating == .explicit,
+      playlistName: playlistName ?? fallback?.playlistName,
+      source: source ?? fallback?.source,
+      sourceLane: sourceLane ?? fallback?.sourceLane,
+      sourceScore: fallback?.sourceScore,
+      reasonSignals: fallback?.reasonSignals
     )
   }
 
@@ -174,6 +190,74 @@ struct AppleMusicCatalogService {
     }
 
     return terms
+  }
+}
+
+extension AppleMusicCatalogService: AppleMusicLibraryProviding {
+  func librarySnapshot(
+    playlistLimit: Int = 12,
+    tracksPerPlaylistLimit: Int = 8,
+    fallbackSongLimit: Int = 36
+  ) async throws -> AppleMusicLibrarySnapshot {
+    var request = MusicLibraryRequest<Playlist>()
+    request.limit = playlistLimit
+
+    let response = try await request.response()
+    var playlistSnapshots: [AppleMusicPlaylistSnapshot] = []
+    var playlistTracks: [Track] = []
+
+    for playlist in response.items {
+      let tracks = (try? await tracks(in: playlist, playlistName: playlist.name)) ?? []
+      let limitedTracks = Array(tracks.prefix(tracksPerPlaylistLimit))
+      playlistTracks.append(contentsOf: limitedTracks)
+      playlistSnapshots.append(
+        AppleMusicPlaylistSnapshot(
+          id: playlist.id.rawValue,
+          name: playlist.name,
+          curatorName: playlist.curatorName,
+          artworkURL: playlist.artwork?.url(width: 512, height: 512),
+          tracks: limitedTracks
+        )
+      )
+    }
+
+    let tracks = uniqued(playlistTracks).isEmpty
+      ? try await librarySongs(limit: fallbackSongLimit)
+      : uniqued(playlistTracks)
+
+    return AppleMusicLibrarySnapshot(
+      playlists: playlistSnapshots,
+      tracks: tracks
+    )
+  }
+
+  private func librarySongs(limit: Int) async throws -> [Track] {
+    var request = MusicLibraryRequest<Song>()
+    request.limit = limit
+
+    let response = try await request.response()
+    return uniqued(
+      response.items.map {
+        Self.track(
+          from: $0,
+          playlistName: "Apple Music Library",
+          source: "apple_music_library",
+          sourceLane: "library_song"
+        )
+      }
+    )
+  }
+
+  private func uniqued(_ tracks: [Track]) -> [Track] {
+    var seen: Set<String> = []
+    var result: [Track] = []
+
+    for track in tracks where !seen.contains(track.radioIdentity) {
+      seen.insert(track.radioIdentity)
+      result.append(track)
+    }
+
+    return result
   }
 }
 

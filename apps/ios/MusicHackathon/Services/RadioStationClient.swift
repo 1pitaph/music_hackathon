@@ -3,6 +3,7 @@ import Foundation
 protocol RadioStationFetching {
   func fetchCurrentStation() async throws -> RadioStation
   func generateStation(context: RadioStationGenerationContext) async throws -> RadioStationResult
+  func fetchSpeechVoices() async throws -> RadioSpeechVoiceCatalog
   func compressMemory(_ request: RadioMemoryCompressionRequest) async throws -> RadioCompressedMemory?
 }
 
@@ -13,6 +14,10 @@ extension RadioStationFetching {
 
   func compressMemory(_ request: RadioMemoryCompressionRequest) async throws -> RadioCompressedMemory? {
     nil
+  }
+
+  func fetchSpeechVoices() async throws -> RadioSpeechVoiceCatalog {
+    .fallback
   }
 }
 
@@ -47,7 +52,8 @@ struct RadioStationGenerationContext: Encodable, Equatable {
     seedTracks: [Track],
     catalogCandidates: [Track],
     memoryContext: RadioMemoryContext,
-    limit: Int = 12
+    limit: Int = 12,
+    hostSpeakerID: String? = nil
   ) {
     self.seedTracks = seedTracks.map {
       RadioTrackPayload(track: $0, playlistName: "Local memory seeds", sourceLane: "familiar_anchor")
@@ -61,6 +67,9 @@ struct RadioStationGenerationContext: Encodable, Equatable {
     }
     self.memoryContext = memoryContext
     self.limit = limit
+    if let hostSpeakerID = hostSpeakerID?.trimmedNilIfEmpty {
+      speechAudio.speaker = hostSpeakerID
+    }
     memory = RadioMemoryRequest(
       recentlyPlayedTrackKeys: memoryContext.recentlyPlayedTrackKeys,
       likedTrackKeys: [],
@@ -72,10 +81,58 @@ struct RadioStationGenerationContext: Encodable, Equatable {
 
 struct RadioSpeechAudioRequest: Codable, Equatable {
   var enabled = false
-  var provider = "openai"
-  var voice = "coral"
-  var model = "gpt-4o-mini-tts"
+  var provider = "volcengine"
+  var voice: String?
+  var speaker: String?
+  var resourceId = "seed-tts-2.0"
+  var model = "seed-tts-2.0-standard"
   var format = "mp3"
+}
+
+struct RadioSpeechVoiceCatalog: Codable, Equatable {
+  var defaultSpeaker: String
+  var resourceId: String
+  var model: String
+  var voices: [RadioSpeechVoice]
+
+  static let fallback = RadioSpeechVoiceCatalog(
+    defaultSpeaker: "zh_female_xiaohe_uranus_bigtts",
+    resourceId: "seed-tts-2.0",
+    model: "seed-tts-2.0-standard",
+    voices: [
+      RadioSpeechVoice(
+        id: "zh_female_xiaohe_uranus_bigtts",
+        name: "小何2.0",
+        language: "zh-cn",
+        gender: "female",
+        style: "通用主持",
+        resourceId: "seed-tts-2.0",
+        model: "seed-tts-2.0-standard"
+      )
+    ]
+  )
+
+  func voice(for speakerID: String) -> RadioSpeechVoice? {
+    voices.first { $0.id == speakerID }
+  }
+}
+
+struct RadioSpeechVoice: Codable, Equatable, Identifiable {
+  let id: String
+  let name: String
+  let language: String
+  let gender: String
+  let style: String
+  let resourceId: String
+  let model: String
+}
+
+enum RadioHostVoiceSettings {
+  static let speakerIDKey = "radio.hostSpeakerID"
+
+  static func selectedSpeakerID(defaults: UserDefaults = .standard) -> String? {
+    defaults.string(forKey: speakerIDKey)?.trimmedNilIfEmpty
+  }
 }
 
 struct RadioTuningPayload: Codable, Equatable {
@@ -196,6 +253,22 @@ struct RadioStationClient: RadioStationFetching {
         station: try await fetchCurrentStation(),
         diagnostics: ["Station generation endpoint is not deployed yet; used current station fallback."]
       )
+    }
+  }
+
+  func fetchSpeechVoices() async throws -> RadioSpeechVoiceCatalog {
+    guard let baseURL else {
+      throw RadioStationClientError.disabled
+    }
+
+    let endpoint = baseURL.appending(path: "v1/radio/speech/voices")
+    var request = URLRequest(url: endpoint, timeoutInterval: timeout)
+    request.httpMethod = "GET"
+
+    do {
+      return try await decodedPayload(for: request)
+    } catch RadioStationClientError.serverStatus(404) {
+      return .fallback
     }
   }
 
@@ -406,5 +479,12 @@ private struct RadioStationItemPayload: Decodable {
       reason: reason ?? "Queued by the backend station.",
       handoffText: handoffText
     )
+  }
+}
+
+private extension String {
+  var trimmedNilIfEmpty: String? {
+    let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 }

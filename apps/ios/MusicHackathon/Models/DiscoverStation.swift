@@ -10,6 +10,7 @@ struct DiscoverStation: Identifiable, Hashable {
   let favorites: Int
   let items: [RadioQueueItem]
   let colorHex: String
+  let artworkURL: URL?
   let shareURL: URL
 
   var color: Color {
@@ -23,6 +24,28 @@ struct DiscoverStation: Identifiable, Hashable {
     return "\(favorites)"
   }
 
+  var heroArtworkURL: URL? {
+    artworkURL ?? items.first?.track.artworkURL
+  }
+
+  var artworkURLs: [URL] {
+    var seen: Set<URL> = []
+    var urls: [URL] = []
+
+    if let artworkURL {
+      seen.insert(artworkURL)
+      urls.append(artworkURL)
+    }
+
+    for item in items {
+      guard let artworkURL = item.track.artworkURL, !seen.contains(artworkURL) else { continue }
+      seen.insert(artworkURL)
+      urls.append(artworkURL)
+    }
+
+    return urls
+  }
+
   func radioStation() -> RadioStation {
     RadioStation(
       id: id,
@@ -34,6 +57,53 @@ struct DiscoverStation: Identifiable, Hashable {
 }
 
 extension DiscoverStation {
+  static func stations(
+    from playlists: [AppleMusicPlaylistSnapshot],
+    libraryTracks: [Track]
+  ) -> [DiscoverStation] {
+    let playlistStations = playlists.enumerated().compactMap { index, playlist -> DiscoverStation? in
+      let playableTracks = playlist.tracks.filter(\.isPlayable)
+      guard !playableTracks.isEmpty else { return nil }
+
+      return make(
+        id: "apple-music-playlist-\(playlist.id)",
+        title: playlist.name,
+        briefIntro: "来自 Apple Music 资料库的真实歌单",
+        description: "\(playlist.name) 已连接到你的 Apple Music 资料库，电台会直接使用这些真实曲目、艺人、专辑和封面。",
+        hostName: playlist.curatorName ?? "Apple Music",
+        genre: dominantGenre(in: playableTracks),
+        favorites: playableTracks.count,
+        colorHex: colorHex(at: index),
+        artworkURL: playlist.artworkURL,
+        tracks: playableTracks,
+        startIndex: 0
+      )
+    }
+
+    if !playlistStations.isEmpty {
+      return playlistStations
+    }
+
+    let playableTracks = libraryTracks.filter(\.isPlayable)
+    guard !playableTracks.isEmpty else { return [] }
+
+    return playableTracks.chunked(maxSize: 6).enumerated().map { index, tracks in
+      make(
+        id: "apple-music-library-\(index)",
+        title: index == 0 ? "我的 Apple Music" : "我的 Apple Music \(index + 1)",
+        briefIntro: "从资料库歌曲生成的真实电台",
+        description: "这张卡片来自你的 Apple Music 资料库歌曲，封面、曲名、艺人和专辑都会使用真实数据。",
+        hostName: "Apple Music",
+        genre: dominantGenre(in: tracks),
+        favorites: tracks.count,
+        colorHex: colorHex(at: index),
+        artworkURL: tracks.first?.artworkURL,
+        tracks: tracks,
+        startIndex: 0
+      )
+    }
+  }
+
   static let mockStations: [DiscoverStation] = {
     let tracks = MockCatalog.radioCandidates.isEmpty ? MockCatalog.featuredTracks : MockCatalog.radioCandidates
 
@@ -47,6 +117,7 @@ extension DiscoverStation {
         genre: "Lo-Fi / 氛围",
         favorites: 2340,
         colorHex: "#D8633C",
+        artworkURL: nil,
         tracks: tracks,
         startIndex: 0
       ),
@@ -59,6 +130,7 @@ extension DiscoverStation {
         genre: "古典 / 钢琴",
         favorites: 1890,
         colorHex: "#C9A23E",
+        artworkURL: nil,
         tracks: tracks,
         startIndex: 2
       ),
@@ -71,6 +143,7 @@ extension DiscoverStation {
         genre: "独立民谣",
         favorites: 3200,
         colorHex: "#8C7355",
+        artworkURL: nil,
         tracks: tracks,
         startIndex: 4
       ),
@@ -83,6 +156,7 @@ extension DiscoverStation {
         genre: "低保真 / 独立",
         favorites: 1560,
         colorHex: "#B5562E",
+        artworkURL: nil,
         tracks: tracks,
         startIndex: 6
       ),
@@ -95,6 +169,7 @@ extension DiscoverStation {
         genre: "梦幻流行",
         favorites: 2780,
         colorHex: "#5C4A38",
+        artworkURL: nil,
         tracks: tracks,
         startIndex: 8
       ),
@@ -107,6 +182,7 @@ extension DiscoverStation {
         genre: "电子 / 实验",
         favorites: 2100,
         colorHex: "#9C6B3E",
+        artworkURL: nil,
         tracks: tracks,
         startIndex: 10
       )
@@ -122,6 +198,7 @@ extension DiscoverStation {
     genre: String,
     favorites: Int,
     colorHex: String,
+    artworkURL: URL?,
     tracks: [Track],
     startIndex: Int
   ) -> DiscoverStation {
@@ -148,8 +225,27 @@ extension DiscoverStation {
       favorites: favorites,
       items: items,
       colorHex: colorHex,
+      artworkURL: artworkURL,
       shareURL: URL(string: "https://airset.example/stations/\(id)")!
     )
+  }
+
+  private static func dominantGenre(in tracks: [Track]) -> String {
+    tracks.first?.mood ?? "Apple Music"
+  }
+
+  private static func colorHex(at index: Int) -> String {
+    let palette = ["#D8633C", "#C9A23E", "#3A6B5C", "#5B4A7A", "#B5562E", "#4C7282"]
+    return palette[index % palette.count]
+  }
+}
+
+private extension Array {
+  func chunked(maxSize: Int) -> [[Element]] {
+    guard maxSize > 0 else { return [] }
+    return stride(from: 0, to: count, by: maxSize).map { startIndex in
+      Array(self[startIndex..<Swift.min(startIndex + maxSize, count)])
+    }
   }
 }
 
