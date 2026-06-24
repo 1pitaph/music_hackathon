@@ -1,3 +1,5 @@
+import json
+
 from radio_agent.graph import (
   generate_radio,
   validate_and_repair,
@@ -62,6 +64,148 @@ def test_mock_multi_agent_response_contains_speech(monkeypatch):
   assert response.speech.stationIntro is not None
   assert response.speech.stationIntro.displayText == response.stationIntro
   assert len(response.speech.betweenTracks) == 0
+
+
+def test_single_call_llm_generates_station_program(monkeypatch):
+  monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+  monkeypatch.delenv("RADIO_AGENT_GENERATION_MODE", raising=False)
+  calls = []
+
+  def fake_invoke(system_prompt, user_prompt, *, temperature):
+    calls.append({
+      "systemPrompt": system_prompt,
+      "userPayload": json.loads(user_prompt),
+      "temperature": temperature,
+    })
+    return json.dumps({
+      "stationIntro": "A focused two-song set.",
+      "items": [
+        {"radioIdentity": "song-1", "reason": "first", "role": "opener", "score": 99, "source": "playlist"},
+        {"radioIdentity": "song-2", "reason": "second", "role": "bridge", "score": 91, "source": "playlist"},
+      ],
+      "speech": {
+        "stationIntro": {
+          "id": "station-intro",
+          "text": "Welcome into A then B.",
+          "displayText": "Welcome into A then B.",
+          "targetItemId": "song-1",
+          "agent": "station_program_agent",
+        },
+        "betweenTracks": [
+          {
+            "id": "bridge-song-1-song-2",
+            "fromItemId": "song-1",
+            "toItemId": "song-2",
+            "text": "That was A. Next is B.",
+            "displayText": "Next: B by Artist B.",
+            "agent": "station_program_agent",
+          }
+        ],
+      },
+    })
+
+  monkeypatch.setattr("radio_agent.graph.invoke_chat", fake_invoke)
+
+  response = generate_radio(_request_with_two_tracks())
+
+  assert len(calls) == 1
+  assert "station programming agent" in calls[0]["systemPrompt"]
+  assert response.mode == "llm"
+  assert [item.radioIdentity for item in response.items] == ["song-1", "song-2"]
+  assert response.stationIntro == "Welcome into A then B."
+  assert response.speech.stationIntro.agent == "station_program_agent"
+  assert response.speech.betweenTracks[0].fromItemId == "song-1"
+  assert response.speech.betweenTracks[0].toItemId == "song-2"
+
+
+def test_single_call_invalid_json_falls_back_to_repaired_queue(monkeypatch):
+  monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+  monkeypatch.delenv("RADIO_AGENT_GENERATION_MODE", raising=False)
+  monkeypatch.setattr("radio_agent.graph.invoke_chat", lambda *args, **kwargs: "not json")
+
+  response = generate_radio(_request_with_two_tracks())
+
+  assert response.mode == "fallback"
+  assert [item.radioIdentity for item in response.items] == ["song-1", "song-2"]
+  assert "Station program payload was not valid JSON; using repaired fallback queue." in response.diagnostics
+  assert "Generation payload was not valid JSON; using repaired fallback queue." in response.diagnostics
+
+
+def test_single_call_repairs_unknown_tracks_and_bad_transitions(monkeypatch):
+  monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+  monkeypatch.delenv("RADIO_AGENT_GENERATION_MODE", raising=False)
+
+  def fake_invoke(*args, **kwargs):
+    return json.dumps({
+      "stationIntro": "A repaired set.",
+      "items": [
+        {"radioIdentity": "song-1", "reason": "first", "role": "opener", "score": 99, "source": "playlist"},
+        {"radioIdentity": "made-up", "reason": "bad", "role": "bridge", "score": 90, "source": "catalog"},
+      ],
+      "speech": {
+        "stationIntro": {
+          "text": "A repaired intro.",
+          "displayText": "A repaired intro.",
+          "targetItemId": "song-1",
+        },
+        "betweenTracks": [
+          {"fromItemId": "song-2", "toItemId": "song-1", "text": "bad", "displayText": "bad"}
+        ],
+      },
+    })
+
+  monkeypatch.setattr("radio_agent.graph.invoke_chat", fake_invoke)
+
+  response = generate_radio(_request_with_two_tracks())
+
+  assert response.mode == "llm"
+  assert [item.radioIdentity for item in response.items] == ["song-1", "song-2"]
+  assert response.speech.betweenTracks[0].fromItemId == "song-1"
+  assert response.speech.betweenTracks[0].toItemId == "song-2"
+  assert response.speech.betweenTracks[0].displayText.startswith("Next:")
+  assert "Dropped unknown track from generation: made-up" in response.diagnostics
+  assert "Dropped transition copy for non-adjacent pair: song-2 -> song-1" in response.diagnostics
+
+
+def test_legacy_generation_mode_uses_multi_agent_path(monkeypatch):
+  monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+  monkeypatch.setenv("RADIO_AGENT_GENERATION_MODE", "legacy_multi_agent")
+  prompts = []
+
+  def fake_invoke(system_prompt, user_prompt, *, temperature):
+    prompts.append(system_prompt)
+    if "recommendation agent" in system_prompt:
+      return json.dumps({
+        "items": [
+          {"radioIdentity": "song-1", "reason": "first", "role": "opener", "score": 99, "source": "playlist"},
+          {"radioIdentity": "song-2", "reason": "second", "role": "bridge", "score": 91, "source": "playlist"},
+        ]
+      })
+    if "first-entry" in system_prompt:
+      return json.dumps({
+        "text": "Legacy intro.",
+        "displayText": "Legacy intro.",
+        "targetItemId": "song-1",
+      })
+    return json.dumps({
+      "betweenTracks": [
+        {
+          "fromItemId": "song-1",
+          "toItemId": "song-2",
+          "text": "Legacy bridge.",
+          "displayText": "Legacy bridge.",
+        }
+      ]
+    })
+
+  monkeypatch.setattr("radio_agent.graph.invoke_chat", fake_invoke)
+
+  response = generate_radio(_request_with_two_tracks())
+
+  assert len(prompts) == 3
+  assert response.mode == "llm"
+  assert response.stationIntro == "Legacy intro."
+  assert response.speech.betweenTracks[0].displayText == "Legacy bridge."
 
 
 def test_entry_copy_invalid_json_uses_default_intro():

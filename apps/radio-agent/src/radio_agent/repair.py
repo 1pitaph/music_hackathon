@@ -138,6 +138,35 @@ def validate_and_repair(state: AgentState) -> dict[str, Any]:
   return assemble_response(state)
 
 
+def validate_station_program(state: AgentState) -> dict[str, Any]:
+  diagnostics = list(state.get("diagnostics", []))
+  payload = parse_generation(state.get("rawProgram"))
+  if payload is None:
+    diagnostics.append("Station program payload was not valid JSON; using repaired fallback queue.")
+    return validate_and_repair({**state, "rawRecommendation": None, "diagnostics": diagnostics})
+
+  next_state = {
+    **state,
+    "rawRecommendation": payload,
+    "diagnostics": diagnostics,
+  }
+  speech_payload = payload.get("speech") if isinstance(payload.get("speech"), dict) else {}
+
+  raw_entry = speech_payload.get("stationIntro") if isinstance(speech_payload, dict) else None
+  if raw_entry is None:
+    raw_entry = payload.get("stationIntroCopy")
+  if isinstance(raw_entry, dict):
+    next_state["rawEntryCopy"] = raw_entry
+
+  raw_transitions = speech_payload.get("betweenTracks") if isinstance(speech_payload, dict) else None
+  if raw_transitions is None:
+    raw_transitions = payload.get("betweenTracks")
+  if isinstance(raw_transitions, list):
+    next_state["rawTransitionCopy"] = {"betweenTracks": raw_transitions}
+
+  return validate_and_repair(next_state)
+
+
 def validate_entry_copy(state: AgentState) -> dict[str, Any]:
   diagnostics = list(state.get("diagnostics", []))
   raw_entry = state.get("rawEntryCopy")

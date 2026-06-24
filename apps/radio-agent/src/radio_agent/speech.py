@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -29,6 +30,7 @@ DEFAULT_SPEECH_FORMAT = "mp3"
 DEFAULT_VOLCENGINE_SAMPLE_RATE = 24000
 DEFAULT_VOLCENGINE_BIT_RATE = 128000
 DEFAULT_VOLCENGINE_TIMEOUT_SECONDS = 30.0
+DEFAULT_SPEECH_SYNTHESIS_MAX_WORKERS = 4
 VOLCENGINE_FINISH_CODE = 20000000
 
 MIME_TYPES = {
@@ -92,23 +94,70 @@ def synthesize_speech_segments(
       f"Speech provider '{context.provider}' is not implemented; returning text-only speech metadata."
     )
 
-  for segment in segments:
-    if context.provider == "volcengine" and _speech_is_configured() and volcengine_settings:
-      audio, segment_diagnostics = _synthesize_volcengine_segment(
-        segment,
-        context,
-        volcengine_settings,
-      )
-      diagnostics.extend(segment_diagnostics)
-    else:
-      audio = _unavailable_audio(segment, context)
-      if context.provider == "mock":
-        audio_url = _mock_audio_url(audio.cacheKey, context.audio_format)
-        audio = audio.model_copy(update={
-          "audioURL": audio_url,
-          "status": "ready" if audio_url else "unavailable",
-        })
+  if context.provider == "volcengine" and _speech_is_configured() and volcengine_settings:
+    results, synthesis_diagnostics = _synthesize_volcengine_segments(
+      segments,
+      context,
+      volcengine_settings,
+    )
+    diagnostics.extend(synthesis_diagnostics)
+    return results, diagnostics
 
+  for segment in segments:
+    audio = _unavailable_audio(segment, context)
+    if context.provider == "mock":
+      audio_url = _mock_audio_url(audio.cacheKey, context.audio_format)
+      audio = audio.model_copy(update={
+        "audioURL": audio_url,
+        "status": "ready" if audio_url else "unavailable",
+      })
+
+    results.append(RadioSpeechSynthesisResult(
+      **segment.model_dump(),
+      audio=audio,
+    ))
+
+  return results, diagnostics
+
+
+def _synthesize_volcengine_segments(
+  segments: list[RadioSpeechSegment],
+  context: SpeechSynthesisContext,
+  settings: VolcengineSettings,
+) -> tuple[list[RadioSpeechSynthesisResult], list[str]]:
+  diagnostics: list[str] = []
+  unique_segments: dict[str, RadioSpeechSegment] = {}
+  for segment in segments:
+    cache_key = _cache_key_for_context(segment.text, context)
+    unique_segments.setdefault(cache_key, segment)
+
+  audio_by_cache_key: dict[str, RadioSpeechAudio] = {}
+  diagnostics_by_cache_key: dict[str, list[str]] = {}
+  max_workers = min(DEFAULT_SPEECH_SYNTHESIS_MAX_WORKERS, max(1, len(unique_segments)))
+
+  with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    futures = {
+      cache_key: executor.submit(_synthesize_volcengine_segment, segment, context, settings)
+      for cache_key, segment in unique_segments.items()
+    }
+    for cache_key, segment in unique_segments.items():
+      try:
+        audio, segment_diagnostics = futures[cache_key].result()
+      except Exception as exc:  # pragma: no cover - defensive around third-party clients.
+        audio = _unavailable_audio(segment, context, cache_key)
+        segment_diagnostics = [
+          f"Volcengine TTS request failed for segment '{segment.id}': {exc.__class__.__name__}."
+        ]
+      audio_by_cache_key[cache_key] = audio
+      diagnostics_by_cache_key[cache_key] = segment_diagnostics
+
+  for cache_key in unique_segments:
+    diagnostics.extend(diagnostics_by_cache_key.get(cache_key, []))
+
+  results = []
+  for segment in segments:
+    cache_key = _cache_key_for_context(segment.text, context)
+    audio = audio_by_cache_key.get(cache_key) or _unavailable_audio(segment, context, cache_key)
     results.append(RadioSpeechSynthesisResult(
       **segment.model_dump(),
       audio=audio,

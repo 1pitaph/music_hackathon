@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -12,6 +13,8 @@ from radio_agent.prompts import (
   entry_copy_user_prompt,
   recommendation_system_prompt,
   recommendation_user_prompt,
+  station_program_system_prompt,
+  station_program_user_prompt,
   transition_copy_system_prompt,
   transition_copy_user_prompt,
 )
@@ -21,6 +24,7 @@ from radio_agent.repair import (
   validate_and_repair,
   validate_entry_copy,
   validate_recommendations,
+  validate_station_program,
   validate_transition_copy,
 )
 from radio_agent.schemas import (
@@ -40,9 +44,11 @@ class RadioAgentState(TypedDict, total=False):
   candidateByID: dict[str, RadioTrack]
   diagnostics: list[str]
   mode: str
+  generationPath: str
   sharedMemory: dict[str, Any]
   rawGeneration: str | dict[str, Any] | None
   rawRecommendation: str | dict[str, Any] | None
+  rawProgram: str | dict[str, Any] | None
   recommendedItems: list[RadioGeneratedItem]
   rawEntryCopy: str | dict[str, Any] | None
   entryCopy: RadioEntryCopy
@@ -93,13 +99,38 @@ def build_shared_memory(state: RadioAgentState) -> RadioAgentState:
 def choose_generation_path(state: RadioAgentState) -> RadioAgentState:
   diagnostics = list(state.get("diagnostics", []))
   if not state.get("candidates"):
-    return {**state, "mode": "fallback", "diagnostics": diagnostics}
+    return {**state, "mode": "fallback", "generationPath": "fallback", "diagnostics": diagnostics}
 
   if has_openai_api_key():
-    return {**state, "mode": "llm", "diagnostics": diagnostics}
+    generation_path = "legacy_multi_agent" if _generation_mode() == "legacy_multi_agent" else "single_call"
+    return {**state, "mode": "llm", "generationPath": generation_path, "diagnostics": diagnostics}
 
   diagnostics.append("OPENAI_API_KEY is not set; using deterministic mock generation.")
-  return {**state, "mode": "mock", "diagnostics": diagnostics}
+  return {**state, "mode": "mock", "generationPath": "mock", "diagnostics": diagnostics}
+
+
+def _generation_mode() -> str:
+  return os.getenv("RADIO_AGENT_GENERATION_MODE", "single_call").strip().lower()
+
+
+def _generation_path(state: RadioAgentState) -> str:
+  return state.get("generationPath") or state.get("mode", "fallback")
+
+
+def station_program_agent(state: RadioAgentState) -> RadioAgentState:
+  request = state["request"]
+  diagnostics = list(state.get("diagnostics", []))
+
+  try:
+    content = invoke_chat(
+      station_program_system_prompt(),
+      station_program_user_prompt(request, state),
+      temperature=0.5,
+    )
+    return {**state, "rawProgram": content, "diagnostics": diagnostics}
+  except Exception as error:  # pragma: no cover - network failures are environment-specific.
+    diagnostics.append(f"Station program agent failed: {error}")
+    return {**state, "mode": "fallback", "rawProgram": None, "diagnostics": diagnostics}
 
 
 def recommendation_agent(state: RadioAgentState) -> RadioAgentState:
@@ -161,6 +192,8 @@ def build_graph():
   graph.add_node("prepare_context", prepare_context)
   graph.add_node("build_shared_memory", build_shared_memory)
   graph.add_node("choose_generation_path", choose_generation_path)
+  graph.add_node("station_program_agent", station_program_agent)
+  graph.add_node("validate_station_program", validate_station_program)
   graph.add_node("recommendation_agent", recommendation_agent)
   graph.add_node("mock_recommendation", mock_recommendation)
   graph.add_node("validate_recommendations", validate_recommendations)
@@ -173,13 +206,16 @@ def build_graph():
   graph.add_edge("build_shared_memory", "choose_generation_path")
   graph.add_conditional_edges(
     "choose_generation_path",
-    lambda state: state.get("mode", "fallback"),
+    _generation_path,
     {
-      "llm": "recommendation_agent",
+      "single_call": "station_program_agent",
+      "legacy_multi_agent": "recommendation_agent",
       "mock": "mock_recommendation",
       "fallback": "validate_recommendations",
     },
   )
+  graph.add_edge("station_program_agent", "validate_station_program")
+  graph.add_edge("validate_station_program", END)
   graph.add_edge("recommendation_agent", "validate_recommendations")
   graph.add_edge("mock_recommendation", "validate_recommendations")
   graph.add_edge("validate_recommendations", "entry_copy_agent")

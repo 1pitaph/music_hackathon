@@ -6,6 +6,7 @@ final class RadioStationClientTests: XCTestCase {
     let session = makeSession { request in
       XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/stations/current")
       XCTAssertEqual(request.httpMethod, "GET")
+      XCTAssertEqual(request.timeoutInterval, 15.0)
 
       let data = """
       {
@@ -213,6 +214,7 @@ final class RadioStationClientTests: XCTestCase {
     let session = makeSession { request in
       XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/speech/voices")
       XCTAssertEqual(request.httpMethod, "GET")
+      XCTAssertEqual(request.timeoutInterval, 15.0)
 
       let data = """
       {
@@ -261,6 +263,7 @@ final class RadioStationClientTests: XCTestCase {
     let session = makeSession { request in
       XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/memory/compress")
       XCTAssertEqual(request.httpMethod, "POST")
+      XCTAssertEqual(request.timeoutInterval, 15.0)
 
       let data = """
       {

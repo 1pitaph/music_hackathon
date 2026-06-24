@@ -265,6 +265,129 @@ def test_volcengine_speech_synthesis_writes_audio_and_reuses_cache(monkeypatch, 
   assert cached_results[0].audio.audioURL == audio.audioURL
 
 
+def test_volcengine_speech_synthesis_dedupes_cache_keys_and_preserves_order(monkeypatch, tmp_path):
+  _configure_volcengine_env(monkeypatch, tmp_path)
+  calls = []
+
+  def fake_stream(method, url, *, headers, json, timeout):
+    text = json["req_params"]["text"]
+    calls.append(text)
+    return _FakeVolcengineStream(
+      200,
+      [
+        {"code": 0, "data": base64.b64encode(f"ID3{text}".encode("utf-8")).decode("ascii")},
+        {"code": 20000000, "message": "finished"},
+      ],
+    )
+
+  monkeypatch.setattr(speech.httpx, "stream", fake_stream)
+  segments = [
+    RadioSpeechSegment(
+      id="station-intro",
+      kind="stationIntro",
+      text="Same text.",
+      displayText="Same text.",
+      targetItemId="song-1",
+    ),
+    RadioSpeechSegment(
+      id="transition-1",
+      kind="transition",
+      text="Different text.",
+      displayText="Different text.",
+      fromItemId="song-1",
+      toItemId="song-2",
+    ),
+    RadioSpeechSegment(
+      id="transition-duplicate",
+      kind="transition",
+      text="Same text.",
+      displayText="Same text again.",
+      fromItemId="song-2",
+      toItemId="song-3",
+    ),
+  ]
+
+  results, diagnostics = speech.synthesize_speech_segments(
+    segments,
+    RadioSpeechAudioConfig(enabled=True, provider="volcengine"),
+  )
+
+  assert diagnostics == []
+  assert [result.id for result in results] == ["station-intro", "transition-1", "transition-duplicate"]
+  assert len(calls) == 2
+  assert set(calls) == {"Same text.", "Different text."}
+  assert results[0].audio.status == "ready"
+  assert results[1].audio.status == "ready"
+  assert results[2].audio.status == "ready"
+  assert results[0].audio.cacheKey == results[2].audio.cacheKey
+  assert results[0].audio.audioURL == results[2].audio.audioURL
+
+
+def test_synthesize_speech_endpoint_keeps_ready_audio_when_one_volcengine_segment_fails(monkeypatch, tmp_path):
+  _configure_volcengine_env(monkeypatch, tmp_path)
+
+  def fake_stream(method, url, *, headers, json, timeout):
+    text = json["req_params"]["text"]
+    if "Fail" in text:
+      return _FakeVolcengineStream(500, [])
+    return _FakeVolcengineStream(
+      200,
+      [
+        {"code": 0, "data": base64.b64encode(f"ID3{text}".encode("utf-8")).decode("ascii")},
+        {"code": 20000000, "message": "finished"},
+      ],
+    )
+
+  monkeypatch.setattr(speech.httpx, "stream", fake_stream)
+  client = TestClient(app)
+
+  response = client.post(
+    "/v1/radio/speech/synthesize",
+    json={
+      "speechAudio": {"enabled": True, "provider": "volcengine"},
+      "segments": [
+        {
+          "id": "station-intro",
+          "kind": "stationIntro",
+          "text": "Ready intro.",
+          "displayText": "Ready intro.",
+          "targetItemId": "song-1",
+        },
+        {
+          "id": "transition-fail",
+          "kind": "transition",
+          "text": "Fail this bridge.",
+          "displayText": "Fail this bridge.",
+          "fromItemId": "song-1",
+          "toItemId": "song-2",
+        },
+        {
+          "id": "transition-ready",
+          "kind": "transition",
+          "text": "Ready bridge.",
+          "displayText": "Ready bridge.",
+          "fromItemId": "song-2",
+          "toItemId": "song-3",
+        },
+      ],
+    },
+  )
+
+  assert response.status_code == 200
+  body = response.json()
+  assert [segment["id"] for segment in body["segments"]] == [
+    "station-intro",
+    "transition-fail",
+    "transition-ready",
+  ]
+  assert [segment["audio"]["status"] for segment in body["segments"]] == [
+    "ready",
+    "unavailable",
+    "ready",
+  ]
+  assert "HTTP 500" in " ".join(body["diagnostics"])
+
+
 def test_volcengine_speech_synthesis_rejects_unallowed_speaker(monkeypatch, tmp_path):
   _configure_volcengine_env(monkeypatch, tmp_path)
   monkeypatch.setenv("VOLCENGINE_TTS_ALLOWED_SPEAKERS", "zh_female_test")
