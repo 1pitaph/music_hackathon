@@ -58,7 +58,11 @@ final class AppleMusicLibraryStore {
   }
 
   func loadIfNeeded(authorizationStatus: MusicAuthorization.Status) async {
-    guard state != .loading, playlists.isEmpty, tracks.isEmpty else { return }
+    while state == .loading {
+      try? await Task.sleep(for: .milliseconds(100))
+    }
+
+    guard playlists.isEmpty, tracks.isEmpty else { return }
     await refresh(authorizationStatus: authorizationStatus)
   }
 

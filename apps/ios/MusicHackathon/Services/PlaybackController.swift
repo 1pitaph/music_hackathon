@@ -191,14 +191,16 @@ final class PlaybackController: RadioPlaybackControlling {
     }
 
     let song = try await catalogService.song(for: track)
+    let resolvedTrack = AppleMusicCatalogService.track(from: song, fallback: track)
     musicPlayer.queue = [song]
     try await musicPlayer.play()
 
+    currentTrack = resolvedTrack
     activeBackend = .appleMusic
     state = .playing
-    updateNowPlayingInfo(for: track)
+    updateNowPlayingInfo(for: resolvedTrack)
     updateNowPlayingPlaybackRate(1)
-    startMusicProgressTimer(duration: track.duration)
+    startMusicProgressTimer(duration: resolvedTrack.duration)
   }
 
   private func startPreviewPlayback(for track: Track, previewURL: URL) {

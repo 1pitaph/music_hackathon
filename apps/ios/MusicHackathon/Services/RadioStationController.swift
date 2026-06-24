@@ -53,6 +53,23 @@ final class RadioStationController {
     Array(queue.prefix(5))
   }
 
+  var upcomingSpeechSegment: RadioSpeechPlaybackSegment? {
+    if currentItem == nil,
+       !queue.isEmpty,
+       !hasPlayedStationIntro,
+       let intro = station?.speech?.stationIntro {
+      return intro.playbackSegment
+    }
+
+    if let currentItem,
+       let nextItem = queue.first,
+       let transition = transitionCopy(from: currentItem, to: nextItem) {
+      return transition.playbackSegment
+    }
+
+    return nil
+  }
+
   var stationTracks: [Track] {
     var tracks: [Track] = []
     if let currentItem {

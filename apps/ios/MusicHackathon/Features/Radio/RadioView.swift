@@ -3,6 +3,10 @@ import SwiftUI
 struct RadioView: View {
   @Environment(PlaybackController.self) private var playbackController
   @Environment(RadioStationController.self) private var radioStation
+  @Environment(MusicAuthorizationService.self) private var musicAuthorization
+  @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
+
+  @GestureState private var cardDragOffset: CGFloat = 0
 
   var body: some View {
     GeometryReader { proxy in
@@ -23,7 +27,6 @@ struct RadioView: View {
             currentItem: radioStation.currentItem,
             queueItems: radioStation.upNextItems,
             status: panelStatus,
-            errorMessage: radioStation.errorMessage,
             isPlaying: playbackController.state == .playing,
             isLoading: playbackController.state == .loading || radioStation.isLoadingStation,
             elapsedTimeText: playbackController.elapsedTimeText,
@@ -31,19 +34,52 @@ struct RadioView: View {
           )
           .padding(.horizontal, 10)
           .offset(y: -44)
+
+          RadioSpeechSubtitleCard(
+            speech: speechSubtitleSegment,
+            isActive: playbackController.currentSpeech != nil,
+            elapsedTimeText: playbackController.elapsedTimeText,
+            isLoading: radioStation.isLoadingStation
+          )
+          .padding(.horizontal, 10)
+          .padding(.top, 12)
+          .offset(y: -44)
         }
         .padding(.bottom, 96)
         .frame(width: proxy.size.width, alignment: .top)
         .frame(minHeight: proxy.size.height, alignment: .top)
+        .offset(y: cardDragOffset)
+        .animation(.spring(response: 0.32, dampingFraction: 0.84), value: cardDragOffset)
+        .contentShape(Rectangle())
+        .simultaneousGesture(cardReturnGesture)
       }
+      .scrollDisabled(true)
       .scrollBounceBehavior(.always, axes: .vertical)
     }
     .background(.clear)
     .task {
+      await musicAuthorization.refreshAccessState()
+      await appleMusicLibrary.loadIfNeeded(authorizationStatus: musicAuthorization.status)
+
       if !radioStation.hasStationContent, !radioStation.isLoadingStation {
         await radioStation.loadCurrentStation()
       }
     }
+  }
+
+  private var cardReturnGesture: some Gesture {
+    DragGesture(minimumDistance: 10, coordinateSpace: .local)
+      .updating($cardDragOffset) { value, state, _ in
+        guard abs(value.translation.height) > abs(value.translation.width) else { return }
+        state = rubberBandOffset(for: value.translation.height)
+      }
+  }
+
+  private func rubberBandOffset(for translation: CGFloat) -> CGFloat {
+    let limit: CGFloat = 58
+    let magnitude = min(abs(translation), 220)
+    let eased = limit * (1 - (1 / ((magnitude * 0.55 / limit) + 1)))
+    return translation < 0 ? -eased : eased
   }
 
   private var displayTrack: Track {
@@ -51,6 +87,10 @@ struct RadioView: View {
       ?? radioStation.currentItem?.track
       ?? radioStation.queue.first?.track
       ?? MockCatalog.featuredTracks[0]
+  }
+
+  private var speechSubtitleSegment: RadioSpeechPlaybackSegment? {
+    playbackController.currentSpeech ?? radioStation.upcomingSpeechSegment
   }
 
   private var panelStatus: RadioPanelStatus {
@@ -180,7 +220,6 @@ private struct NowPlayingSetCard: View {
   let currentItem: RadioQueueItem?
   let queueItems: [RadioQueueItem]
   let status: RadioPanelStatus
-  let errorMessage: String?
   let isPlaying: Bool
   let isLoading: Bool
   let elapsedTimeText: String
@@ -188,15 +227,6 @@ private struct NowPlayingSetCard: View {
 
   private var nextItem: RadioQueueItem? {
     queueItems.first
-  }
-
-  private var upNextTitle: String {
-    nextItem?.track.title ?? status.emptyQueueText
-  }
-
-  private var upNextDetail: String? {
-    guard let track = nextItem?.track else { return nil }
-    return "\(track.artist) • \(track.album)"
   }
 
   private var queueMetaTitle: String {
@@ -209,26 +239,6 @@ private struct NowPlayingSetCard: View {
 
   private var sourceText: String {
     currentItem?.sourceTitle ?? queueItems.first?.sourceTitle ?? "Backend station"
-  }
-
-  private var reasonText: String {
-    errorMessage ?? currentItem?.handoffText ?? currentItem?.reason ?? status.reasonText
-  }
-
-  private var trackFeedSource: String {
-    currentItem == nil ? "AIRSET" : track.artist.uppercased()
-  }
-
-  private var trackFeedMessage: String {
-    if currentItem != nil {
-      return "Now playing \(track.title), from \(track.album)."
-    }
-
-    if queueItems.isEmpty {
-      return "Load the backend station to start playback."
-    }
-
-    return "Ready to play \(track.title), from \(track.album)."
   }
 
   var body: some View {
@@ -261,48 +271,6 @@ private struct NowPlayingSetCard: View {
             .font(.system(size: 18, weight: .bold, design: .rounded))
             .foregroundStyle(.black.opacity(0.36))
         }
-      }
-
-      VStack(alignment: .leading, spacing: 10) {
-        FeedLine(
-          source: "Radio Brain",
-          message: reasonText,
-          lineLimit: 3
-        )
-
-        FeedLine(
-          source: trackFeedSource,
-          message: trackFeedMessage,
-          lineLimit: 2
-        )
-
-        VStack(alignment: .leading, spacing: 8) {
-          Text("Up next")
-            .font(.system(size: 16, weight: .heavy, design: .rounded))
-            .foregroundStyle(.black.opacity(0.38))
-
-          Text(upNextTitle)
-            .font(.system(size: 19, weight: .heavy, design: .rounded))
-            .foregroundStyle(.black)
-            .lineLimit(1)
-            .minimumScaleFactor(0.58)
-
-          if let upNextDetail {
-            Text(upNextDetail)
-              .font(.system(size: 14, weight: .bold, design: .rounded))
-              .foregroundStyle(.black.opacity(0.46))
-              .lineLimit(1)
-              .minimumScaleFactor(0.72)
-          }
-        }
-      }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 14)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(.black.opacity(0.055), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-      .overlay {
-        RoundedRectangle(cornerRadius: 28, style: .continuous)
-          .stroke(.white.opacity(0.72), lineWidth: 1)
       }
 
       HStack(spacing: 22) {
@@ -388,48 +356,86 @@ private struct NowPlayingSetCard: View {
   }
 }
 
-private extension RadioPanelStatus {
-  var reasonText: String {
-    switch self {
-    case .loading:
-      "Loading the latest backend station queue."
-    case .ready:
-      "The backend station is ready to load a playable queue."
-    case .onAir:
-      "Streaming the backend-programmed station queue."
-    }
-  }
-
-  var emptyQueueText: String {
-    switch self {
-    case .loading:
-      "Loading station"
-    case .ready:
-      "Tap start to load the station"
-    case .onAir:
-      "End of queue"
-    }
-  }
-}
-
-private struct FeedLine: View {
-  let source: String
-  let message: String
-  let lineLimit: Int
+private struct RadioSpeechSubtitleCard: View {
+  let speech: RadioSpeechPlaybackSegment?
+  let isActive: Bool
+  let elapsedTimeText: String
+  let isLoading: Bool
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Text("\(source) • 0:00")
-        .font(.system(size: 16, weight: .heavy, design: .rounded))
-        .foregroundStyle(.black.opacity(0.34))
+    VStack(alignment: .leading, spacing: 8) {
+      Text("\(subtitleTitle) • \(subtitleTimeText)")
+        .font(.system(size: 17, weight: .heavy, design: .rounded))
+        .foregroundStyle(.black.opacity(0.36))
+        .lineLimit(1)
+        .minimumScaleFactor(0.76)
 
-      Text(message)
-        .font(.system(size: 18, weight: .heavy, design: .rounded))
+      Text(captionText)
+        .font(.system(size: 26, weight: .heavy, design: .rounded))
         .foregroundStyle(.black)
-        .lineSpacing(2)
-        .lineLimit(lineLimit)
+        .lineSpacing(3)
+        .lineLimit(4)
         .truncationMode(.tail)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
+    .padding(.horizontal, 20)
+    .padding(.vertical, 18)
+    .frame(maxWidth: .infinity, minHeight: 132, alignment: .leading)
+    .background(
+      Color(red: 0.98, green: 0.97, blue: 0.93),
+      in: RoundedRectangle(cornerRadius: 30, style: .continuous)
+    )
+    .overlay(alignment: .top) {
+      LinearGradient(
+        colors: [.white.opacity(0.76), .clear],
+        startPoint: .top,
+        endPoint: .bottom
+      )
+      .frame(height: 78)
+      .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+    }
+    .overlay {
+      RoundedRectangle(cornerRadius: 30, style: .continuous)
+        .stroke(.white.opacity(0.7), lineWidth: 1)
+    }
+    .shadow(color: .black.opacity(0.12), radius: 18, y: 10)
+    .accessibilityElement(children: .combine)
+  }
+
+  private var subtitleTitle: String {
+    guard let speech else {
+      return isLoading ? "串词字幕" : "字幕待命"
+    }
+
+    switch speech.kind {
+    case .stationIntro:
+      return "电台开场"
+    case .transition:
+      return isActive ? "电台串场" : "下一段串场"
+    }
+  }
+
+  private var subtitleTimeText: String {
+    if isActive {
+      return elapsedTimeText
+    }
+
+    return isLoading ? "加载中" : "待播放"
+  }
+
+  private var captionText: String {
+    guard let speech else {
+      return isLoading
+        ? "正在加载串词字幕。"
+        : "串词字幕会在电台开场或串场时显示。"
+    }
+
+    let displayText = speech.displayText.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !displayText.isEmpty {
+      return displayText
+    }
+
+    return speech.text
   }
 }
 
@@ -554,4 +560,5 @@ private enum SpectrumBarPresets {
   .environment(playbackController)
   .environment(RadioStationController(playbackController: playbackController))
   .environment(MusicAuthorizationService())
+  .environment(AppleMusicLibraryStore())
 }

@@ -22,6 +22,7 @@ struct PlayerView: View {
       let safeArea = proxy.safeAreaInsets
       let artworkFrame = artworkStageFrame(for: proxy.size)
       let controlsSpacing = controlSpacing(for: proxy.size)
+      let controlsClusterSpacing = controlClusterSpacing(for: proxy.size)
       let horizontalPadding = horizontalPadding(for: proxy.size)
       let dragOffset = showsPresentationHandle ? max(0, verticalDragOffset) : 0
       let isLandscape = proxy.size.width > proxy.size.height
@@ -35,7 +36,11 @@ struct PlayerView: View {
               HStack(alignment: .center, spacing: 28) {
                 artworkStage(size: artworkFrame)
 
-                bottomControls(spacing: controlsSpacing)
+                bottomControls(
+                  spacing: controlsSpacing,
+                  clusterSpacing: controlsClusterSpacing,
+                  anchorsControlClusterToBottom: false
+                )
                   .frame(maxWidth: .infinity, alignment: .leading)
               }
               .padding(.horizontal, horizontalPadding)
@@ -48,11 +53,16 @@ struct PlayerView: View {
                   .frame(maxWidth: .infinity)
                   .ignoresSafeArea(edges: .top)
 
-                bottomControls(spacing: controlsSpacing)
+                bottomControls(
+                  spacing: controlsSpacing,
+                  clusterSpacing: controlsClusterSpacing,
+                  anchorsControlClusterToBottom: true
+                )
                   .padding(.horizontal, horizontalPadding)
-                  .padding(.top, -24)
-                  .padding(.bottom, max(safeArea.bottom, 20))
-                  .frame(width: proxy.size.width, alignment: .leading)
+                  .padding(.top, -8)
+                  .padding(.bottom, bottomControlsBottomPadding(for: safeArea))
+                  .frame(maxHeight: .infinity, alignment: .top)
+                  .frame(width: proxy.size.width, alignment: .top)
               }
               .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
@@ -108,8 +118,12 @@ struct PlayerView: View {
     .frame(width: size.width, height: size.height)
   }
 
-  private func bottomControls(spacing: CGFloat) -> some View {
-    VStack(alignment: .leading, spacing: spacing) {
+  private func bottomControls(
+    spacing: CGFloat,
+    clusterSpacing: CGFloat,
+    anchorsControlClusterToBottom: Bool
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 0) {
       PlayerTrackIdentity(
         title: playbackTitle,
         subtitle: playbackSubtitle,
@@ -119,6 +133,9 @@ struct PlayerView: View {
         }
       )
 
+      Spacer()
+        .frame(height: spacing)
+
       PlayerScrubber(
         progress: clampedPlaybackProgress,
         elapsedText: playbackController.elapsedTimeText,
@@ -127,36 +144,44 @@ struct PlayerView: View {
         statusIsAlert: playbackController.lastErrorMessage != nil
       )
 
-      PlayerTransportControls(
-        playButtonSystemImage: playButtonSystemImage,
-        playButtonAccessibilityLabel: playButtonAccessibilityLabel,
-        isLoading: playbackController.state == .loading,
-        playPauseAction: {
-          playbackController.togglePlayback()
-        },
-        nextAction: {
-          Task {
-            await radioStation.playNext(reason: .manual)
+      if anchorsControlClusterToBottom {
+        Spacer(minLength: spacing)
+      } else {
+        Spacer()
+          .frame(height: spacing)
+      }
+
+      VStack(alignment: .leading, spacing: clusterSpacing) {
+        PlayerTransportControls(
+          playButtonSystemImage: playButtonSystemImage,
+          playButtonAccessibilityLabel: playButtonAccessibilityLabel,
+          isLoading: playbackController.state == .loading,
+          playPauseAction: {
+            playbackController.togglePlayback()
+          },
+          nextAction: {
+            Task {
+              await radioStation.playNext(reason: .manual)
+            }
           }
-        }
-      )
+        )
 
-      VolumeControlRow()
+        VolumeControlRow()
 
-      PlayerSecondaryActions(
-        lyricsAction: {
-          presentedSheet = .lyrics
-        },
-        routeAction: {
-          presentedSheet = .details
-        },
-        queueAction: {
-          presentedSheet = .queue
-        }
-      )
+        PlayerSecondaryActions(
+          lyricsAction: {
+            presentedSheet = .lyrics
+          },
+          routeAction: {
+            presentedSheet = .details
+          },
+          queueAction: {
+            presentedSheet = .queue
+          }
+        )
+      }
     }
-    .padding(.bottom, 4)
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .frame(maxWidth: .infinity, maxHeight: anchorsControlClusterToBottom ? .infinity : nil, alignment: .topLeading)
   }
 
   @ViewBuilder
@@ -207,6 +232,14 @@ struct PlayerView: View {
     }
 
     return size.height < 780 ? 18 : 24
+  }
+
+  private func controlClusterSpacing(for size: CGSize) -> CGFloat {
+    size.height < 780 ? 20 : 24
+  }
+
+  private func bottomControlsBottomPadding(for safeArea: EdgeInsets) -> CGFloat {
+    max(24, safeArea.bottom - 10)
   }
 
   private var dismissDragGesture: some Gesture {
@@ -503,8 +536,8 @@ private struct PlayerTrackIdentity: View {
         CircleIconButton(
           systemImage: "star.fill",
           accessibilityLabel: "收藏暂不可用",
-          size: 25,
-          frameSize: 56,
+          size: 21,
+          frameSize: 48,
           isEnabled: false,
           action: {}
         )
@@ -512,8 +545,8 @@ private struct PlayerTrackIdentity: View {
         CircleIconButton(
           systemImage: "ellipsis",
           accessibilityLabel: "更多",
-          size: 24,
-          frameSize: 56,
+          size: 20,
+          frameSize: 48,
           action: moreAction
         )
       }
@@ -583,9 +616,9 @@ private struct PlayerTransportControls: View {
     HStack {
       Button(action: {}) {
         Image(systemName: "backward.fill")
-          .font(.system(size: 42, weight: .bold))
+          .font(.system(size: 34, weight: .bold))
           .foregroundStyle(.white.opacity(0.36))
-          .frame(width: 88, height: 72)
+          .frame(width: 76, height: 62)
       }
       .disabled(true)
       .accessibilityLabel("上一首暂不可用")
@@ -594,9 +627,9 @@ private struct PlayerTransportControls: View {
 
       Button(action: playPauseAction) {
         Image(systemName: playButtonSystemImage)
-          .font(.system(size: isLoading ? 50 : 58, weight: .bold))
+          .font(.system(size: isLoading ? 42 : 48, weight: .bold))
           .foregroundStyle(.white)
-          .frame(width: 96, height: 92)
+          .frame(width: 80, height: 76)
           .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
@@ -607,9 +640,9 @@ private struct PlayerTransportControls: View {
 
       Button(action: nextAction) {
         Image(systemName: "forward.fill")
-          .font(.system(size: 42, weight: .bold))
+          .font(.system(size: 34, weight: .bold))
           .foregroundStyle(.white)
-          .frame(width: 88, height: 72)
+          .frame(width: 76, height: 62)
           .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
@@ -656,7 +689,7 @@ private struct VolumeControlRow: View {
   var body: some View {
     HStack(spacing: 14) {
       Image(systemName: "speaker.fill")
-        .font(.system(size: 18, weight: .bold))
+        .font(.system(size: 16, weight: .bold))
         .foregroundStyle(.white.opacity(0.56))
         .frame(width: 22)
         .accessibilityHidden(true)
@@ -667,7 +700,7 @@ private struct VolumeControlRow: View {
         .accessibilityLabel("音量")
 
       Image(systemName: "speaker.wave.3.fill")
-        .font(.system(size: 20, weight: .bold))
+        .font(.system(size: 18, weight: .bold))
         .foregroundStyle(.white.opacity(0.56))
         .frame(width: 26)
         .accessibilityHidden(true)
@@ -706,10 +739,10 @@ private struct SecondaryActionButton: View {
   var body: some View {
     Button(action: action) {
       Image(systemName: systemImage)
-        .font(.system(size: 29, weight: .semibold))
+        .font(.system(size: 24, weight: .semibold))
         .symbolRenderingMode(.hierarchical)
         .foregroundStyle(.white.opacity(0.64))
-        .frame(width: 52, height: 44)
+        .frame(width: 46, height: 40)
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)

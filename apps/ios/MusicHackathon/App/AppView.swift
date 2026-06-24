@@ -4,6 +4,8 @@ import SwiftUI
 struct AppView: View {
   @Environment(PlaybackController.self) private var playbackController
   @Environment(RadioStationController.self) private var radioStation
+  @Environment(MusicAuthorizationService.self) private var musicAuthorization
+  @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
 
   @State private var selectedTab: AppTab = .radio
   @State private var isPlayerPresented = false
@@ -17,6 +19,10 @@ struct AppView: View {
           .presentationDetents([.playerExpanded])
           .presentationDragIndicator(.visible)
           .presentationCompactAdaptation(.sheet)
+      }
+      .task {
+        await musicAuthorization.refreshAccessState()
+        await appleMusicLibrary.loadIfNeeded(authorizationStatus: musicAuthorization.status)
       }
   }
 

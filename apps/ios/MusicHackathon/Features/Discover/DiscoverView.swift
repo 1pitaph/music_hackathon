@@ -3,13 +3,12 @@ import SwiftUI
 struct DiscoverView: View {
   @Environment(PlaybackController.self) private var playbackController
   @Environment(RadioStationController.self) private var radioStation
+  @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
 
   @State private var currentIndex = 0
   @State private var favoritedIDs: Set<String> = []
   @State private var expandedStationID: String?
   @State private var activeStationID: String?
-
-  private let stations = DiscoverStation.mockStations
 
   var body: some View {
     ZStack {
@@ -36,10 +35,26 @@ struct DiscoverView: View {
       }
     }
     .animation(.spring(response: 0.35, dampingFraction: 0.82), value: activeStationID)
+    .onChange(of: stationIDs) { _, _ in
+      normalizeSelectionForAvailableStations()
+    }
+  }
+
+  private var stations: [DiscoverStation] {
+    appleMusicLibrary.stations.isEmpty ? DiscoverStation.mockStations : appleMusicLibrary.stations
+  }
+
+  private var stationIDs: [String] {
+    stations.map(\.id)
   }
 
   private var currentStation: DiscoverStation {
-    stations[currentIndex]
+    stations[safeCurrentIndex]
+  }
+
+  private var safeCurrentIndex: Int {
+    guard !stations.isEmpty else { return 0 }
+    return min(max(currentIndex, 0), stations.count - 1)
   }
 
   private var isCurrentCardPlaying: Bool {
@@ -108,6 +123,17 @@ struct DiscoverView: View {
 
     Task {
       await radioStation.loadLocalStation(station.radioStation(), playImmediately: true)
+    }
+  }
+
+  private func normalizeSelectionForAvailableStations() {
+    guard !stations.isEmpty else { return }
+
+    currentIndex = safeCurrentIndex
+
+    if let activeStationID,
+       !stations.contains(where: { $0.id == activeStationID }) {
+      self.activeStationID = nil
     }
   }
 
@@ -587,6 +613,7 @@ private struct DiscoverCardStack: View {
       }
     }
   }
+
 }
 
 private struct DiscoverStationCard: View {
