@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { Image } from 'expo-image';
 import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
@@ -13,7 +14,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { WaveformBar } from '@/components/WaveformBar';
 import { ThemedText } from '@/components/themed-text';
 import { AppleColors, AppleType } from '@/constants/theme';
-import { STATION_COLORS } from '@/data/stations';
+import { COVER_IMAGES, STATION_COLORS } from '@/data/stations';
 import { Station } from '@/types/station';
 
 const MOCK_STATION_DURATION = 25 * 60; // 25分钟模拟电台时长
@@ -83,13 +84,12 @@ export function NowPlaying({
       <View style={[styles.coverWrap, { marginTop: 18, marginBottom: 16 }]}>
         <View style={[styles.coverShadow, { width: coverW, height: coverH, borderRadius: 14, backgroundColor: color + '1A' }]} />
         <View style={[styles.cover, { width: coverW, height: coverH, borderRadius: 14 }]}>
-          <LinearGradient
-            colors={[color, color + 'CC', color + '88']}
-            start={{ x: 0.25, y: 0 }}
-            end={{ x: 0.75, y: 1 }}
+          <Image
+            source={COVER_IMAGES[station.id]}
             style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            transition={300}
           />
-          <View style={[styles.cvHL, { width: coverW * 0.55, height: coverH * 0.28, borderRadius: coverW, top: coverH * 0.1 }]} />
         </View>
       </View>
 
@@ -159,7 +159,6 @@ const styles = StyleSheet.create({
   coverWrap: { alignItems: 'center' },
   coverShadow: { position: 'absolute', top: 4, opacity: 0.25 },
   cover: { overflow: 'hidden' },
-  cvHL: { position: 'absolute', backgroundColor: 'rgba(255,255,255,0.08)', transform: [{ scaleY: 0.4 }], left: '22.5%' },
   lower: { flex: 1, justifyContent: 'space-evenly' },
   info: { alignItems: 'center', paddingHorizontal: 24 },
   stationName: { ...AppleType.title1, fontWeight: '500' as const, textAlign: 'center', letterSpacing: -0.01, marginBottom: 4 },

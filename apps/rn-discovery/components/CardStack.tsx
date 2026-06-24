@@ -66,7 +66,7 @@ export function CardStack({ stations, currentIndex, isPlaying, onPlayToggle, onP
 }
 
 const styles = StyleSheet.create({
-  con: { alignItems: 'center', justifyContent: 'center' },
+  con: { alignItems: 'center' },
   main: { zIndex: 3 },
   peek: { position: 'absolute', zIndex: 1, opacity: 0.45, top: 12 },
   peekL: { left: -(8), transform: [{ translateX: -(24) }, { scale: 0.9 }, { rotate: '-3deg' }] },

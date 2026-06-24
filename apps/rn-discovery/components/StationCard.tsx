@@ -1,23 +1,16 @@
 import { useState } from 'react';
+import { Image } from 'expo-image';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSequence, withSpring } from 'react-native-reanimated';
 
 import { ExpandableDrawer } from '@/components/ExpandableDrawer';
 import { ThemedText } from '@/components/themed-text';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { AppleColors, AppleType, Spacing } from '@/constants/theme';
-import { STATION_COLORS } from '@/data/stations';
+import { COVER_IMAGES, STATION_COLORS } from '@/data/stations';
 import { Station } from '@/types/station';
 
 const AP = Animated.createAnimatedComponent(Pressable);
-
-function glowHex(hex: string): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r},${g},${b},0.28)`;
-}
 
 interface Props { station: Station; isActive: boolean; isPlaying: boolean; onPlayToggle: () => void; }
 
@@ -35,7 +28,6 @@ export function StationCard({ station, isActive, isPlaying, onPlayToggle }: Prop
   const handleToggle = () => setOpen(o => !o);
 
   const c = STATION_COLORS[station.id] ?? '#8C7355';
-  const g = glowHex(c);
 
   return (
     <View style={[styles.wrap, isActive && styles.wrapActive]}>
@@ -43,9 +35,16 @@ export function StationCard({ station, isActive, isPlaying, onPlayToggle }: Prop
       <View style={styles.main}>
         {/* 封面 */}
         <AP style={styles.art} onPress={press}>
-          <View style={[styles.gl, { backgroundColor: g }, isPlaying && styles.glOn]} />
-          <LinearGradient colors={[c, c + 'CC', c + '99']} start={{ x: 0.2, y: 0 }} end={{ x: 0.8, y: 1 }} style={styles.gr} />
-          <View style={styles.hl} />
+          <Image
+            source={COVER_IMAGES[station.id]}
+            style={styles.gr}
+            contentFit="cover"
+            transition={300}
+          />
+          {/* 播放态光晕 */}
+          {isPlaying && (
+            <View style={[styles.gl, { backgroundColor: c + '40' }, styles.glOn]} />
+          )}
         </AP>
 
         {/* 信息区 */}
@@ -115,14 +114,12 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 22,
   },
   gr: { ...StyleSheet.absoluteFillObject },
-  gl: { position: 'absolute', top: -20, left: -20, right: -20, bottom: -20, borderRadius: 48, opacity: 0.35 },
-  glOn: { opacity: 0.65 },
-  hl: {
+  gl: {
     position: 'absolute',
-    top: 16, left: '20%', width: '60%', height: '50%',
-    backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 999,
-    transform: [{ scaleY: 0.4 }],
+    inset: 0,
+    borderRadius: 22,
   },
+  glOn: { opacity: 1 },
 
   infoBg: { backgroundColor: 'rgba(36,34,30,0.75)' },
   info: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.xl, paddingTop: Spacing.lg },

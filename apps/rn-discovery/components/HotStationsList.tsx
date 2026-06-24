@@ -1,11 +1,11 @@
+import { Image } from 'expo-image';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ThemedText } from '@/components/themed-text';
 import { AppleColors, AppleRadius, AppleType, Spacing } from '@/constants/theme';
-import { STATION_COLORS } from '@/data/stations';
+import { COVER_IMAGES } from '@/data/stations';
 import { popularStationIds } from '@/data/trending';
 import { Station } from '@/types/station';
 
@@ -33,15 +33,12 @@ export function HotStationsList({ stations, onPlayStation }: Props) {
         热门电台
       </ThemedText>
 
-      {rows.map((s, i) => {
-        const c = STATION_COLORS[s.id] ?? '#8C7355';
-        return (
-          <View key={s.id}>
-            <HotListItem station={s} color={c} onPress={() => onPlayStation(s)} />
-            {i < rows.length - 1 && <View style={styles.dv} />}
-          </View>
-        );
-      })}
+      {rows.map((s, i) => (
+        <View key={s.id}>
+          <HotListItem station={s} onPress={() => onPlayStation(s)} />
+          {i < rows.length - 1 && <View style={styles.dv} />}
+        </View>
+      ))}
 
       <View style={styles.btm}>
         <ThemedText style={styles.btt} lightColor={AppleColors.tertiaryLabel} darkColor={AppleColors.tertiaryLabel}>
@@ -53,7 +50,7 @@ export function HotStationsList({ stations, onPlayStation }: Props) {
 }
 
 /** 单项 — 按压 scale 0.98 + 阴影 */
-function HotListItem({ station: s, color: c, onPress }: { station: Station; color: string; onPress: () => void }) {
+function HotListItem({ station: s, onPress }: { station: Station; onPress: () => void }) {
   const sc = useSharedValue(1);
   const aS = useAnimatedStyle(() => ({ transform: [{ scale: sc.value }] }));
   const press = () => {
@@ -66,7 +63,7 @@ function HotListItem({ station: s, color: c, onPress }: { station: Station; colo
 
   return (
     <AP onPress={press} style={[styles.r, aS]}>
-      <LinearGradient colors={[c, c + 'CC']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.cv} />
+      <Image source={COVER_IMAGES[s.id]} style={styles.cv} contentFit="cover" />
       <View style={styles.tb}>
         <ThemedText style={styles.n} numberOfLines={1} lightColor={AppleColors.label} darkColor={AppleColors.label}>
           {s.title}

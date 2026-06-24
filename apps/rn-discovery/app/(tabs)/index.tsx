@@ -161,8 +161,7 @@ export default function DiscoverScreen() {
         <FloatingPlayer
           title={playingStation.title}
           host={playingStation.hostName}
-          songTitle={playingStation.title}
-          color={STATION_COLORS[playingStation.id] ?? '#8C7355'}
+          stationId={playingStation.id}
           isPlaying={playing}
           onPlayToggle={() => setPlaying(p => !p)}
           onPrev={goPlayerPrev}
@@ -196,7 +195,7 @@ const styles = StyleSheet.create({
   sc: {},
   hd: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 8, paddingTop: 12, paddingBottom: Spacing.xxl,
+    paddingHorizontal: 8, paddingTop: 4, paddingBottom: 40,
   },
   hdIcon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   hdTitle: { flex: 1, alignItems: 'center' },

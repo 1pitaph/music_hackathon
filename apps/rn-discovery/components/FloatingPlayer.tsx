@@ -1,15 +1,16 @@
+import { Image } from 'expo-image';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { useAnimatedStyle, useSharedValue, withSequence, withSpring } from 'react-native-reanimated';
 
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ThemedText } from '@/components/themed-text';
 import { AppleColors, AppleRadius, AppleType, Spacing } from '@/constants/theme';
+import { COVER_IMAGES } from '@/data/stations';
 
 const AP = Animated.createAnimatedComponent(Pressable);
 
 interface Props {
-  title: string; host: string; color: string;
+  title: string; host: string; stationId: string;
   /** 当前歌曲名，显示在播放器主体区域 */
   songTitle?: string;
   isPlaying: boolean; onPlayToggle: () => void;
@@ -18,7 +19,7 @@ interface Props {
 }
 
 /** 悬浮播放器 — 暂停/播放只切图标，不隐藏。非按钮区域预留展开详情页。 */
-export function FloatingPlayer({ title, host, color, isPlaying, onPlayToggle, onPrev, onNext, onExpandPlayer }: Props) {
+export function FloatingPlayer({ title, host, stationId, isPlaying, onPlayToggle, onPrev, onNext, onExpandPlayer }: Props) {
   const sc = useSharedValue(1);
   const aS = useAnimatedStyle(() => ({ transform: [{ scale: sc.value }] }));
 
@@ -36,7 +37,7 @@ export function FloatingPlayer({ title, host, color, isPlaying, onPlayToggle, on
       {/* 非按钮区域 — 点击预留展开全屏播放器 */}
       <Pressable onPress={onExpandPlayer} style={styles.cap}>
         {/* 小封面 */}
-        <LinearGradient colors={[color, color + 'CC']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.cv} />
+        <Image source={COVER_IMAGES[stationId]} style={styles.cv} contentFit="cover" />
 
         {/* 信息 */}
         <View style={styles.inf}>

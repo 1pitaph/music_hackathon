@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { LayoutChangeEvent, Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -17,18 +17,32 @@ interface Props {
   onToggle: () => void;
 }
 
-const DRAWER_MAX = 360;
-
+/**
+ * 抽屉展开 — onLayout 实测内容高度，精确匹配，不留空白。
+ * 歌曲最多 5 首，简介最多 300 字。
+ */
 export function ExpandableDrawer({ station, expanded, onToggle }: Props) {
+  const [contentH, setContentH] = useState(0);
   const drawerH = useSharedValue(0);
 
+  // 切换电台 → 重置测量值，避免闪烁
   useEffect(() => {
-    if (expanded) {
-      drawerH.value = withTiming(DRAWER_MAX, { duration: 320 });
+    setContentH(0);
+  }, [station.id]);
+
+  // 测量内容高度 — 无条件更新（变大变小都覆盖）
+  const onLayout = useCallback((e: LayoutChangeEvent) => {
+    const h = e.nativeEvent.layout.height;
+    if (h > 0) setContentH(h);
+  }, []);
+
+  useEffect(() => {
+    if (expanded && contentH > 0) {
+      drawerH.value = withTiming(contentH, { duration: 320 });
     } else {
       drawerH.value = withTiming(0, { duration: 280 });
     }
-  }, [expanded]);
+  }, [expanded, contentH]);
 
   const drawerAS = useAnimatedStyle(() => ({
     maxHeight: drawerH.value,
@@ -40,6 +54,12 @@ export function ExpandableDrawer({ station, expanded, onToggle }: Props) {
     pointerEvents: drawerH.value > 10 ? ('auto' as const) : ('none' as const),
   }));
 
+  const desc = station.description
+    ? station.description.length > 300
+      ? station.description.slice(0, 300) + '…'
+      : station.description
+    : '暂无介绍';
+
   return (
     <View style={styles.outer}>
       <Animated.View style={[styles.mask, maskAS]}>
@@ -47,20 +67,23 @@ export function ExpandableDrawer({ station, expanded, onToggle }: Props) {
       </Animated.View>
 
       <Animated.View style={[styles.drawer, drawerAS]}>
-        <View style={styles.sec}>
-          <ThemedText style={styles.secLabel}>关于此电台</ThemedText>
-          <ThemedText style={styles.desc}>{station.description || '暂无介绍'}</ThemedText>
-        </View>
-        {station.songs.length > 0 && (
+        {/* 测量层：onLayout 获取实际内容像素高度 */}
+        <View onLayout={onLayout}>
           <View style={styles.sec}>
-            {station.songs.slice(0, 5).map((s) => (
-              <View key={s.id} style={styles.songRow}>
-                <IconSymbol size={13} name="music.note.list" color="rgba(255,255,255,0.4)" />
-                <ThemedText style={styles.songTitle} numberOfLines={1}>{s.title}</ThemedText>
-              </View>
-            ))}
+            <ThemedText style={styles.secLabel}>关于此电台</ThemedText>
+            <ThemedText style={styles.desc}>{desc}</ThemedText>
           </View>
-        )}
+          {station.songs.length > 0 && (
+            <View style={styles.sec}>
+              {station.songs.slice(0, 5).map((s) => (
+                <View key={s.id} style={styles.songRow}>
+                  <IconSymbol size={13} name="music.note.list" color="rgba(255,255,255,0.4)" />
+                  <ThemedText style={styles.songTitle} numberOfLines={1}>{s.title}</ThemedText>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
       </Animated.View>
     </View>
   );
