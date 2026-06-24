@@ -133,42 +133,15 @@ private struct GlobalMiniPlayer: View {
   let onNext: () -> Void
 
   private let accentColor = Color(hex: "#D9523A")
-  private let cornerRadius: CGFloat = 18
 
   var body: some View {
-    if #available(iOS 26.0, *) {
-      content
-        .background(.black.opacity(0.12), in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .glassEffect(.regular.tint(.black.opacity(0.18)).interactive(), in: .rect(cornerRadius: cornerRadius))
-        .overlay(containerStroke)
-        .shadow(color: .black.opacity(0.24), radius: 18, y: 8)
-    } else {
-      content
-        .background {
-          RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(.ultraThinMaterial)
-
-          RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(.black.opacity(0.22))
-        }
-        .overlay(containerStroke)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .shadow(color: .black.opacity(0.24), radius: 18, y: 8)
-    }
+    content
   }
 
   private var content: some View {
     HStack(spacing: 10) {
-      Button(action: onOpenPlayer) {
-        HStack(spacing: 10) {
-          artwork
-          trackText
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-      }
-      .buttonStyle(.plain)
-      .layoutPriority(1)
+      playableInfo
+        .layoutPriority(1)
 
       controls
     }
@@ -178,9 +151,20 @@ private struct GlobalMiniPlayer: View {
     .frame(maxWidth: .infinity)
   }
 
-  private var containerStroke: some View {
-    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-      .stroke(.white.opacity(0.12), lineWidth: 1)
+  private var playableInfo: some View {
+    HStack(spacing: 10) {
+      artwork
+      trackText
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .contentShape(Rectangle())
+    .onTapGesture(perform: onOpenPlayer)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("\(title), \(subtitle)")
+    .accessibilityAddTraits(.isButton)
+    .accessibilityAction {
+      onOpenPlayer()
+    }
   }
 
   private var artwork: some View {
@@ -259,13 +243,8 @@ private struct GlobalMiniPlayer: View {
     Button(action: action) {
       Image(systemName: systemImage)
         .font(.system(size: prominent ? 16 : 14, weight: .bold))
-        .foregroundStyle(prominent ? accentColor : .white.opacity(0.86))
+        .foregroundStyle(.white)
         .frame(width: prominent ? 42 : 36, height: prominent ? 42 : 36)
-        .background(prominent ? .white.opacity(0.94) : .white.opacity(0.08), in: Circle())
-        .overlay {
-          Circle()
-            .stroke(prominent ? .white.opacity(0.26) : .white.opacity(0.08), lineWidth: 1)
-        }
     }
     .buttonStyle(.plain)
     .contentShape(Circle())
