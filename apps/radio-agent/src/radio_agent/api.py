@@ -9,11 +9,17 @@ from radio_agent.schemas import (
   RadioMemoryCompressionRequest,
   RadioMemoryCompressionResponse,
   RadioMemoryPatchProposal,
+  RadioSpeech,
+  RadioSpeechAudioConfig,
+  RadioSpeechSegment,
+  RadioSpeechSynthesisRequest,
+  RadioSpeechSynthesisResponse,
   RadioStationGenerateRequest,
   RadioStationGenerateResponse,
   RadioStationItem,
   RadioTrack,
 )
+from radio_agent.speech import synthesize_speech_segments
 
 app = FastAPI(title="Airset Radio Agent", version="0.1.0")
 
@@ -100,6 +106,11 @@ def generate_station(request: RadioStationGenerateRequest) -> RadioStationGenera
   items = _station_items_from_generation(generation, candidates)
 
   diagnostics = list(generation.diagnostics)
+  speech = generation.speech
+  if speech and request.speechAudio.enabled:
+    speech, speech_diagnostics = _speech_with_audio(speech, request.speechAudio)
+    diagnostics.extend(speech_diagnostics)
+
   if len(items) < request.limit:
     used = {item.id for item in items}
     for track in [*request.seedTracks, *request.catalogCandidates]:
@@ -117,10 +128,10 @@ def generate_station(request: RadioStationGenerateRequest) -> RadioStationGenera
   return RadioStationGenerateResponse(
     stationID=request.stationID,
     title=request.title,
-    subtitle=generation.speech.stationIntro.displayText if generation.speech and generation.speech.stationIntro else generation.stationIntro,
+    subtitle=speech.stationIntro.displayText if speech and speech.stationIntro else generation.stationIntro,
     items=items[: request.limit],
     mode=generation.mode,
-    speech=generation.speech,
+    speech=speech,
     diagnostics=diagnostics,
     memoryPatchProposals=_memory_patch_proposals(request),
   )
@@ -129,6 +140,12 @@ def generate_station(request: RadioStationGenerateRequest) -> RadioStationGenera
 @app.post("/v1/radio/generate", response_model=RadioGenerateResponse)
 def generate(request: RadioGenerateRequest) -> RadioGenerateResponse:
   return generate_radio(request)
+
+
+@app.post("/v1/radio/speech/synthesize", response_model=RadioSpeechSynthesisResponse)
+def synthesize_speech(request: RadioSpeechSynthesisRequest) -> RadioSpeechSynthesisResponse:
+  results, diagnostics = synthesize_speech_segments(request.segments, request.speechAudio)
+  return RadioSpeechSynthesisResponse(segments=results, diagnostics=diagnostics)
 
 
 @app.post("/v1/radio/memory/compress", response_model=RadioMemoryCompressionResponse)
@@ -194,6 +211,52 @@ def _station_item(
 
 def _is_playable(track: RadioTrack) -> bool:
   return bool(track.appleMusicID or track.previewURL)
+
+
+def _speech_with_audio(
+  speech: RadioSpeech,
+  config: RadioSpeechAudioConfig,
+) -> tuple[RadioSpeech, list[str]]:
+  segments = _speech_segments(speech)
+  results, diagnostics = synthesize_speech_segments(segments, config)
+  audio_by_id = {result.id: result.audio for result in results}
+
+  station_intro = speech.stationIntro
+  if station_intro and station_intro.id in audio_by_id:
+    station_intro = station_intro.model_copy(update={"audio": audio_by_id[station_intro.id]})
+
+  between_tracks = [
+    copy.model_copy(update={"audio": audio_by_id[copy.id]})
+    if copy.id in audio_by_id else copy
+    for copy in speech.betweenTracks
+  ]
+  return speech.model_copy(update={
+    "stationIntro": station_intro,
+    "betweenTracks": between_tracks,
+  }), diagnostics
+
+
+def _speech_segments(speech: RadioSpeech) -> list[RadioSpeechSegment]:
+  segments: list[RadioSpeechSegment] = []
+  if speech.stationIntro:
+    segments.append(RadioSpeechSegment(
+      id=speech.stationIntro.id,
+      kind="stationIntro",
+      text=speech.stationIntro.text,
+      displayText=speech.stationIntro.displayText,
+      targetItemId=speech.stationIntro.targetItemId,
+    ))
+
+  for copy in speech.betweenTracks:
+    segments.append(RadioSpeechSegment(
+      id=copy.id,
+      kind="transition",
+      text=copy.text,
+      displayText=copy.displayText,
+      fromItemId=copy.fromItemId,
+      toItemId=copy.toItemId,
+    ))
+  return segments
 
 
 def _memory_patch_proposals(request: RadioStationGenerateRequest) -> list[RadioMemoryPatchProposal]:

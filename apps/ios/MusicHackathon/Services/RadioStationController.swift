@@ -14,13 +14,14 @@ final class RadioStationController {
   var memorySummaryText = "Local memory is ready."
   var memoryEventCount = 0
 
-  @ObservationIgnored private let playbackController: PlaybackController
+  @ObservationIgnored private let playbackController: any RadioPlaybackControlling
   @ObservationIgnored private let stationClient: any RadioStationFetching
   @ObservationIgnored private let memoryStore: any RadioMemoryStoring
   @ObservationIgnored private var history: [RadioQueueItem] = []
+  @ObservationIgnored private var hasPlayedStationIntro = false
 
   init(
-    playbackController: PlaybackController,
+    playbackController: any RadioPlaybackControlling,
     stationClient: any RadioStationFetching = RadioStationClient(),
     memoryStore: any RadioMemoryStoring = RadioMemoryStore()
   ) {
@@ -28,9 +29,9 @@ final class RadioStationController {
     self.stationClient = stationClient
     self.memoryStore = memoryStore
 
-    playbackController.onTrackFinished = { [weak self] in
+    playbackController.onPlaybackFinished = { [weak self] kind in
       Task { @MainActor in
-        await self?.playNext(reason: .automaticCompletion)
+        await self?.handlePlaybackFinished(kind)
       }
     }
   }
@@ -65,6 +66,31 @@ final class RadioStationController {
   }
 
   func playNext(reason: RadioAdvanceReason = .manual) async {
+    if reason == .stationStart,
+       !hasPlayedStationIntro,
+       let intro = station?.speech?.stationIntro {
+      hasPlayedStationIntro = true
+      playbackController.playSpeech(intro.playbackSegment)
+      return
+    }
+
+    if reason == .automaticCompletion,
+       let finishedItem = currentItem {
+      await recordMemoryEvent(type: "complete", track: finishedItem.track)
+      history.append(finishedItem)
+      currentItem = nil
+
+      if let nextItem = queue.first,
+         let transition = transitionCopy(from: finishedItem, to: nextItem) {
+        playbackController.playSpeech(transition.playbackSegment)
+        return
+      }
+    } else if reason == .manual, let currentItem {
+      await recordMemoryEvent(type: "skip", track: currentItem.track)
+      history.append(currentItem)
+      self.currentItem = nil
+    }
+
     if queue.isEmpty {
       await loadCurrentStation()
     }
@@ -74,11 +100,6 @@ final class RadioStationController {
         errorMessage = "No tracks are ready from the backend station."
       }
       return
-    }
-
-    if let currentItem {
-      await recordMemoryEvent(type: reason == .automaticCompletion ? "complete" : "skip", track: currentItem.track)
-      history.append(currentItem)
     }
 
     let nextItem = queue.removeFirst()
@@ -108,6 +129,25 @@ final class RadioStationController {
     await loadCurrentStation()
   }
 
+  func loadLocalStation(_ station: RadioStation, playImmediately: Bool = false) async {
+    isLoadingStation = false
+    errorMessage = nil
+    self.station = station
+    stationTitle = station.title
+    stationIntro = station.subtitle
+    currentItem = nil
+    history = []
+    queue = station.items
+    hasPlayedStationIntro = false
+    await recordMemoryEvent(type: "station_generate", track: station.items.first?.track)
+
+    if playImmediately {
+      await playNext(reason: .stationStart)
+    } else {
+      playbackController.stop()
+    }
+  }
+
   func loadCurrentStation(playImmediately: Bool = false) async {
     guard !isLoadingStation else { return }
 
@@ -130,6 +170,7 @@ final class RadioStationController {
       currentItem = nil
       history = []
       queue = station.items
+      hasPlayedStationIntro = false
       await recordMemoryEvent(type: "station_generate", track: station.items.first?.track)
 
       if playImmediately {
@@ -142,6 +183,7 @@ final class RadioStationController {
       currentItem = nil
       history = []
       queue = []
+      hasPlayedStationIntro = false
       stationTitle = "Airset Radio"
       stationIntro = "The backend station is not available right now."
       errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -191,6 +233,25 @@ final class RadioStationController {
     await refreshMemoryStatus()
   }
 
+  private func handlePlaybackFinished(_ kind: PlaybackCompletionKind) async {
+    switch kind {
+    case .track:
+      await playNext(reason: .automaticCompletion)
+    case .speech:
+      await playNext(reason: .speechCompletion)
+    }
+  }
+
+  private func transitionCopy(from finishedItem: RadioQueueItem, to nextItem: RadioQueueItem) -> RadioTransitionCopy? {
+    station?.speech?.betweenTracks.first { copy in
+      idsMatch(copy.fromItemId, finishedItem) && idsMatch(copy.toItemId, nextItem)
+    }
+  }
+
+  private func idsMatch(_ id: String, _ item: RadioQueueItem) -> Bool {
+    id == item.id || id == item.track.radioIdentity
+  }
+
   private func compressMemoryIfNeeded() async {
     guard let request = try? await memoryStore.compressionRequest() else { return }
     guard let proposal = try? await stationClient.compressMemory(request) else { return }
@@ -202,4 +263,5 @@ enum RadioAdvanceReason {
   case manual
   case stationStart
   case automaticCompletion
+  case speechCompletion
 }

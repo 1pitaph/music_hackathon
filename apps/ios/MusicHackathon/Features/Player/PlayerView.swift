@@ -8,11 +8,11 @@ struct PlayerView: View {
       artwork
 
       VStack(spacing: 8) {
-        Text(playbackController.currentTrack?.title ?? "Ready to play")
+        Text(playbackTitle)
           .font(.title2.bold())
           .multilineTextAlignment(.center)
 
-        Text(playbackController.currentTrack?.artist ?? "Choose a track from Discover")
+        Text(playbackSubtitle)
           .font(.subheadline)
           .foregroundStyle(.secondary)
       }
@@ -52,7 +52,11 @@ struct PlayerView: View {
 
   private var artwork: some View {
     Group {
-      if let artworkURL = playbackController.currentTrack?.artworkURL {
+      if playbackController.currentSpeech != nil {
+        Image(systemName: "waveform.badge.mic")
+          .font(.system(size: 92))
+          .foregroundStyle(.tint)
+      } else if let artworkURL = playbackController.currentTrack?.artworkURL {
         AsyncImage(url: artworkURL) { image in
           image
             .resizable()
@@ -86,9 +90,23 @@ struct PlayerView: View {
       Text("Apple Music")
     } else if playbackController.activeBackend == .localPreview {
       Text("Local preview")
+    } else if playbackController.activeBackend == .speechAudio || playbackController.activeBackend == .speechSynthesis {
+      Text("Airset host")
     } else {
       Text(playbackController.state.rawValue.capitalized)
     }
+  }
+
+  private var playbackTitle: String {
+    playbackController.currentSpeech == nil
+      ? playbackController.currentTrack?.title ?? "Ready to play"
+      : "Airset Host"
+  }
+
+  private var playbackSubtitle: String {
+    playbackController.currentSpeech?.displayText
+      ?? playbackController.currentTrack?.artist
+      ?? "Choose a track from Discover"
   }
 
   private var playButtonSystemImage: String {

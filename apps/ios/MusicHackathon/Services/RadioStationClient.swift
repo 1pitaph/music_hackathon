@@ -41,6 +41,7 @@ struct RadioStationGenerationContext: Encodable, Equatable {
   var limit = 12
   var stationID = "airset-personal"
   var title = "Airset Radio"
+  var speechAudio = RadioSpeechAudioRequest(enabled: true)
 
   init(
     seedTracks: [Track],
@@ -67,6 +68,14 @@ struct RadioStationGenerationContext: Encodable, Equatable {
       dislikedTrackKeys: []
     )
   }
+}
+
+struct RadioSpeechAudioRequest: Codable, Equatable {
+  var enabled = false
+  var provider = "openai"
+  var voice = "coral"
+  var model = "gpt-4o-mini-tts"
+  var format = "mp3"
 }
 
 struct RadioTuningPayload: Codable, Equatable {

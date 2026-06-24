@@ -74,12 +74,31 @@ class RadioGeneratedItem(BaseModel):
   source: str
 
 
+class RadioSpeechAudio(BaseModel):
+  audioURL: str | None = None
+  mimeType: str = "audio/mpeg"
+  durationSeconds: float | None = None
+  cacheKey: str
+  voice: str
+  model: str
+  status: Literal["ready", "unavailable", "failed"] = "unavailable"
+
+
+class RadioSpeechAudioConfig(BaseModel):
+  enabled: bool = False
+  provider: str = "openai"
+  voice: str | None = None
+  model: str | None = None
+  format: str = "mp3"
+
+
 class RadioEntryCopy(BaseModel):
   id: str = "station-intro"
   text: str
   displayText: str
   targetItemId: str | None = None
   agent: str = "entry_copy_agent"
+  audio: RadioSpeechAudio | None = None
 
 
 class RadioTransitionCopy(BaseModel):
@@ -89,6 +108,7 @@ class RadioTransitionCopy(BaseModel):
   text: str
   displayText: str
   agent: str = "transition_copy_agent"
+  audio: RadioSpeechAudio | None = None
 
 
 class RadioSpeech(BaseModel):
@@ -107,6 +127,7 @@ class RadioGenerateResponse(BaseModel):
 class RadioStationGenerateRequest(RadioGenerateRequest):
   stationID: str = "airset-personal"
   title: str = "Airset Radio"
+  speechAudio: RadioSpeechAudioConfig = Field(default_factory=RadioSpeechAudioConfig)
 
 
 class RadioStationItem(BaseModel):
@@ -143,6 +164,32 @@ class RadioStationGenerateResponse(BaseModel):
   speech: RadioSpeech | None = None
   diagnostics: list[str] = Field(default_factory=list)
   memoryPatchProposals: list[RadioMemoryPatchProposal] = Field(default_factory=list)
+
+
+class RadioSpeechSegment(BaseModel):
+  id: str
+  kind: Literal["stationIntro", "transition"]
+  text: str
+  displayText: str
+  fromItemId: str | None = None
+  toItemId: str | None = None
+  targetItemId: str | None = None
+
+
+class RadioSpeechSynthesisRequest(BaseModel):
+  segments: list[RadioSpeechSegment] = Field(default_factory=list)
+  speechAudio: RadioSpeechAudioConfig = Field(
+    default_factory=lambda: RadioSpeechAudioConfig(enabled=True)
+  )
+
+
+class RadioSpeechSynthesisResult(RadioSpeechSegment):
+  audio: RadioSpeechAudio
+
+
+class RadioSpeechSynthesisResponse(BaseModel):
+  segments: list[RadioSpeechSynthesisResult]
+  diagnostics: list[str] = Field(default_factory=list)
 
 
 class RadioMemoryCompressionRequest(BaseModel):

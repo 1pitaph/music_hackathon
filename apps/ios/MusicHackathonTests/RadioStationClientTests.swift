@@ -58,6 +58,9 @@ final class RadioStationClientTests: XCTestCase {
       XCTAssertEqual(body?["stationID"] as? String, "airset-personal")
       let memoryContext = body?["memoryContext"] as? [String: Any]
       XCTAssertEqual(memoryContext?["tasteSummary"] as? String, "Likes intimate pop.")
+      let speechAudio = body?["speechAudio"] as? [String: Any]
+      XCTAssertEqual(speechAudio?["enabled"] as? Bool, true)
+      XCTAssertEqual(speechAudio?["voice"] as? String, "coral")
       let catalogCandidates = body?["catalogCandidates"] as? [[String: Any]]
       XCTAssertEqual(catalogCandidates?.first?["playlistName"] as? String, "Virtual Library: Warm Starts")
       XCTAssertEqual(catalogCandidates?.first?["source"] as? String, "virtual_music_library_json")
@@ -77,7 +80,16 @@ final class RadioStationClientTests: XCTestCase {
             "text": "Welcome into this generated station.",
             "displayText": "Welcome into this generated station.",
             "targetItemId": "item-1",
-            "agent": "entry_copy_agent"
+            "agent": "entry_copy_agent",
+            "audio": {
+              "audioURL": "https://example.com/speech/intro.mp3",
+              "mimeType": "audio/mpeg",
+              "durationSeconds": 3.2,
+              "cacheKey": "speech_intro",
+              "voice": "coral",
+              "model": "gpt-4o-mini-tts",
+              "status": "ready"
+            }
           },
           "betweenTracks": [
             {
@@ -86,7 +98,16 @@ final class RadioStationClientTests: XCTestCase {
               "toItemId": "item-1",
               "text": "From the opener, Airset is moving into Signal.",
               "displayText": "Next: Signal by Artist A.",
-              "agent": "transition_copy_agent"
+              "agent": "transition_copy_agent",
+              "audio": {
+                "audioURL": "https://example.com/speech/transition.mp3",
+                "mimeType": "audio/mpeg",
+                "durationSeconds": 2.8,
+                "cacheKey": "speech_transition",
+                "voice": "coral",
+                "model": "gpt-4o-mini-tts",
+                "status": "ready"
+              }
             }
           ]
         },
@@ -132,7 +153,10 @@ final class RadioStationClientTests: XCTestCase {
     XCTAssertEqual(result.station.id, "airset-personal")
     XCTAssertEqual(result.station.subtitle, "Generated from local memory.")
     XCTAssertEqual(result.station.speech?.stationIntro?.displayText, "Welcome into this generated station.")
+    XCTAssertEqual(result.station.speech?.stationIntro?.audio?.audioURL?.absoluteString, "https://example.com/speech/intro.mp3")
+    XCTAssertEqual(result.station.speech?.stationIntro?.audio?.status, "ready")
     XCTAssertEqual(result.station.speech?.betweenTracks.first?.toItemId, "item-1")
+    XCTAssertEqual(result.station.speech?.betweenTracks.first?.audio?.cacheKey, "speech_transition")
     XCTAssertEqual(result.station.items.first?.handoffText, "Next: Signal by Artist A.")
     XCTAssertEqual(result.diagnostics, ["ok"])
     XCTAssertEqual(result.memoryPatchProposals.first?.type, "taste")

@@ -2,6 +2,7 @@ import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable {
   case radio
+  case discover
   case mine
 
   var id: String { rawValue }
@@ -9,15 +10,17 @@ enum AppTab: String, CaseIterable, Identifiable {
   var title: String {
     switch self {
     case .radio:
-      "Radio"
+      "电台"
+    case .discover:
+      "发现"
     case .mine:
-      "Mine"
+      "我的"
     }
   }
 
   var prefersHiddenNavigationBar: Bool {
     switch self {
-    case .radio:
+    case .radio, .discover:
       true
     case .mine:
       false
@@ -28,9 +31,11 @@ enum AppTab: String, CaseIterable, Identifiable {
   var content: some View {
     switch self {
     case .radio:
+      RadioView()
+    case .discover:
       DiscoverView()
     case .mine:
-      SettingsView()
+      MineView()
     }
   }
 
@@ -38,9 +43,11 @@ enum AppTab: String, CaseIterable, Identifiable {
   var label: some View {
     switch self {
     case .radio:
-      Label("Radio", systemImage: "dot.radiowaves.left.and.right")
+      Label("电台", systemImage: "dot.radiowaves.left.and.right")
+    case .discover:
+      Label("发现", systemImage: "music.note.list")
     case .mine:
-      Label("Mine", systemImage: "person.crop.circle")
+      Label("我的", systemImage: "person.crop.circle")
     }
   }
 }

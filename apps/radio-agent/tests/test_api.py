@@ -70,6 +70,68 @@ def test_generate_station_returns_ios_playable_payload(monkeypatch):
   assert body["memoryPatchProposals"]
 
 
+def test_generate_station_can_attach_mock_speech_audio(monkeypatch):
+  monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+  monkeypatch.setenv("SPEECH_PUBLIC_BASE_URL", "https://speech.test/audio")
+  client = TestClient(app)
+  payload = {
+    **_request_payload(),
+    "speechAudio": {
+      "enabled": True,
+      "provider": "mock",
+      "voice": "coral",
+      "model": "gpt-4o-mini-tts",
+      "format": "mp3",
+    },
+  }
+
+  response = client.post("/v1/radio/stations/generate", json=payload)
+
+  assert response.status_code == 200
+  body = response.json()
+  intro_audio = body["speech"]["stationIntro"]["audio"]
+  transition_audio = body["speech"]["betweenTracks"][0]["audio"]
+  assert intro_audio["status"] == "ready"
+  assert intro_audio["audioURL"].startswith("https://speech.test/audio/speech_")
+  assert transition_audio["status"] == "ready"
+  assert "Using mock speech synthesis metadata." in body["diagnostics"]
+
+
+def test_synthesize_speech_endpoint_returns_matching_segment_audio(monkeypatch):
+  monkeypatch.setenv("SPEECH_PUBLIC_BASE_URL", "https://speech.test/audio")
+  client = TestClient(app)
+
+  response = client.post(
+    "/v1/radio/speech/synthesize",
+    json={
+      "speechAudio": {"enabled": True, "provider": "mock"},
+      "segments": [
+        {
+          "id": "station-intro",
+          "kind": "stationIntro",
+          "text": "Welcome in.",
+          "displayText": "Welcome in.",
+          "targetItemId": "song-1",
+        },
+        {
+          "id": "transition-1",
+          "kind": "transition",
+          "text": "Next up is B.",
+          "displayText": "Next up is B.",
+          "fromItemId": "song-1",
+          "toItemId": "song-2",
+        },
+      ],
+    },
+  )
+
+  assert response.status_code == 200
+  body = response.json()
+  assert [segment["id"] for segment in body["segments"]] == ["station-intro", "transition-1"]
+  assert all(segment["audio"]["status"] == "ready" for segment in body["segments"])
+  assert all(segment["audio"]["cacheKey"].startswith("speech_") for segment in body["segments"])
+
+
 def test_compress_memory_uses_deterministic_fallback(monkeypatch):
   monkeypatch.delenv("OPENAI_API_KEY", raising=False)
   client = TestClient(app)
