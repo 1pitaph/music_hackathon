@@ -6,32 +6,70 @@ struct PlayerView: View {
   @Environment(PlaybackController.self) private var playbackController
   @Environment(RadioStationController.self) private var radioStation
 
+  let showsPresentationHandle: Bool
+
   @State private var presentedSheet: PlayerSheet?
+  @GestureState private var verticalDragOffset: CGFloat = 0
 
   private let accentColor = Color(hex: "#D9523A")
+
+  init(showsPresentationHandle: Bool = true) {
+    self.showsPresentationHandle = showsPresentationHandle
+  }
 
   var body: some View {
     GeometryReader { proxy in
       let safeArea = proxy.safeAreaInsets
+      let artworkFrame = artworkStageFrame(for: proxy.size)
+      let controlsSpacing = controlSpacing(for: proxy.size)
+      let horizontalPadding = horizontalPadding(for: proxy.size)
+      let dragOffset = showsPresentationHandle ? max(0, verticalDragOffset) : 0
+      let isLandscape = proxy.size.width > proxy.size.height
 
-      ZStack {
-        PlayerArtworkBackdrop(
-          artworkURLs: artworkURLs,
-          fallbackSeed: fallbackArtworkSeed,
-          accentColor: accentColor
-        )
-      }
+      dismissiblePlayerContent(
+        ZStack(alignment: .top) {
+          PlayerBackgroundSurface(accentColor: accentColor)
+
+          Group {
+            if isLandscape {
+              HStack(alignment: .center, spacing: 28) {
+                artworkStage(size: artworkFrame)
+
+                bottomControls(spacing: controlsSpacing)
+                  .frame(maxWidth: .infinity, alignment: .leading)
+              }
+              .padding(.horizontal, horizontalPadding)
+              .padding(.top, max(safeArea.top, 14))
+              .padding(.bottom, max(safeArea.bottom, 14))
+              .frame(width: proxy.size.width, height: proxy.size.height)
+            } else {
+              VStack(spacing: 0) {
+                artworkStage(size: artworkFrame)
+                  .frame(maxWidth: .infinity)
+                  .ignoresSafeArea(edges: .top)
+
+                bottomControls(spacing: controlsSpacing)
+                  .padding(.horizontal, horizontalPadding)
+                  .padding(.top, -24)
+                  .padding(.bottom, max(safeArea.bottom, 20))
+                  .frame(width: proxy.size.width, alignment: .leading)
+              }
+              .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+            }
+          }
+          .overlay(alignment: .top) {
+            if showsPresentationHandle {
+              playerHeader
+                .padding(.top, max(safeArea.top + 48, 64))
+            }
+          }
+        }
+      )
       .frame(width: proxy.size.width, height: proxy.size.height)
-      .overlay(alignment: .top) {
-        playerHeader
-          .frame(width: proxy.size.width)
-          .padding(.top, max(safeArea.top, 10))
-      }
-      .overlay(alignment: .bottom) {
-        bottomControls
-          .padding(.horizontal, horizontalPadding(for: proxy.size))
-          .padding(.bottom, max(safeArea.bottom, 20))
-          .frame(width: proxy.size.width, alignment: .leading)
+      .offset(y: dragOffset)
+      .opacity(1 - min(Double(dragOffset / 420), 0.28))
+      .accessibilityAction(.escape) {
+        dismiss()
       }
     }
     .preferredColorScheme(.dark)
@@ -44,50 +82,34 @@ struct PlayerView: View {
     }
   }
 
-  private var playerHeader: some View {
-    VStack(spacing: 12) {
-      Capsule()
-        .fill(.white.opacity(0.42))
-        .frame(width: 72, height: 6)
-        .accessibilityHidden(true)
-
-      HStack {
-        playerButton(
-          systemImage: "chevron.down",
-          accessibilityLabel: "关闭播放器",
-          size: 17,
-          frameSize: 42,
-          style: .subtle
-        ) {
-          dismiss()
-        }
-
-        Spacer()
-
-        Text("正在播放")
-          .font(.system(size: 13, weight: .semibold, design: .rounded))
-          .foregroundStyle(.white.opacity(0.7))
-          .lineLimit(1)
-          .shadow(color: .black.opacity(0.3), radius: 10, y: 4)
-
-        Spacer()
-
-        playerButton(
-          systemImage: "ellipsis",
-          accessibilityLabel: "更多",
-          size: 18,
-          frameSize: 42,
-          style: .subtle
-        ) {
-          presentedSheet = .details
-        }
-      }
+  @ViewBuilder
+  private func dismissiblePlayerContent<Content: View>(_ content: Content) -> some View {
+    if showsPresentationHandle {
+      content.simultaneousGesture(dismissDragGesture)
+    } else {
+      content
     }
-    .padding(.horizontal, 22)
   }
 
-  private var bottomControls: some View {
-    VStack(alignment: .leading, spacing: 26) {
+  private var playerHeader: some View {
+    Capsule()
+      .fill(.white.opacity(0.46))
+      .frame(width: 72, height: 6)
+      .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
+      .accessibilityHidden(true)
+  }
+
+  private func artworkStage(size: CGSize) -> some View {
+    PlayerArtworkStage(
+      artworkURLs: artworkURLs,
+      fallbackSeed: fallbackArtworkSeed,
+      accentColor: accentColor
+    )
+    .frame(width: size.width, height: size.height)
+  }
+
+  private func bottomControls(spacing: CGFloat) -> some View {
+    VStack(alignment: .leading, spacing: spacing) {
       PlayerTrackIdentity(
         title: playbackTitle,
         subtitle: playbackSubtitle,
@@ -133,7 +155,6 @@ struct PlayerView: View {
         }
       )
     }
-    .padding(.top, 52)
     .padding(.bottom, 4)
     .frame(maxWidth: .infinity, alignment: .leading)
   }
@@ -164,49 +185,48 @@ struct PlayerView: View {
     }
   }
 
-  @ViewBuilder
-  private func playerButton(
-    systemImage: String,
-    accessibilityLabel: String,
-    size: CGFloat,
-    frameSize: CGFloat,
-    style: PlayerButtonStyle,
-    action: @escaping () -> Void
-  ) -> some View {
-    if #available(iOS 26.0, *) {
-      if style == .primary {
-        Button(action: action) {
-          buttonImage(systemImage: systemImage, size: size, frameSize: frameSize)
-        }
-        .buttonStyle(.glassProminent)
-        .accessibilityLabel(accessibilityLabel)
-      } else {
-        Button(action: action) {
-          buttonImage(systemImage: systemImage, size: size, frameSize: frameSize)
-        }
-        .buttonStyle(.glass)
-        .accessibilityLabel(accessibilityLabel)
-      }
-    } else {
-      Button(action: action) {
-        buttonImage(systemImage: systemImage, size: size, frameSize: frameSize)
-          .background(style.backgroundColor(accentColor: accentColor), in: Circle())
-      }
-      .buttonStyle(.plain)
-      .accessibilityLabel(accessibilityLabel)
-    }
-  }
-
-  private func buttonImage(systemImage: String, size: CGFloat, frameSize: CGFloat) -> some View {
-    Image(systemName: systemImage)
-      .font(.system(size: size, weight: .bold))
-      .foregroundStyle(.white)
-      .frame(width: frameSize, height: frameSize)
-      .contentShape(Circle())
-  }
-
   private func horizontalPadding(for size: CGSize) -> CGFloat {
     size.width > 700 ? 86 : 30
+  }
+
+  private func artworkStageFrame(for size: CGSize) -> CGSize {
+    if size.width <= size.height {
+      return CGSize(
+        width: size.width,
+        height: min(size.width, size.height * 0.47)
+      )
+    }
+
+    let sideLength = min(size.height * 0.72, size.width * 0.58)
+    return CGSize(width: sideLength, height: sideLength)
+  }
+
+  private func controlSpacing(for size: CGSize) -> CGFloat {
+    if size.height < 700 {
+      return 12
+    }
+
+    return size.height < 780 ? 18 : 24
+  }
+
+  private var dismissDragGesture: some Gesture {
+    DragGesture(minimumDistance: 12)
+      .updating($verticalDragOffset) { value, state, _ in
+        guard value.translation.height > 0,
+              abs(value.translation.height) > abs(value.translation.width) else {
+          return
+        }
+
+        state = min(value.translation.height, 180)
+      }
+      .onEnded { value in
+        let isMostlyVertical = abs(value.translation.height) > abs(value.translation.width)
+        let shouldDismiss = value.translation.height > 120 || value.predictedEndTranslation.height > 180
+
+        if isMostlyVertical, shouldDismiss {
+          dismiss()
+        }
+      }
   }
 
   private var artworkURLs: [URL?] {
@@ -341,63 +361,82 @@ private enum PlayerSheet: String, Identifiable {
   }
 }
 
-private enum PlayerButtonStyle {
-  case primary
-  case subtle
+private struct PlayerBackgroundSurface: View {
+  let accentColor: Color
 
-  func backgroundColor(accentColor: Color) -> Color {
-    switch self {
-    case .primary:
-      accentColor.opacity(0.92)
-    case .subtle:
-      .white.opacity(0.16)
+  var body: some View {
+    ZStack {
+      LinearGradient(
+        colors: [
+          Color(hex: "#3B2112"),
+          Color(hex: "#22110A"),
+          Color(hex: "#0B0705")
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+      )
+
+      RadialGradient(
+        colors: [
+          accentColor.opacity(0.18),
+          .clear
+        ],
+        center: .top,
+        startRadius: 20,
+        endRadius: 360
+      )
+      .blendMode(.plusLighter)
     }
+    .ignoresSafeArea()
   }
 }
 
-private struct PlayerArtworkBackdrop: View {
+private struct PlayerArtworkStage: View {
   let artworkURLs: [URL?]
   let fallbackSeed: String
   let accentColor: Color
 
   var body: some View {
-    ZStack {
-      RemoteArtworkView(urls: artworkURLs, showsLoadingIndicator: false) {
-        fallbackArtwork
-      }
-      .scaledToFill()
-      .blur(radius: 18)
-      .scaleEffect(1.08)
-      .overlay {
+    GeometryReader { proxy in
+      ZStack(alignment: .bottom) {
         RemoteArtworkView(urls: artworkURLs, showsLoadingIndicator: false) {
           fallbackArtwork
         }
-        .scaledToFill()
-        .opacity(0.74)
+        .frame(width: proxy.size.width, height: proxy.size.height)
+        .clipped()
+
+        RemoteArtworkView(urls: artworkURLs, showsLoadingIndicator: false) {
+          fallbackArtwork
+        }
+        .frame(width: proxy.size.width, height: proxy.size.height)
+        .blur(radius: 24)
+        .scaleEffect(1.08)
+        .clipped()
+        .mask {
+          LinearGradient(
+            stops: [
+              .init(color: .clear, location: 0.48),
+              .init(color: .black.opacity(0.5), location: 0.74),
+              .init(color: .black, location: 1)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+          )
+        }
+
+        LinearGradient(
+          stops: [
+            .init(color: .clear, location: 0.52),
+            .init(color: Color(hex: "#24130B").opacity(0.54), location: 0.82),
+            .init(color: Color(hex: "#180D08"), location: 1)
+          ],
+          startPoint: .top,
+          endPoint: .bottom
+        )
       }
-
-      LinearGradient(
-        colors: [
-          .black.opacity(0.12),
-          Color(hex: "#1E1510").opacity(0.32),
-          Color(hex: "#2A160B").opacity(0.72),
-          Color(hex: "#180D08").opacity(0.98)
-        ],
-        startPoint: .top,
-        endPoint: .bottom
-      )
-
-      LinearGradient(
-        colors: [
-          .clear,
-          .black.opacity(0.1),
-          .black.opacity(0.42)
-        ],
-        startPoint: .top,
-        endPoint: .bottom
-      )
     }
-    .ignoresSafeArea()
+    .clipped()
+    .accessibilityHidden(true)
   }
 
   private var fallbackArtwork: some View {

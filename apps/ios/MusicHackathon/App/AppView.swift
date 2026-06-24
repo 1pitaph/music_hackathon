@@ -12,8 +12,11 @@ struct AppView: View {
     tabView
       .tint(.cyan)
       .preferredColorScheme(.dark)
-      .fullScreenCover(isPresented: $isPlayerPresented) {
-        PlayerView()
+      .sheet(isPresented: $isPlayerPresented) {
+        PlayerView(showsPresentationHandle: false)
+          .presentationDetents([.playerExpanded])
+          .presentationDragIndicator(.visible)
+          .presentationCompactAdaptation(.sheet)
       }
   }
 
@@ -119,6 +122,16 @@ struct AppView: View {
       }
     )
   }
+}
+
+private struct PlayerExpandedDetent: CustomPresentationDetent {
+  static func height(in context: Context) -> CGFloat? {
+    max(360, context.maxDetentValue - 12)
+  }
+}
+
+private extension PresentationDetent {
+  static let playerExpanded = Self.custom(PlayerExpandedDetent.self)
 }
 
 private struct GlobalMiniPlayer: View {
