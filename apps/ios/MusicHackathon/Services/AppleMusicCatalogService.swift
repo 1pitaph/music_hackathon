@@ -99,7 +99,7 @@ struct AppleMusicCatalogService {
         id: playlist.id.rawValue,
         name: playlist.name,
         curatorName: playlist.curatorName,
-        artworkURL: playlist.artwork?.url(width: 512, height: 512)
+        artworkURL: Self.normalizedArtworkURL(playlist.artwork?.url(width: 512, height: 512))
       )
     }
   }
@@ -150,7 +150,8 @@ struct AppleMusicCatalogService {
       mood: song.genreNames.first ?? fallback?.mood ?? "Apple Music",
       duration: song.duration ?? fallback?.duration ?? 0,
       artworkSystemName: fallback?.artworkSystemName ?? "music.note",
-      artworkURL: song.artwork?.url(width: 512, height: 512) ?? fallback?.artworkURL,
+      artworkURL: normalizedArtworkURL(song.artwork?.url(width: 512, height: 512))
+        ?? normalizedArtworkURL(fallback?.artworkURL),
       previewURL: song.previewAssets?.first?.url ?? fallback?.previewURL,
       appleMusicID: song.id.rawValue,
       isExplicit: song.contentRating == .explicit,
@@ -160,6 +161,10 @@ struct AppleMusicCatalogService {
       sourceScore: fallback?.sourceScore,
       reasonSignals: fallback?.reasonSignals
     )
+  }
+
+  static func normalizedArtworkURL(_ url: URL?) -> URL? {
+    ArtworkURLCandidates.normalized(url)
   }
 
   private static func stableID(for rawValue: String) -> UUID {
@@ -215,7 +220,7 @@ extension AppleMusicCatalogService: AppleMusicLibraryProviding {
           id: playlist.id.rawValue,
           name: playlist.name,
           curatorName: playlist.curatorName,
-          artworkURL: playlist.artwork?.url(width: 512, height: 512),
+          artworkURL: Self.normalizedArtworkURL(playlist.artwork?.url(width: 512, height: 512)),
           tracks: limitedTracks
         )
       )

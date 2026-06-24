@@ -27,10 +27,7 @@ struct RadioView: View {
             isPlaying: playbackController.state == .playing,
             isLoading: playbackController.state == .loading || radioStation.isLoadingStation,
             elapsedTimeText: playbackController.elapsedTimeText,
-            primaryAction: primaryRadioAction,
-            previousAction: playPreviousTrack,
-            nextAction: playNextTrack,
-            refreshAction: refreshStation
+            primaryAction: primaryRadioAction
           )
           .padding(.horizontal, 10)
           .offset(y: -44)
@@ -87,21 +84,6 @@ struct RadioView: View {
     }
   }
 
-  private func playNextTrack() {
-    Task {
-      await radioStation.playNext()
-    }
-  }
-
-  private func playPreviousTrack() {
-    radioStation.playPrevious()
-  }
-
-  private func refreshStation() {
-    Task {
-      await radioStation.refreshStation()
-    }
-  }
 }
 
 private enum RadioPanelStatus {
@@ -203,9 +185,6 @@ private struct NowPlayingSetCard: View {
   let isLoading: Bool
   let elapsedTimeText: String
   let primaryAction: () -> Void
-  let previousAction: () -> Void
-  let nextAction: () -> Void
-  let refreshAction: () -> Void
 
   private var nextItem: RadioQueueItem? {
     queueItems.first
@@ -356,16 +335,10 @@ private struct NowPlayingSetCard: View {
         .accessibilityLabel(playButtonAccessibilityLabel)
       }
 
-      HStack(spacing: 12) {
-        RadioActionButton(systemImage: "backward.end.fill", label: "Previous", action: previousAction)
-        RadioActionButton(systemImage: "forward.end.fill", label: "Next", action: nextAction)
-        RadioActionButton(systemImage: "arrow.clockwise", label: "Refresh station", action: refreshAction)
-      }
-      .disabled(status == .loading)
     }
     .padding(.horizontal, 20)
     .padding(.top, 36)
-    .padding(.bottom, 14)
+    .padding(.bottom, 20)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(
       Color(red: 0.98, green: 0.97, blue: 0.93),
@@ -436,24 +409,6 @@ private extension RadioPanelStatus {
     case .onAir:
       "End of queue"
     }
-  }
-}
-
-private struct RadioActionButton: View {
-  let systemImage: String
-  let label: String
-  let action: () -> Void
-
-  var body: some View {
-    Button(action: action) {
-      Image(systemName: systemImage)
-        .font(.system(size: 17, weight: .bold))
-        .foregroundStyle(.black)
-        .frame(maxWidth: .infinity)
-        .frame(height: 44)
-        .background(.black.opacity(0.07), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-    .accessibilityLabel(label)
   }
 }
 

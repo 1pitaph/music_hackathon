@@ -10,6 +10,8 @@
 		A10000000000000000000001 /* MusicHackathonApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* MusicHackathonApp.swift */; };
 		A10000000000000000000002 /* AppView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* AppView.swift */; };
 		A10000000000000000000003 /* AppTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* AppTab.swift */; };
+		M10000000000000000000001 /* RemoteArtworkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = M20000000000000000000001 /* RemoteArtworkView.swift */; };
+		N10000000000000000000001 /* MarbleAvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = N20000000000000000000001 /* MarbleAvatarView.swift */; };
 		A10000000000000000000004 /* Track.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* Track.swift */; };
 		A10000000000000000000005 /* MockCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* MockCatalog.swift */; };
 		A10000000000000000000006 /* PlaybackController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* PlaybackController.swift */; };
@@ -41,6 +43,7 @@
 			T10000000000000000000006 /* VirtualMusicLibraryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000007 /* VirtualMusicLibraryTests.swift */; };
 			T10000000000000000000007 /* MigrationModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000008 /* MigrationModelsTests.swift */; };
 			T10000000000000000000008 /* AppleMusicLibraryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000009 /* AppleMusicLibraryStoreTests.swift */; };
+			N10000000000000000000002 /* MarbleAvatarRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = N20000000000000000000002 /* MarbleAvatarRendererTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,6 +60,8 @@
 		A20000000000000000000001 /* MusicHackathonApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicHackathonApp.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* AppView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppView.swift; sourceTree = "<group>"; };
 		A20000000000000000000003 /* AppTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTab.swift; sourceTree = "<group>"; };
+		M20000000000000000000001 /* RemoteArtworkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteArtworkView.swift; sourceTree = "<group>"; };
+		N20000000000000000000001 /* MarbleAvatarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarbleAvatarView.swift; sourceTree = "<group>"; };
 		A20000000000000000000004 /* Track.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Track.swift; sourceTree = "<group>"; };
 		A20000000000000000000005 /* MockCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockCatalog.swift; sourceTree = "<group>"; };
 		A20000000000000000000006 /* PlaybackController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackController.swift; sourceTree = "<group>"; };
@@ -90,6 +95,7 @@
 		T20000000000000000000007 /* VirtualMusicLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualMusicLibraryTests.swift; sourceTree = "<group>"; };
 		T20000000000000000000008 /* MigrationModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigrationModelsTests.swift; sourceTree = "<group>"; };
 		T20000000000000000000009 /* AppleMusicLibraryStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicLibraryStoreTests.swift; sourceTree = "<group>"; };
+		N20000000000000000000002 /* MarbleAvatarRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarbleAvatarRendererTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -138,6 +144,8 @@
 				A20000000000000000000001 /* MusicHackathonApp.swift */,
 				A20000000000000000000002 /* AppView.swift */,
 				A20000000000000000000003 /* AppTab.swift */,
+				M20000000000000000000001 /* RemoteArtworkView.swift */,
+				N20000000000000000000001 /* MarbleAvatarView.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -277,6 +285,7 @@
 					T20000000000000000000007 /* VirtualMusicLibraryTests.swift */,
 					T20000000000000000000008 /* MigrationModelsTests.swift */,
 					T20000000000000000000009 /* AppleMusicLibraryStoreTests.swift */,
+					N20000000000000000000002 /* MarbleAvatarRendererTests.swift */,
 			);
 			path = MusicHackathonTests;
 			sourceTree = "<group>";
@@ -389,6 +398,8 @@
 				A10000000000000000000001 /* MusicHackathonApp.swift in Sources */,
 				A10000000000000000000002 /* AppView.swift in Sources */,
 				A10000000000000000000003 /* AppTab.swift in Sources */,
+				M10000000000000000000001 /* RemoteArtworkView.swift in Sources */,
+				N10000000000000000000001 /* MarbleAvatarView.swift in Sources */,
 				A10000000000000000000004 /* Track.swift in Sources */,
 				A10000000000000000000005 /* MockCatalog.swift in Sources */,
 				F10000000000000000000001 /* RadioModels.swift in Sources */,
@@ -423,6 +434,7 @@
 				T10000000000000000000006 /* VirtualMusicLibraryTests.swift in Sources */,
 				T10000000000000000000007 /* MigrationModelsTests.swift in Sources */,
 				T10000000000000000000008 /* AppleMusicLibraryStoreTests.swift in Sources */,
+				N10000000000000000000002 /* MarbleAvatarRendererTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

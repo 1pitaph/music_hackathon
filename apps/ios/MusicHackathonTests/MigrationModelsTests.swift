@@ -31,6 +31,11 @@ final class MigrationModelsTests: XCTestCase {
     XCTAssertTrue(ArchiveStationItem.coverPalette.contains(first))
   }
 
+  func testArchiveProfileEmptyStartsWithoutDefaultNameOrBio() {
+    XCTAssertEqual(ArchiveProfile.empty.nickname, "")
+    XCTAssertEqual(ArchiveProfile.empty.bio, "")
+  }
+
   func testArchiveProfileBuildsMineDataFromAppleMusicLibrary() {
     let artworkURL = URL(string: "https://example.com/artwork.jpg")!
     let firstTrack = makeTrack(
@@ -70,7 +75,80 @@ final class MigrationModelsTests: XCTestCase {
     XCTAssertEqual(profile.published.first?.tracks.map(\.title), ["First Song", "Second Song"])
     XCTAssertEqual(profile.recentlyPlayed.map(\.name), ["First Song", "Second Song"])
     XCTAssertEqual(profile.saved.map(\.name), ["Artist A", "Artist B"])
-    XCTAssertTrue(profile.bio.contains("2 首歌"))
+    XCTAssertEqual(profile.nickname, "")
+    XCTAssertEqual(profile.bio, "")
+  }
+
+  func testArchiveProfileInfersNicknameFromPersonalPlaylistCurator() {
+    let track = makeTrack(
+      appleMusicID: "song-1",
+      title: "Personal Song",
+      artist: "Artist A",
+      album: "Album A",
+      duration: 180,
+      artworkURL: nil
+    )
+    let playlist = AppleMusicPlaylistSnapshot(
+      id: "playlist-1",
+      name: "Personal Mix",
+      curatorName: "Ada Chen",
+      artworkURL: nil,
+      tracks: [track]
+    )
+
+    let profile = ArchiveProfile.appleMusic(base: .empty, playlists: [playlist], tracks: [])
+
+    XCTAssertEqual(profile.nickname, "Ada Chen")
+    XCTAssertEqual(profile.bio, "")
+  }
+
+  func testArchiveProfileIgnoresGenericAppleMusicCuratorName() {
+    let track = makeTrack(
+      appleMusicID: "song-1",
+      title: "Editorial Song",
+      artist: "Artist A",
+      album: "Album A",
+      duration: 180,
+      artworkURL: nil
+    )
+    let playlist = AppleMusicPlaylistSnapshot(
+      id: "playlist-1",
+      name: "Editorial Mix",
+      curatorName: "Apple Music",
+      artworkURL: nil,
+      tracks: [track]
+    )
+
+    let profile = ArchiveProfile.appleMusic(base: .empty, playlists: [playlist], tracks: [])
+
+    XCTAssertEqual(profile.nickname, "")
+    XCTAssertEqual(profile.bio, "")
+  }
+
+  func testArchiveProfileKeepsManualNicknameAndBio() {
+    var baseProfile = ArchiveProfile.empty
+    baseProfile.nickname = "Manual Name"
+    baseProfile.bio = "Manual intro"
+    let track = makeTrack(
+      appleMusicID: "song-1",
+      title: "Personal Song",
+      artist: "Artist A",
+      album: "Album A",
+      duration: 180,
+      artworkURL: nil
+    )
+    let playlist = AppleMusicPlaylistSnapshot(
+      id: "playlist-1",
+      name: "Personal Mix",
+      curatorName: "Ada Chen",
+      artworkURL: nil,
+      tracks: [track]
+    )
+
+    let profile = ArchiveProfile.appleMusic(base: baseProfile, playlists: [playlist], tracks: [])
+
+    XCTAssertEqual(profile.nickname, "Manual Name")
+    XCTAssertEqual(profile.bio, "Manual intro")
   }
 
   func testArchiveProfileUsesLibrarySummaryWhenNoPlaylistsExist() {

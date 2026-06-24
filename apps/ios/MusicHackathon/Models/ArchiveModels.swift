@@ -109,9 +109,9 @@ extension ArchiveStationItem {
 
 extension ArchiveProfile {
   static let empty = ArchiveProfile(
-    nickname: "我的音乐",
+    nickname: "",
     avatarColorHex: "#2A2A2A",
-    bio: "连接 Apple Music 后显示你的资料库。",
+    bio: "",
     stats: ArchiveStats(listeningHours: 0, stationsCount: 0, likesCount: 0),
     published: [],
     saved: [],
@@ -217,8 +217,9 @@ extension ArchiveProfile {
     profile.recentlyPlayed = Array(songItems)
     profile.artists = artistItems.map(\.name)
 
-    if profile.bio == ArchiveProfile.empty.bio {
-      profile.bio = "来自 Apple Music 资料库的 \(allTracks.count) 首歌和 \(playlists.count) 个歌单。"
+    if profile.nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+       let inferredNickname = inferredNickname(from: playlists) {
+      profile.nickname = inferredNickname
     }
 
     return profile
@@ -312,6 +313,25 @@ extension ArchiveProfile {
           tracks: artistTracks
         )
       }
+  }
+
+  private static func inferredNickname(from playlists: [AppleMusicPlaylistSnapshot]) -> String? {
+    for playlist in playlists {
+      guard let curatorName = playlist.curatorName?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !curatorName.isEmpty,
+            !isGenericAppleMusicCuratorName(curatorName) else {
+        continue
+      }
+
+      return curatorName
+    }
+
+    return nil
+  }
+
+  private static func isGenericAppleMusicCuratorName(_ name: String) -> Bool {
+    let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return normalizedName == "apple music" || normalizedName == "apple"
   }
 
   private static func uniqueTracks(from tracks: [Track]) -> [Track] {

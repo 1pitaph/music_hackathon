@@ -2,21 +2,41 @@ import FluidGradient
 import SwiftUI
 
 struct AppView: View {
+  @Environment(PlaybackController.self) private var playbackController
+  @Environment(RadioStationController.self) private var radioStation
+
   @State private var selectedTab: AppTab = .radio
+  @State private var isPlayerPresented = false
 
   var body: some View {
     tabView
       .tint(.cyan)
       .preferredColorScheme(.dark)
+      .fullScreenCover(isPresented: $isPlayerPresented) {
+        PlayerView()
+      }
   }
 
   @ViewBuilder
   private var tabView: some View {
-    if #available(iOS 26.0, *) {
+    if #available(iOS 26.1, *) {
       systemTabView
         .tabBarMinimizeBehavior(.never)
+        .tabViewBottomAccessory(isEnabled: showsGlobalPlayer) {
+          globalMiniPlayer
+            .padding(.horizontal, 12)
+        }
+    } else if #available(iOS 26.0, *) {
+      systemTabView
+        .tabBarMinimizeBehavior(.never)
+        .safeAreaInset(edge: .bottom) {
+          globalMiniPlayerInset
+        }
     } else {
       systemTabView
+        .safeAreaInset(edge: .bottom) {
+          globalMiniPlayerInset
+        }
     }
   }
 
@@ -30,13 +50,226 @@ struct AppView: View {
 
             tab.content
           }
-          .navigationTitle(tab.title)
+          .navigationTitle(tab.navigationTitle)
           .toolbar(tab.prefersHiddenNavigationBar ? .hidden : .automatic, for: .navigationBar)
         }
         .tabItem { tab.label }
         .tag(tab)
       }
     }
+  }
+
+  private var showsGlobalPlayer: Bool {
+    playbackController.currentTrack != nil || playbackController.currentSpeech != nil
+  }
+
+  private var miniPlayerTitle: String {
+    playbackController.currentTrack?.title ?? radioStation.stationTitle
+  }
+
+  private var miniPlayerSubtitle: String {
+    playbackController.currentSpeech?.displayText
+      ?? playbackController.currentTrack?.artist
+      ?? radioStation.stationIntro
+  }
+
+  private var miniPlayerArtworkURLs: [URL?] {
+    [
+      playbackController.currentTrack?.artworkURL,
+      radioStation.currentItem?.track.artworkURL
+    ]
+  }
+
+  private var miniPlayerFallbackSeed: String {
+    playbackController.currentTrack?.title
+      ?? playbackController.currentSpeech?.id
+      ?? radioStation.station?.id
+      ?? radioStation.stationTitle
+  }
+
+  @ViewBuilder
+  private var globalMiniPlayerInset: some View {
+    if showsGlobalPlayer {
+      globalMiniPlayer
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .padding(.bottom, 14)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+  }
+
+  private var globalMiniPlayer: some View {
+    GlobalMiniPlayer(
+      title: miniPlayerTitle,
+      subtitle: miniPlayerSubtitle,
+      artworkURLs: miniPlayerArtworkURLs,
+      fallbackSeed: miniPlayerFallbackSeed,
+      isPlaying: playbackController.state == .playing,
+      isLoading: playbackController.state == .loading,
+      onOpenPlayer: {
+        isPlayerPresented = true
+      },
+      onTogglePlay: {
+        playbackController.togglePlayback()
+      },
+      onNext: {
+        Task {
+          await radioStation.playNext(reason: .manual)
+        }
+      }
+    )
+  }
+}
+
+private struct GlobalMiniPlayer: View {
+  let title: String
+  let subtitle: String
+  let artworkURLs: [URL?]
+  let fallbackSeed: String
+  let isPlaying: Bool
+  let isLoading: Bool
+  let onOpenPlayer: () -> Void
+  let onTogglePlay: () -> Void
+  let onNext: () -> Void
+
+  private let accentColor = Color(hex: "#D9523A")
+  private let cornerRadius: CGFloat = 18
+
+  var body: some View {
+    if #available(iOS 26.0, *) {
+      content
+        .background(.black.opacity(0.12), in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .glassEffect(.regular.tint(.black.opacity(0.18)).interactive(), in: .rect(cornerRadius: cornerRadius))
+        .overlay(containerStroke)
+        .shadow(color: .black.opacity(0.24), radius: 18, y: 8)
+    } else {
+      content
+        .background {
+          RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(.ultraThinMaterial)
+
+          RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(.black.opacity(0.22))
+        }
+        .overlay(containerStroke)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .shadow(color: .black.opacity(0.24), radius: 18, y: 8)
+    }
+  }
+
+  private var content: some View {
+    HStack(spacing: 10) {
+      Button(action: onOpenPlayer) {
+        HStack(spacing: 10) {
+          artwork
+          trackText
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .layoutPriority(1)
+
+      controls
+    }
+    .padding(.leading, 8)
+    .padding(.trailing, 7)
+    .frame(height: 58)
+    .frame(maxWidth: .infinity)
+  }
+
+  private var containerStroke: some View {
+    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+      .stroke(.white.opacity(0.12), lineWidth: 1)
+  }
+
+  private var artwork: some View {
+    RemoteArtworkView(urls: artworkURLs, showsLoadingIndicator: false) {
+      ZStack {
+        LinearGradient(
+          colors: [
+            accentColor.opacity(0.85),
+            Color(hex: "#3F2630")
+          ],
+          startPoint: .topLeading,
+          endPoint: .bottomTrailing
+        )
+
+        MarbleAvatarView(
+          seed: fallbackSeed,
+          size: 36,
+          palette: ["#F6A46D", "#D9523A", "#7BC9C8", "#40232F"],
+          accessibilityLabel: nil
+        )
+      }
+    }
+    .frame(width: 42, height: 42)
+    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 9, style: .continuous)
+        .stroke(.white.opacity(0.12), lineWidth: 1)
+    }
+    .accessibilityHidden(true)
+  }
+
+  private var trackText: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(title)
+        .font(.system(size: 14, weight: .semibold, design: .rounded))
+        .foregroundStyle(.white)
+        .lineLimit(1)
+        .truncationMode(.tail)
+
+      Text(subtitle)
+        .font(.system(size: 11, weight: .medium, design: .rounded))
+        .foregroundStyle(.white.opacity(0.62))
+        .lineLimit(1)
+        .truncationMode(.tail)
+    }
+    .frame(minWidth: 72, maxWidth: .infinity, alignment: .leading)
+    .layoutPriority(1)
+  }
+
+  private var controls: some View {
+    HStack(spacing: 6) {
+      controlButton(
+        systemImage: isLoading ? "hourglass" : (isPlaying ? "pause.fill" : "play.fill"),
+        accessibilityLabel: isLoading ? "正在加载" : (isPlaying ? "暂停" : "播放"),
+        prominent: true,
+        action: onTogglePlay
+      )
+      .disabled(isLoading)
+
+      controlButton(
+        systemImage: "forward.fill",
+        accessibilityLabel: "下一首",
+        prominent: false,
+        action: onNext
+      )
+    }
+    .frame(width: 84, alignment: .trailing)
+  }
+
+  private func controlButton(
+    systemImage: String,
+    accessibilityLabel: String,
+    prominent: Bool,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      Image(systemName: systemImage)
+        .font(.system(size: prominent ? 16 : 14, weight: .bold))
+        .foregroundStyle(prominent ? accentColor : .white.opacity(0.86))
+        .frame(width: prominent ? 42 : 36, height: prominent ? 42 : 36)
+        .background(prominent ? .white.opacity(0.94) : .white.opacity(0.08), in: Circle())
+        .overlay {
+          Circle()
+            .stroke(prominent ? .white.opacity(0.26) : .white.opacity(0.08), lineWidth: 1)
+        }
+    }
+    .buttonStyle(.plain)
+    .contentShape(Circle())
+    .accessibilityLabel(accessibilityLabel)
   }
 }
 

@@ -18,6 +18,15 @@ enum AppTab: String, CaseIterable, Identifiable {
     }
   }
 
+  var navigationTitle: String {
+    switch self {
+    case .mine:
+      ""
+    case .radio, .discover:
+      title
+    }
+  }
+
   var prefersHiddenNavigationBar: Bool {
     switch self {
     case .radio, .discover:

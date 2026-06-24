@@ -8,7 +8,6 @@ struct DiscoverView: View {
   @State private var favoritedIDs: Set<String> = []
   @State private var expandedStationID: String?
   @State private var activeStationID: String?
-  @State private var presentedPlayerStation: DiscoverStation?
 
   private let stations = DiscoverStation.mockStations
 
@@ -33,63 +32,14 @@ struct DiscoverView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 20)
-        .padding(.bottom, activeStation == nil ? 36 : 118)
+        .padding(.bottom, 36)
       }
-    }
-    .safeAreaInset(edge: .bottom) {
-      if let activeStation {
-        DiscoverFloatingPlayer(
-          station: activeStation,
-          speechText: playbackController.currentSpeech?.displayText,
-          isPlaying: playbackController.state == .playing,
-          onOpenPlayer: {
-            presentedPlayerStation = activeStation
-          },
-          onTogglePlay: {
-            playbackController.togglePlayback()
-          },
-          onPrevious: {
-            playAdjacentStation(direction: -1)
-          },
-          onNext: {
-            playAdjacentStation(direction: 1)
-          }
-        )
-        .padding(.bottom, 10)
-        .transition(.move(edge: .bottom).combined(with: .opacity))
-      }
-    }
-    .fullScreenCover(item: $presentedPlayerStation) { station in
-      DiscoverNowPlayingView(
-        station: activeStation ?? station,
-        isFavorited: favoritedIDs.contains((activeStation ?? station).id),
-        onClose: {
-          presentedPlayerStation = nil
-        },
-        onToggleFavorite: {
-          toggleFavorite(activeStation ?? station)
-        },
-        onPreviousStation: {
-          playAdjacentStation(direction: -1)
-        },
-        onNextStation: {
-          playAdjacentStation(direction: 1)
-        },
-        onTogglePlay: {
-          playbackController.togglePlayback()
-        }
-      )
     }
     .animation(.spring(response: 0.35, dampingFraction: 0.82), value: activeStationID)
   }
 
   private var currentStation: DiscoverStation {
     stations[currentIndex]
-  }
-
-  private var activeStation: DiscoverStation? {
-    guard let activeStationID else { return nil }
-    return stations.first { $0.id == activeStationID }
   }
 
   private var isCurrentCardPlaying: Bool {
@@ -159,14 +109,6 @@ struct DiscoverView: View {
     Task {
       await radioStation.loadLocalStation(station.radioStation(), playImmediately: true)
     }
-  }
-
-  private func playAdjacentStation(direction: Int) {
-    let startIndex = activeStation.flatMap { station in
-      stations.firstIndex(where: { $0.id == station.id })
-    } ?? currentIndex
-    let nextIndex = (startIndex + direction + stations.count) % stations.count
-    playStation(stations[nextIndex])
   }
 
   private func toggleFavorite(_ station: DiscoverStation) {
@@ -827,253 +769,6 @@ private struct DiscoverStationDrawer: View {
     .padding(.bottom, 22)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(Color(hex: "#1E1B18"))
-  }
-}
-
-private struct DiscoverFloatingPlayer: View {
-  let station: DiscoverStation
-  let speechText: String?
-  let isPlaying: Bool
-  let onOpenPlayer: () -> Void
-  let onTogglePlay: () -> Void
-  let onPrevious: () -> Void
-  let onNext: () -> Void
-
-  var body: some View {
-    Button(action: onOpenPlayer) {
-      HStack(spacing: 12) {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .fill(
-            LinearGradient(
-              colors: [station.color, station.color.opacity(0.72)],
-              startPoint: .topLeading,
-              endPoint: .bottomTrailing
-            )
-          )
-          .frame(width: 42, height: 42)
-
-        VStack(alignment: .leading, spacing: 2) {
-          Text(station.title)
-            .font(.system(size: 13, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white)
-            .lineLimit(1)
-
-          Text(speechText ?? station.hostName)
-            .font(.system(size: 11, weight: .medium, design: .rounded))
-            .foregroundStyle(.white.opacity(0.5))
-            .lineLimit(1)
-        }
-
-        Spacer()
-
-        HStack(spacing: 18) {
-          playerButton(systemImage: "backward.fill", action: onPrevious, size: 18)
-          playerButton(systemImage: isPlaying ? "pause.fill" : "play.fill", action: onTogglePlay, size: 18, filled: true)
-          playerButton(systemImage: "forward.fill", action: onNext, size: 18)
-        }
-      }
-      .padding(.horizontal, 16)
-      .frame(height: 62)
-      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-      .overlay {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
-          .stroke(.white.opacity(0.08), lineWidth: 1)
-      }
-      .shadow(color: .black.opacity(0.35), radius: 28, y: 14)
-      .padding(.horizontal, 22)
-    }
-    .buttonStyle(.plain)
-  }
-
-  private func playerButton(systemImage: String, action: @escaping () -> Void, size: CGFloat, filled: Bool = false) -> some View {
-    Button(action: action) {
-      Image(systemName: systemImage)
-        .font(.system(size: size, weight: .bold))
-        .foregroundStyle(.white.opacity(filled ? 1 : 0.62))
-        .frame(width: filled ? 38 : 24, height: filled ? 38 : 24)
-        .background(filled ? Color(hex: "#D9523A") : .clear, in: Circle())
-    }
-    .buttonStyle(.plain)
-  }
-}
-
-private struct DiscoverNowPlayingView: View {
-  @Environment(PlaybackController.self) private var playbackController
-
-  let station: DiscoverStation
-  let isFavorited: Bool
-  let onClose: () -> Void
-  let onToggleFavorite: () -> Void
-  let onPreviousStation: () -> Void
-  let onNextStation: () -> Void
-  let onTogglePlay: () -> Void
-
-  private var isPlaying: Bool {
-    playbackController.state == .playing
-  }
-
-  private var durationText: String {
-    let totalSeconds = Int(station.items.map(\.track.duration).reduce(0, +))
-    return "\(totalSeconds / 60):\(String(format: "%02d", totalSeconds % 60))"
-  }
-
-  var body: some View {
-    ZStack {
-      LinearGradient(
-        colors: [
-          station.color.opacity(0.22),
-          Color(hex: "#15120F")
-        ],
-        startPoint: .top,
-        endPoint: .bottom
-      )
-      .ignoresSafeArea()
-
-      VStack(spacing: 0) {
-        HStack {
-          Button(action: onClose) {
-            Image(systemName: "chevron.down")
-              .font(.system(size: 18, weight: .bold))
-              .foregroundStyle(.white)
-              .frame(width: 38, height: 38)
-              .background(.white.opacity(0.07), in: Circle())
-          }
-          .buttonStyle(.plain)
-
-          Spacer()
-
-          Button {} label: {
-            Image(systemName: "ellipsis")
-              .font(.system(size: 18, weight: .bold))
-              .foregroundStyle(.white.opacity(0.58))
-              .frame(width: 38, height: 38)
-              .background(.white.opacity(0.07), in: Circle())
-          }
-          .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 18)
-
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-          .fill(
-            LinearGradient(
-              colors: [station.color, station.color.opacity(0.78), station.color.opacity(0.5)],
-              startPoint: .topLeading,
-              endPoint: .bottomTrailing
-            )
-          )
-          .frame(maxWidth: .infinity)
-          .aspectRatio(1.04, contentMode: .fit)
-          .overlay {
-            Circle()
-              .fill(.white.opacity(0.08))
-              .frame(width: 220, height: 88)
-              .scaleEffect(y: 0.45)
-              .offset(y: -90)
-          }
-          .shadow(color: station.color.opacity(0.22), radius: 36, y: 22)
-          .padding(.horizontal, 26)
-          .padding(.top, 22)
-
-        VStack(spacing: 8) {
-          Text(station.title)
-            .font(.system(size: 27, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white)
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-
-          HStack(spacing: 12) {
-            Text(playbackController.currentSpeech?.displayText ?? "by \(station.hostName)")
-              .font(.system(size: 15, weight: .medium, design: .rounded))
-              .foregroundStyle(.white.opacity(0.5))
-              .lineLimit(2)
-              .multilineTextAlignment(.center)
-
-            Button(action: onToggleFavorite) {
-              Image(systemName: isFavorited ? "heart.fill" : "heart")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(isFavorited ? Color(hex: "#D9523A") : .white.opacity(0.34))
-            }
-            .buttonStyle(.plain)
-          }
-        }
-        .padding(.top, 24)
-
-        DiscoverWaveformView(
-          seed: station.id,
-          progress: playbackController.playbackProgress,
-          elapsedText: playbackController.elapsedTimeText,
-          durationText: durationText,
-          color: station.color
-        )
-        .padding(.top, 28)
-
-        HStack(spacing: 56) {
-          Button(action: onPreviousStation) {
-            Image(systemName: "backward.fill")
-              .font(.system(size: 34, weight: .bold))
-              .foregroundStyle(.white)
-          }
-          .buttonStyle(.plain)
-
-          Button(action: onTogglePlay) {
-            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-              .font(.system(size: 52, weight: .bold))
-              .foregroundStyle(.white)
-              .frame(width: 76, height: 76)
-          }
-          .buttonStyle(.plain)
-
-          Button(action: onNextStation) {
-            Image(systemName: "forward.fill")
-              .font(.system(size: 34, weight: .bold))
-              .foregroundStyle(.white)
-          }
-          .buttonStyle(.plain)
-        }
-        .padding(.top, 34)
-
-        Spacer()
-      }
-    }
-  }
-}
-
-private struct DiscoverWaveformView: View {
-  let seed: String
-  let progress: Double
-  let elapsedText: String
-  let durationText: String
-  let color: Color
-
-  private var bars: [Double] {
-    var state = abs(seed.unicodeScalars.reduce(17) { ($0 * 31) + Int($1.value) })
-    return (0..<44).map { _ in
-      state = (state * 16_807) % 2_147_483_647
-      return 0.18 + (Double(state % 100) / 100) * 0.82
-    }
-  }
-
-  var body: some View {
-    VStack(spacing: 8) {
-      HStack(alignment: .center, spacing: 2) {
-        ForEach(Array(bars.enumerated()), id: \.offset) { index, value in
-          Capsule()
-            .fill(Double(index) / Double(max(bars.count - 1, 1)) <= progress ? color : .white.opacity(0.14))
-            .frame(width: 4, height: 10 + 52 * value)
-        }
-      }
-      .frame(height: 66)
-
-      HStack {
-        Text(elapsedText)
-        Spacer()
-        Text(durationText)
-      }
-      .font(.system(size: 11, weight: .medium, design: .rounded))
-      .foregroundStyle(.white.opacity(0.4))
-    }
-    .padding(.horizontal, 26)
   }
 }
 

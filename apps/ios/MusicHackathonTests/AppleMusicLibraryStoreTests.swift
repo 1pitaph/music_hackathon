@@ -57,6 +57,83 @@ final class AppleMusicLibraryStoreTests: XCTestCase {
     XCTAssertEqual(stations[0].heroArtworkURL?.absoluteString, "https://example.com/fallback-song.jpg")
   }
 
+  func testNormalizedArtworkURLKeepsOnlyFetchableLookingHTTPURLs() {
+    let validURL = URL(string: "https://example.com/cover.jpg")!
+    let fileURL = URL(string: "file:///tmp/cover.jpg")!
+    let hostlessURL = URL(string: "https:/cover.jpg")!
+    let templateURL = URL(string: "https://example.com/{w}x{h}bb.{f}")!
+
+    XCTAssertEqual(AppleMusicCatalogService.normalizedArtworkURL(validURL), validURL)
+    XCTAssertNil(AppleMusicCatalogService.normalizedArtworkURL(fileURL))
+    XCTAssertNil(AppleMusicCatalogService.normalizedArtworkURL(hostlessURL))
+    XCTAssertNil(AppleMusicCatalogService.normalizedArtworkURL(templateURL))
+    XCTAssertNil(AppleMusicCatalogService.normalizedArtworkURL(nil))
+  }
+
+  func testPlaylistArtworkCandidatesPreferPlaylistThenTrackArtworkAndDedupe() {
+    let playlistArtworkURL = URL(string: "https://example.com/playlist.jpg")!
+    let trackArtworkURL = URL(string: "https://example.com/track.jpg")!
+    let templateArtworkURL = URL(string: "https://example.com/{w}x{h}bb.{f}")!
+    let playlist = AppleMusicPlaylistSnapshot(
+      id: "playlist-1",
+      name: "Library Mix",
+      curatorName: "Apple Music",
+      artworkURL: playlistArtworkURL,
+      tracks: [
+        makeTrack(title: "Signal", artworkURL: trackArtworkURL),
+        makeTrack(title: "Duplicate", artworkURL: playlistArtworkURL),
+        makeTrack(title: "Template", artworkURL: templateArtworkURL)
+      ]
+    )
+
+    XCTAssertEqual(
+      playlist.artworkCandidateURLs.map(\.absoluteString),
+      [
+        "https://example.com/playlist.jpg",
+        "https://example.com/track.jpg"
+      ]
+    )
+  }
+
+  func testDiscoverStationArtworkURLsKeepOrderAndRemoveDuplicates() {
+    let stationArtworkURL = URL(string: "https://example.com/station.jpg")!
+    let trackArtworkURL = URL(string: "https://example.com/track.jpg")!
+    let station = DiscoverStation(
+      id: "station-1",
+      title: "Station",
+      briefIntro: "Brief",
+      description: "Description",
+      hostName: "Host",
+      genre: "Pop",
+      favorites: 2,
+      items: [
+        RadioQueueItem(
+          id: "item-1",
+          track: makeTrack(title: "Duplicate", artworkURL: stationArtworkURL),
+          sourceTitle: "Host",
+          reason: "Duplicate artwork"
+        ),
+        RadioQueueItem(
+          id: "item-2",
+          track: makeTrack(title: "Unique", artworkURL: trackArtworkURL),
+          sourceTitle: "Host",
+          reason: "Unique artwork"
+        )
+      ],
+      colorHex: "#2A2A2A",
+      artworkURL: stationArtworkURL,
+      shareURL: URL(string: "https://example.com/station-1")!
+    )
+
+    XCTAssertEqual(
+      station.artworkURLs.map(\.absoluteString),
+      [
+        "https://example.com/station.jpg",
+        "https://example.com/track.jpg"
+      ]
+    )
+  }
+
   private func makeSnapshot() -> AppleMusicLibrarySnapshot {
     let track = makeTrack(title: "Signal")
     let playlist = AppleMusicPlaylistSnapshot(
@@ -70,7 +147,7 @@ final class AppleMusicLibraryStoreTests: XCTestCase {
     return AppleMusicLibrarySnapshot(playlists: [playlist], tracks: [track])
   }
 
-  private func makeTrack(title: String) -> MusicHackathon.Track {
+  private func makeTrack(title: String, artworkURL: URL? = nil) -> MusicHackathon.Track {
     let slug = title.lowercased().replacingOccurrences(of: " ", with: "-")
     return MusicHackathon.Track(
       title: title,
@@ -79,7 +156,7 @@ final class AppleMusicLibraryStoreTests: XCTestCase {
       mood: "Pop",
       duration: 210,
       artworkSystemName: "music.note",
-      artworkURL: URL(string: "https://example.com/\(slug).jpg"),
+      artworkURL: artworkURL ?? URL(string: "https://example.com/\(slug).jpg"),
       previewURL: URL(string: "https://example.com/\(slug).m4a"),
       appleMusicID: slug,
       playlistName: "Library Mix",

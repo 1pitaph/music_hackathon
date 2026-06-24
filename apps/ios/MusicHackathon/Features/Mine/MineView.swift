@@ -4,9 +4,14 @@ struct MineView: View {
   @Environment(MusicAuthorizationService.self) private var musicAuthorization
   @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
 
+  @AppStorage("mine.profile.avatarSeed") private var profileAvatarSeed = ""
+  @AppStorage("mine.profile.nickname") private var profileNickname = ""
+  @AppStorage("mine.profile.bio") private var profileBio = ""
+
   @State private var profile = ArchiveProfile.empty
   @State private var recentlyPlayedExpanded = true
   @State private var savedExpanded = true
+  @State private var transientAvatarSeed = MineAvatarSeed.make()
 
   var body: some View {
     let currentProfile = displayProfile
@@ -47,59 +52,82 @@ struct MineView: View {
         ArchiveStationDetailPage(station: station)
           .navigationTitle(station.name)
       case .profile:
-        ProfileEditorPage(profile: $profile)
+        ProfileEditorPage(
+          initialNickname: currentProfile.nickname,
+          nickname: $profileNickname,
+          bio: $profileBio,
+          avatarSeed: avatarSeedBinding
+        )
           .navigationTitle("个人电台")
       }
     }
     .task {
+      ensurePersistentAvatarSeed()
       await refreshLibraryIfNeeded()
     }
   }
 
   private var displayProfile: ArchiveProfile {
-    guard hasLibraryContent else { return profile }
+    guard hasLibraryContent else { return baseProfile }
 
     return ArchiveProfile.appleMusic(
-      base: profile,
+      base: baseProfile,
       playlists: appleMusicLibrary.playlists,
       tracks: appleMusicLibrary.tracks
     )
+  }
+
+  private var baseProfile: ArchiveProfile {
+    var baseProfile = profile
+    baseProfile.nickname = profileNickname.trimmingCharacters(in: .whitespacesAndNewlines)
+    baseProfile.bio = profileBio.trimmingCharacters(in: .whitespacesAndNewlines)
+    return baseProfile
   }
 
   private var hasLibraryContent: Bool {
     !appleMusicLibrary.playlists.isEmpty || !appleMusicLibrary.tracks.isEmpty
   }
 
-  private func identityHeader(profile: ArchiveProfile) -> some View {
-    VStack(spacing: 16) {
-      NavigationLink(value: MineRoute.profile) {
-        ZStack {
-          Circle()
-            .fill(Color(hex: profile.avatarColorHex))
-            .frame(width: 82, height: 82)
-            .overlay {
-              Circle()
-                .stroke(.white.opacity(0.16), lineWidth: 2)
-            }
+  private var avatarSeed: String {
+    profileAvatarSeed.isEmpty ? transientAvatarSeed : profileAvatarSeed
+  }
 
-          Text(String(profile.nickname.prefix(1)))
-            .font(.system(size: 30, weight: .bold, design: .rounded))
-            .foregroundStyle(.white.opacity(0.72))
-        }
+  private var avatarSeedBinding: Binding<String> {
+    Binding {
+      avatarSeed
+    } set: { newValue in
+      profileAvatarSeed = newValue
+    }
+  }
+
+  private func identityHeader(profile: ArchiveProfile) -> some View {
+    let nickname = profile.nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+    let bio = profile.bio.trimmingCharacters(in: .whitespacesAndNewlines)
+    let avatarAccessibilityLabel = nickname.isEmpty ? "个人资料头像" : "\(nickname) 的头像"
+
+    return VStack(spacing: 16) {
+      NavigationLink(value: MineRoute.profile) {
+        MarbleAvatarView(seed: avatarSeed, size: 82, accessibilityLabel: avatarAccessibilityLabel)
       }
       .buttonStyle(.plain)
       .accessibilityLabel("编辑个人资料")
 
-      VStack(spacing: 8) {
-        Text(profile.nickname)
-          .font(.system(size: 28, weight: .bold, design: .rounded))
-          .foregroundStyle(.white)
-          .lineLimit(1)
+      if !nickname.isEmpty || !bio.isEmpty {
+        VStack(spacing: 8) {
+          if !nickname.isEmpty {
+            Text(nickname)
+              .font(.system(size: 28, weight: .bold, design: .rounded))
+              .foregroundStyle(.white)
+              .lineLimit(1)
+          }
 
-        Text(profile.bio)
-          .font(.system(size: 13, weight: .medium, design: .rounded))
-          .foregroundStyle(.white.opacity(0.42))
-          .multilineTextAlignment(.center)
+          if !bio.isEmpty {
+            Text(bio)
+              .font(.system(size: 13, weight: .medium, design: .rounded))
+              .foregroundStyle(.white.opacity(0.42))
+              .multilineTextAlignment(.center)
+          }
+        }
       }
 
       HStack(spacing: 0) {
@@ -110,6 +138,11 @@ struct MineView: View {
       .padding(.top, 4)
     }
     .frame(maxWidth: .infinity)
+  }
+
+  private func ensurePersistentAvatarSeed() {
+    guard profileAvatarSeed.isEmpty else { return }
+    profileAvatarSeed = transientAvatarSeed
   }
 
   @ViewBuilder
@@ -629,59 +662,67 @@ private struct ArchiveStationDetailPage: View {
 }
 
 private struct ProfileEditorPage: View {
-  @Binding var profile: ArchiveProfile
+  @Binding var nickname: String
+  @Binding var bio: String
+  @Binding var avatarSeed: String
   @Environment(\.dismiss) private var dismiss
 
-  @State private var nickname: String
-  @State private var bio: String
-  @State private var selectedColorHex: String
+  @State private var draftNickname: String
+  @State private var draftBio: String
+  @State private var draftAvatarSeed: String
 
-  private let colors = ["#2A2A2A", "#FF6B6B", "#4ECDC4", "#45B7D1", "#DDA0DD"]
-
-  init(profile: Binding<ArchiveProfile>) {
-    _profile = profile
-    _nickname = State(initialValue: profile.wrappedValue.nickname)
-    _bio = State(initialValue: profile.wrappedValue.bio)
-    _selectedColorHex = State(initialValue: profile.wrappedValue.avatarColorHex)
+  init(
+    initialNickname: String,
+    nickname: Binding<String>,
+    bio: Binding<String>,
+    avatarSeed: Binding<String>
+  ) {
+    _nickname = nickname
+    _bio = bio
+    _avatarSeed = avatarSeed
+    _draftNickname = State(initialValue: nickname.wrappedValue.isEmpty ? initialNickname : nickname.wrappedValue)
+    _draftBio = State(initialValue: bio.wrappedValue)
+    _draftAvatarSeed = State(initialValue: avatarSeed.wrappedValue)
   }
 
   var body: some View {
     ScrollView(.vertical, showsIndicators: false) {
       VStack(alignment: .leading, spacing: 30) {
         field(title: "昵称") {
-          TextField("输入昵称", text: $nickname)
+          TextField("输入昵称", text: $draftNickname)
             .textInputAutocapitalization(.never)
             .foregroundStyle(.white)
         }
 
         field(title: "电台简介") {
-          TextField("输入电台简介", text: $bio)
+          TextField("输入电台简介", text: $draftBio)
             .foregroundStyle(.white)
         }
 
         VStack(alignment: .leading, spacing: 12) {
-          Text("头像颜色")
+          Text("随机头像")
             .font(.system(size: 14, weight: .semibold, design: .rounded))
             .foregroundStyle(.white.opacity(0.62))
 
-          HStack(spacing: 16) {
-            ForEach(colors, id: \.self) { colorHex in
-              Button {
-                selectedColorHex = colorHex
-              } label: {
-                Circle()
-                  .fill(Color(hex: colorHex))
-                  .frame(width: 48, height: 48)
-                  .overlay {
-                    if selectedColorHex == colorHex {
-                      Circle()
-                        .stroke(.white, lineWidth: 3)
-                    }
-                  }
+          HStack(spacing: 18) {
+            MarbleAvatarView(seed: draftAvatarSeed, size: 96, accessibilityLabel: "当前头像")
+
+            Button {
+              withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                draftAvatarSeed = MineAvatarSeed.make()
               }
-              .buttonStyle(.plain)
-              .accessibilityLabel("选择颜色 \(colorHex)")
+            } label: {
+              Label("换一个", systemImage: "shuffle")
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color(hex: "#121212"))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("重新生成头像")
+
+            Spacer(minLength: 0)
           }
         }
 
@@ -720,10 +761,18 @@ private struct ProfileEditorPage: View {
   }
 
   private func save() {
-    profile.nickname = String(nickname.prefix(20))
-    profile.bio = String(bio.prefix(60))
-    profile.avatarColorHex = selectedColorHex
+    let trimmedNickname = draftNickname.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmedBio = draftBio.trimmingCharacters(in: .whitespacesAndNewlines)
+    nickname = String(trimmedNickname.prefix(20))
+    bio = String(trimmedBio.prefix(60))
+    avatarSeed = draftAvatarSeed
     dismiss()
+  }
+}
+
+private enum MineAvatarSeed {
+  static func make() -> String {
+    "mine-avatar-\(UUID().uuidString)"
   }
 }
 
@@ -737,28 +786,8 @@ private struct ArchiveStationCover: View {
   }
 
   var body: some View {
-    Group {
-      if let artworkURL = station.artworkURL {
-        AsyncImage(url: artworkURL) { phase in
-          switch phase {
-          case let .success(image):
-            image
-              .resizable()
-              .scaledToFill()
-          case .empty:
-            fallback
-              .overlay {
-                ProgressView()
-              }
-          case .failure:
-            fallback
-          @unknown default:
-            fallback
-          }
-        }
-      } else {
-        fallback
-      }
+    RemoteArtworkView(urls: [station.artworkURL] + station.tracks.map(\.artworkURL)) {
+      fallback
     }
     .aspectRatio(1, contentMode: .fit)
     .frame(width: size, height: size)
@@ -799,28 +828,8 @@ private struct MineTrackArtwork: View {
   let size: CGFloat
 
   var body: some View {
-    Group {
-      if let artworkURL = track.artworkURL {
-        AsyncImage(url: artworkURL) { phase in
-          switch phase {
-          case let .success(image):
-            image
-              .resizable()
-              .scaledToFill()
-          case .empty:
-            fallback
-              .overlay {
-                ProgressView()
-              }
-          case .failure:
-            fallback
-          @unknown default:
-            fallback
-          }
-        }
-      } else {
-        fallback
-      }
+    RemoteArtworkView(urls: [track.artworkURL]) {
+      fallback
     }
     .frame(width: size, height: size)
     .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))

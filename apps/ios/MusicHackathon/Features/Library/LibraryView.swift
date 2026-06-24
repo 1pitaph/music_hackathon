@@ -150,28 +150,8 @@ private struct PlaylistArtworkThumbnail: View {
   let size: CGFloat
 
   var body: some View {
-    Group {
-      if let artworkURL = playlist.artworkURL ?? playlist.tracks.first?.artworkURL {
-        AsyncImage(url: artworkURL) { phase in
-          switch phase {
-          case let .success(image):
-            image
-              .resizable()
-              .scaledToFill()
-          case .empty:
-            fallback
-              .overlay {
-                ProgressView()
-              }
-          case .failure:
-            fallback
-          @unknown default:
-            fallback
-          }
-        }
-      } else {
-        fallback
-      }
+    RemoteArtworkView(urls: playlist.artworkCandidateURLs) {
+      fallback
     }
     .frame(width: size, height: size)
     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -192,28 +172,8 @@ private struct TrackArtworkThumbnail: View {
   let size: CGFloat
 
   var body: some View {
-    Group {
-      if let artworkURL = track.artworkURL {
-        AsyncImage(url: artworkURL) { phase in
-          switch phase {
-          case let .success(image):
-            image
-              .resizable()
-              .scaledToFill()
-          case .empty:
-            fallback
-              .overlay {
-                ProgressView()
-              }
-          case .failure:
-            fallback
-          @unknown default:
-            fallback
-          }
-        }
-      } else {
-        fallback
-      }
+    RemoteArtworkView(urls: [track.artworkURL]) {
+      fallback
     }
     .frame(width: size, height: size)
     .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))

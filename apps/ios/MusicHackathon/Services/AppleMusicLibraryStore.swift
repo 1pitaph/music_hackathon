@@ -15,6 +15,10 @@ struct AppleMusicPlaylistSnapshot: Identifiable, Hashable {
   let curatorName: String?
   let artworkURL: URL?
   let tracks: [Track]
+
+  var artworkCandidateURLs: [URL] {
+    ArtworkURLCandidates.unique(from: [artworkURL] + tracks.map(\.artworkURL))
+  }
 }
 
 protocol AppleMusicLibraryProviding {
