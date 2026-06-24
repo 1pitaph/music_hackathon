@@ -1,6 +1,11 @@
+import base64
+import json
+
 from fastapi.testclient import TestClient
 
 from radio_agent.api import app
+from radio_agent import speech
+from radio_agent.schemas import RadioSpeechAudioConfig, RadioSpeechSegment
 
 
 def test_root_health():
@@ -132,6 +137,184 @@ def test_synthesize_speech_endpoint_returns_matching_segment_audio(monkeypatch):
   assert all(segment["audio"]["cacheKey"].startswith("speech_") for segment in body["segments"])
 
 
+def test_volcengine_speech_synthesis_writes_audio_and_reuses_cache(monkeypatch, tmp_path):
+  _configure_volcengine_env(monkeypatch, tmp_path)
+  audio_bytes = b"ID3fake-mp3"
+  calls = []
+
+  def fake_stream(method, url, *, headers, json, timeout):
+    calls.append({"method": method, "url": url, "headers": headers, "json": json, "timeout": timeout})
+    return _FakeVolcengineStream(
+      200,
+      [
+        {"code": 0, "data": base64.b64encode(audio_bytes[:4]).decode("ascii")},
+        {"code": 0, "data": base64.b64encode(audio_bytes[4:]).decode("ascii")},
+        {"code": 20000000, "message": "finished"},
+      ],
+    )
+
+  monkeypatch.setattr(speech.httpx, "stream", fake_stream)
+  config = RadioSpeechAudioConfig(
+    enabled=True,
+    provider="openai",
+    voice="coral",
+    model="gpt-4o-mini-tts",
+    format="mp3",
+  )
+  segment = RadioSpeechSegment(
+    id="station-intro",
+    kind="stationIntro",
+    text="Welcome in.",
+    displayText="Welcome in.",
+    targetItemId="song-1",
+  )
+
+  results, diagnostics = speech.synthesize_speech_segments([segment], config)
+
+  assert diagnostics == []
+  assert len(calls) == 1
+  assert calls[0]["method"] == "POST"
+  assert calls[0]["url"] == "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
+  assert calls[0]["headers"]["X-Api-Key"] == "test-api-key"
+  assert calls[0]["headers"]["X-Api-Resource-Id"] == "seed-tts-2.0"
+  assert calls[0]["headers"]["X-Api-Request-Id"].startswith("speech_")
+  req_params = calls[0]["json"]["req_params"]
+  assert req_params["text"] == "Welcome in."
+  assert req_params["speaker"] == "zh_female_test"
+  assert req_params["model"] == "seed-tts-2.0-standard"
+  assert req_params["audio_params"] == {
+    "format": "mp3",
+    "sample_rate": 24000,
+    "bit_rate": 128000,
+    "speech_rate": 0,
+    "loudness_rate": 0,
+    "enable_subtitle": False,
+  }
+
+  audio = results[0].audio
+  assert audio.status == "ready"
+  assert audio.voice == "zh_female_test"
+  assert audio.model == "seed-tts-2.0-standard"
+  assert audio.mimeType == "audio/mpeg"
+  assert audio.audioURL == f"https://speech.test/audio/{audio.cacheKey}.mp3"
+  assert (tmp_path / f"{audio.cacheKey}.mp3").read_bytes() == audio_bytes
+
+  def fail_if_called(*args, **kwargs):
+    raise AssertionError("cache hit should not call Volcengine")
+
+  monkeypatch.setattr(speech.httpx, "stream", fail_if_called)
+  cached_results, cached_diagnostics = speech.synthesize_speech_segments([segment], config)
+
+  assert cached_diagnostics == []
+  assert cached_results[0].audio.status == "ready"
+  assert cached_results[0].audio.audioURL == audio.audioURL
+
+
+def test_volcengine_speech_synthesis_failure_does_not_leak_secret(monkeypatch, tmp_path):
+  _configure_volcengine_env(monkeypatch, tmp_path)
+
+  def fake_stream(method, url, *, headers, json, timeout):
+    return _FakeVolcengineStream(
+      200,
+      [{"code": 5000, "message": "bad key test-api-key"}],
+    )
+
+  monkeypatch.setattr(speech.httpx, "stream", fake_stream)
+  results, diagnostics = speech.synthesize_speech_segments(
+    [
+      RadioSpeechSegment(
+        id="transition-1",
+        kind="transition",
+        text="Next up.",
+        displayText="Next up.",
+        fromItemId="song-1",
+        toItemId="song-2",
+      )
+    ],
+    RadioSpeechAudioConfig(enabled=True, provider="volcengine", voice="zh_female_test"),
+  )
+
+  assert results[0].audio.status == "unavailable"
+  assert "test-api-key" not in " ".join(diagnostics)
+  assert "[redacted]" in " ".join(diagnostics)
+
+
+def test_volcengine_speech_synthesis_reports_missing_configuration(monkeypatch, tmp_path):
+  monkeypatch.setenv("SPEECH_ENABLED", "true")
+  monkeypatch.setenv("SPEECH_PROVIDER", "volcengine")
+  monkeypatch.setenv("SPEECH_CACHE_DIR", str(tmp_path))
+  monkeypatch.setenv("SPEECH_PUBLIC_BASE_URL", "https://speech.test/audio")
+  monkeypatch.delenv("VOLCENGINE_TTS_API_KEY", raising=False)
+  monkeypatch.delenv("VOLCENGINE_TTS_SPEAKER", raising=False)
+  monkeypatch.delenv("VOLCENGINE_TTS_VOICE_TYPE", raising=False)
+
+  def fail_if_called(*args, **kwargs):
+    raise AssertionError("missing configuration should not call Volcengine")
+
+  monkeypatch.setattr(speech.httpx, "stream", fail_if_called)
+  results, diagnostics = speech.synthesize_speech_segments(
+    [
+      RadioSpeechSegment(
+        id="station-intro",
+        kind="stationIntro",
+        text="Welcome in.",
+        displayText="Welcome in.",
+      )
+    ],
+    RadioSpeechAudioConfig(enabled=True, provider="volcengine"),
+  )
+
+  assert results[0].audio.status == "unavailable"
+  assert "Volcengine TTS is missing required configuration" in " ".join(diagnostics)
+  assert "VOLCENGINE_TTS_API_KEY" in " ".join(diagnostics)
+  assert "VOLCENGINE_TTS_SPEAKER" in " ".join(diagnostics)
+
+
+def test_generate_station_can_attach_volcengine_speech_audio(monkeypatch, tmp_path):
+  monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+  _configure_volcengine_env(monkeypatch, tmp_path)
+  audio_bytes = b"ID3station-mp3"
+
+  def fake_stream(method, url, *, headers, json, timeout):
+    return _FakeVolcengineStream(
+      200,
+      [
+        {"code": 0, "data": base64.b64encode(audio_bytes).decode("ascii")},
+        {"code": 20000000, "message": "finished"},
+      ],
+    )
+
+  monkeypatch.setattr(speech.httpx, "stream", fake_stream)
+  client = TestClient(app)
+  payload = {
+    **_request_payload(),
+    "speechAudio": {
+      "enabled": True,
+      "provider": "openai",
+      "voice": "coral",
+      "model": "gpt-4o-mini-tts",
+      "format": "mp3",
+    },
+  }
+
+  response = client.post("/v1/radio/stations/generate", json=payload)
+
+  assert response.status_code == 200
+  body = response.json()
+  intro_audio = body["speech"]["stationIntro"]["audio"]
+  transition_audio = body["speech"]["betweenTracks"][0]["audio"]
+  assert intro_audio["status"] == "ready"
+  assert transition_audio["status"] == "ready"
+  assert intro_audio["voice"] == "zh_female_test"
+  assert intro_audio["audioURL"].startswith("https://speech.test/audio/speech_")
+
+  audio_response = client.get(f"/v1/radio/speech/audio/{intro_audio['cacheKey']}.mp3")
+
+  assert audio_response.status_code == 200
+  assert audio_response.content == audio_bytes
+  assert audio_response.headers["content-type"].startswith("audio/mpeg")
+
+
 def test_compress_memory_uses_deterministic_fallback(monkeypatch):
   monkeypatch.delenv("OPENAI_API_KEY", raising=False)
   client = TestClient(app)
@@ -231,3 +414,38 @@ def _request_payload():
       }
     ],
   }
+
+
+class _FakeVolcengineStream:
+  def __init__(self, status_code, bodies):
+    self.status_code = status_code
+    self._bodies = bodies
+
+  def __enter__(self):
+    return self
+
+  def __exit__(self, exc_type, exc_value, traceback):
+    return False
+
+  def iter_lines(self):
+    for body in self._bodies:
+      yield json.dumps(body)
+
+
+def _configure_volcengine_env(monkeypatch, tmp_path):
+  monkeypatch.setenv("SPEECH_ENABLED", "true")
+  monkeypatch.setenv("SPEECH_PROVIDER", "volcengine")
+  monkeypatch.setenv("SPEECH_MODEL", "seed-tts-2.0-standard")
+  monkeypatch.setenv("SPEECH_DEFAULT_VOICE", "")
+  monkeypatch.setenv("SPEECH_FORMAT", "mp3")
+  monkeypatch.setenv("SPEECH_CACHE_DIR", str(tmp_path))
+  monkeypatch.setenv("SPEECH_PUBLIC_BASE_URL", "https://speech.test/audio")
+  monkeypatch.setenv("VOLCENGINE_TTS_ENDPOINT", "https://openspeech.bytedance.com/api/v3/tts/unidirectional")
+  monkeypatch.setenv("VOLCENGINE_TTS_API_KEY", "test-api-key")
+  monkeypatch.setenv("VOLCENGINE_TTS_RESOURCE_ID", "seed-tts-2.0")
+  monkeypatch.setenv("VOLCENGINE_TTS_SPEAKER", "zh_female_test")
+  monkeypatch.setenv("VOLCENGINE_TTS_MODEL", "seed-tts-2.0-standard")
+  monkeypatch.setenv("VOLCENGINE_TTS_SAMPLE_RATE", "24000")
+  monkeypatch.setenv("VOLCENGINE_TTS_BIT_RATE", "128000")
+  monkeypatch.setenv("VOLCENGINE_TTS_SPEECH_RATE", "0")
+  monkeypatch.setenv("VOLCENGINE_TTS_LOUDNESS_RATE", "0")

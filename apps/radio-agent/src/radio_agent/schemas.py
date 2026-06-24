@@ -88,8 +88,21 @@ class RadioSpeechAudioConfig(BaseModel):
   enabled: bool = False
   provider: str = "openai"
   voice: str | None = None
+  speaker: str | None = None
+  resourceId: str | None = None
   model: str | None = None
   format: str = "mp3"
+  speedRatio: float | None = Field(default=None, gt=0, le=3)
+  volumeRatio: float | None = Field(default=None, gt=0, le=3)
+  pitchRatio: float | None = Field(default=None, gt=0, le=3)
+  sampleRate: int | None = Field(default=None, gt=0)
+  bitRate: int | None = Field(default=None, gt=0)
+  speechRate: int | None = Field(default=None, ge=-50, le=100)
+  loudnessRate: int | None = Field(default=None, ge=-50, le=100)
+  pitch: int | None = Field(default=None, ge=-12, le=12)
+  language: str | None = None
+  explicitLanguage: str | None = None
+  emotion: str | None = None
 
 
 class RadioEntryCopy(BaseModel):

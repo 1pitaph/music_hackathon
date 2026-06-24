@@ -30,13 +30,6 @@ struct DiscoverView: View {
             onPreviousCard: showPreviousCard,
             onNextCard: showNextCard
           )
-
-          HotStationsList(
-            stations: stations.sorted { $0.favorites > $1.favorites },
-            favoritedIDs: favoritedIDs,
-            onPlayStation: playStation,
-            onToggleFavorite: toggleFavorite
-          )
         }
         .padding(.horizontal, 16)
         .padding(.top, 20)
@@ -201,85 +194,456 @@ private struct DiscoverCardStack: View {
   let onPreviousCard: () -> Void
   let onNextCard: () -> Void
 
-  @GestureState private var dragOffset: CGFloat = 0
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  @State private var dragTranslation: CGSize = .zero
+  @State private var committedDirection: SwipeDirection?
+  @State private var isAnimatingSwipe = false
+  @State private var isTrackingHorizontalDrag = false
+  @State private var rejectedVerticalDrag = false
+  @State private var swipeToken = 0
 
   var body: some View {
-    GeometryReader { proxy in
-      let width = max(proxy.size.width - 8, 1)
-      let threshold = proxy.size.width * 0.22
-      let previousIndex = (currentIndex - 1 + stations.count) % stations.count
-      let nextIndex = (currentIndex + 1) % stations.count
-      let activeStation = stations[currentIndex]
+    if stations.isEmpty {
+      EmptyView()
+        .frame(height: collapsedHeight)
+    } else {
+      GeometryReader { proxy in
+        let safeIndex = wrappedIndex(currentIndex, count: stations.count)
+        let width = max(proxy.size.width - 8, 1)
+        let activeStation = stations[safeIndex]
+        let direction = committedDirection ?? SwipeDirection(translation: dragTranslation.width)
+        let progress = swipeProgress(width: proxy.size.width)
+        let sideDirections = visibleSideDirections(activeDirection: direction, currentIndex: safeIndex)
 
-      ZStack {
-        DiscoverStationCard(
-          station: stations[previousIndex],
-          isActive: false,
-          isPlaying: false,
-          isFavorited: favoritedIDs.contains(stations[previousIndex].id),
-          isExpanded: false,
-          onPlayToggle: {},
-          onToggleFavorite: {},
-          onToggleExpanded: {}
-        )
-        .frame(width: width)
-        .scaleEffect(0.9)
-        .rotationEffect(.degrees(-3))
-        .opacity(0.42)
-        .offset(x: -42, y: 20)
+        ZStack {
+          ForEach(sideDirections, id: \.self) { sideDirection in
+            let sideIndex = adjacentIndex(from: safeIndex, direction: sideDirection)
 
-        DiscoverStationCard(
-          station: stations[nextIndex],
-          isActive: false,
-          isPlaying: false,
-          isFavorited: favoritedIDs.contains(stations[nextIndex].id),
-          isExpanded: false,
-          onPlayToggle: {},
-          onToggleFavorite: {},
-          onToggleExpanded: {}
-        )
-        .frame(width: width)
-        .scaleEffect(0.9)
-        .rotationEffect(.degrees(3))
-        .opacity(0.42)
-        .offset(x: 42, y: 20)
-
-        DiscoverStationCard(
-          station: activeStation,
-          isActive: true,
-          isPlaying: isPlaying,
-          isFavorited: favoritedIDs.contains(activeStation.id),
-          isExpanded: expandedStationID == activeStation.id,
-          onPlayToggle: onPlayToggle,
-          onToggleFavorite: {
-            onToggleFavorite(activeStation)
-          },
-          onToggleExpanded: {
-            onToggleExpanded(activeStation)
+            backCard(
+              station: stations[sideIndex],
+              direction: sideDirection,
+              isTarget: direction == sideDirection,
+              width: width,
+              progress: progress
+            )
           }
-        )
-        .frame(width: width)
-        .offset(x: dragOffset)
-        .rotationEffect(.degrees(Double(dragOffset / max(proxy.size.width, 1)) * 2.5))
-        .gesture(
-          DragGesture()
-            .updating($dragOffset) { value, state, _ in
-              state = value.translation.width
-            }
-            .onEnded { value in
-              if value.translation.width > threshold {
-                onPreviousCard()
-              } else if value.translation.width < -threshold {
-                onNextCard()
-              }
-            }
-        )
+
+          activeCard(
+            station: activeStation,
+            direction: direction,
+            progress: progress,
+            width: width,
+            proxySize: proxy.size
+          )
+        }
+        .frame(width: proxy.size.width, height: proxy.size.height)
       }
-      .frame(width: proxy.size.width, height: proxy.size.height)
+      .frame(height: stackHeight)
+      .animation(.spring(response: 0.32, dampingFraction: 0.88), value: currentIndex)
+      .animation(.spring(response: 0.32, dampingFraction: 0.88), value: expandedStationID)
+      .onChange(of: currentIndex) { _, _ in
+        resetSwipeState(invalidatesPendingSwipe: true)
+      }
     }
-    .frame(height: expandedStationID == stations[currentIndex].id ? 650 : 548)
-    .animation(.spring(response: 0.34, dampingFraction: 0.86), value: currentIndex)
-    .animation(.spring(response: 0.32, dampingFraction: 0.88), value: expandedStationID)
+  }
+
+  private var stackHeight: CGFloat {
+    guard !stations.isEmpty else { return collapsedHeight }
+    let safeIndex = wrappedIndex(currentIndex, count: stations.count)
+    return expandedStationID == stations[safeIndex].id ? expandedHeight : collapsedHeight
+  }
+
+  private var snapBackAnimation: Animation {
+    reduceMotion ? .easeOut(duration: 0.16) : .spring(response: 0.32, dampingFraction: 0.82)
+  }
+
+  private var flyOutAnimation: Animation {
+    reduceMotion ? .easeOut(duration: 0.18) : .spring(response: 0.34, dampingFraction: 0.86)
+  }
+
+  private var flyOutDuration: TimeInterval {
+    reduceMotion ? 0.18 : 0.28
+  }
+
+  private var collapsedHeight: CGFloat {
+    548
+  }
+
+  private var expandedHeight: CGFloat {
+    650
+  }
+
+  private func activeCard(
+    station: DiscoverStation,
+    direction: SwipeDirection?,
+    progress: CGFloat,
+    width: CGFloat,
+    proxySize: CGSize
+  ) -> some View {
+    DiscoverStationCard(
+      station: station,
+      isActive: true,
+      isPlaying: isPlaying,
+      isFavorited: favoritedIDs.contains(station.id),
+      isExpanded: expandedStationID == station.id,
+      onPlayToggle: onPlayToggle,
+      onToggleFavorite: {
+        onToggleFavorite(station)
+      },
+      onToggleExpanded: {
+        onToggleExpanded(station)
+      }
+    )
+    .frame(width: width)
+    .offset(x: dragTranslation.width, y: dragTranslation.height)
+    .rotationEffect(.degrees(activeRotation(width: proxySize.width)), anchor: .bottom)
+    .overlay(alignment: direction?.indicatorAlignment ?? .top) {
+      if let direction {
+        swipeIndicator(direction: direction, progress: progress)
+      }
+    }
+    .contentShape(Rectangle())
+    .zIndex(4)
+    .simultaneousGesture(
+      swipeGesture(width: proxySize.width, size: proxySize, activeStation: station)
+    )
+    .accessibilityAction(named: Text("上一张")) {
+      commitSwipe(.right, size: proxySize, activeStation: station)
+    }
+    .accessibilityAction(named: Text("下一张")) {
+      commitSwipe(.left, size: proxySize, activeStation: station)
+    }
+  }
+
+  private func backCard(
+    station: DiscoverStation,
+    direction: SwipeDirection,
+    isTarget: Bool,
+    width: CGFloat,
+    progress: CGFloat
+  ) -> some View {
+    let targetProgress = isTarget ? progress : 0
+
+    return DiscoverStationCard(
+      station: station,
+      isActive: false,
+      isPlaying: false,
+      isFavorited: favoritedIDs.contains(station.id),
+      isExpanded: false,
+      onPlayToggle: {},
+      onToggleFavorite: {},
+      onToggleExpanded: {}
+    )
+    .frame(width: width)
+    .scaleEffect(backScale(progress: targetProgress))
+    .rotationEffect(.degrees(direction.restingRotation * Double(1 - targetProgress)))
+    .opacity(backOpacity(progress: targetProgress, isTarget: isTarget))
+    .offset(
+      x: direction.restingOffsetX * (1 - targetProgress),
+      y: 22 * (1 - targetProgress)
+    )
+    .zIndex(isTarget ? 2 : 1)
+    .allowsHitTesting(false)
+    .accessibilityHidden(true)
+  }
+
+  private func swipeIndicator(direction: SwipeDirection, progress: CGFloat) -> some View {
+    Text(direction.label)
+      .font(.system(size: reduceMotion ? 16 : 18, weight: .black, design: .rounded))
+      .foregroundStyle(.white.opacity(0.92))
+      .padding(.horizontal, 14)
+      .padding(.vertical, 8)
+      .background(direction.tint.opacity(0.82), in: Capsule())
+      .overlay {
+        Capsule()
+          .stroke(.white.opacity(0.22), lineWidth: 1)
+      }
+      .rotationEffect(.degrees(reduceMotion ? 0 : direction.indicatorRotation))
+      .opacity(indicatorOpacity(progress: progress))
+      .padding(.top, 26)
+      .padding(direction.indicatorPaddingEdge, 24)
+  }
+
+  private func swipeGesture(width: CGFloat, size: CGSize, activeStation: DiscoverStation) -> some Gesture {
+    DragGesture(minimumDistance: 12, coordinateSpace: .local)
+      .onChanged { value in
+        handleDragChanged(value)
+      }
+      .onEnded { value in
+        handleDragEnded(value, width: width, size: size, activeStation: activeStation)
+      }
+  }
+
+  private func handleDragChanged(_ value: DragGesture.Value) {
+    guard !isAnimatingSwipe else { return }
+
+    let horizontalDistance = abs(value.translation.width)
+    let verticalDistance = abs(value.translation.height)
+
+    if !isTrackingHorizontalDrag, !rejectedVerticalDrag {
+      guard horizontalDistance > 6 || verticalDistance > 6 else { return }
+
+      if horizontalDistance > max(12, verticalDistance * 1.18) {
+        isTrackingHorizontalDrag = true
+      } else if verticalDistance > horizontalDistance * 1.12 {
+        rejectedVerticalDrag = true
+      }
+    }
+
+    guard isTrackingHorizontalDrag else { return }
+
+    dragTranslation = CGSize(
+      width: value.translation.width,
+      height: reduceMotion ? 0 : value.translation.height * 0.18
+    )
+  }
+
+  private func handleDragEnded(
+    _ value: DragGesture.Value,
+    width: CGFloat,
+    size: CGSize,
+    activeStation: DiscoverStation
+  ) {
+    defer {
+      isTrackingHorizontalDrag = false
+      rejectedVerticalDrag = false
+    }
+
+    guard isTrackingHorizontalDrag else {
+      resetDragOffset()
+      return
+    }
+
+    let actualX = value.translation.width
+    let predictedX = value.predictedEndTranslation.width
+    let distanceThreshold = width * 0.26
+    let predictionThreshold = width * 0.45
+
+    if abs(actualX) > distanceThreshold || abs(predictedX) > predictionThreshold {
+      let decisionX = abs(predictedX) > abs(actualX) ? predictedX : actualX
+      let direction: SwipeDirection = decisionX < 0 ? .left : .right
+      commitSwipe(direction, size: size, activeStation: activeStation)
+    } else {
+      resetDragOffset()
+    }
+  }
+
+  private func commitSwipe(_ direction: SwipeDirection, size: CGSize, activeStation: DiscoverStation) {
+    guard !isAnimatingSwipe else { return }
+
+    isAnimatingSwipe = true
+    committedDirection = direction
+    swipeToken += 1
+    let token = swipeToken
+
+    if expandedStationID == activeStation.id {
+      onToggleExpanded(activeStation)
+
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+        flyOut(direction, size: size, token: token)
+      }
+    } else {
+      flyOut(direction, size: size, token: token)
+    }
+  }
+
+  private func flyOut(_ direction: SwipeDirection, size: CGSize, token: Int) {
+    guard token == swipeToken else { return }
+
+    let targetWidth = max(size.width, 1) * 1.35
+    let targetHeight = reduceMotion ? 0 : dragTranslation.height * 0.35
+
+    withAnimation(flyOutAnimation) {
+      dragTranslation = CGSize(
+        width: direction.sign * targetWidth,
+        height: targetHeight
+      )
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + flyOutDuration) {
+      finishSwipe(direction, token: token)
+    }
+  }
+
+  private func finishSwipe(_ direction: SwipeDirection, token: Int) {
+    guard token == swipeToken else { return }
+
+    var transaction = Transaction()
+    transaction.disablesAnimations = true
+
+    withTransaction(transaction) {
+      switch direction {
+      case .left:
+        onNextCard()
+      case .right:
+        onPreviousCard()
+      }
+
+      resetSwipeState()
+    }
+  }
+
+  private func resetDragOffset() {
+    withAnimation(snapBackAnimation) {
+      dragTranslation = .zero
+    }
+  }
+
+  private func resetSwipeState(invalidatesPendingSwipe: Bool = false) {
+    if invalidatesPendingSwipe {
+      swipeToken += 1
+    }
+
+    dragTranslation = .zero
+    committedDirection = nil
+    isAnimatingSwipe = false
+    isTrackingHorizontalDrag = false
+    rejectedVerticalDrag = false
+  }
+
+  private func activeRotation(width: CGFloat) -> Double {
+    let limit = reduceMotion ? 4.0 : 12.0
+    let multiplier = reduceMotion ? 4.0 : 11.0
+    let rotation = Double(dragTranslation.width / max(width, 1)) * multiplier
+    return min(max(rotation, -limit), limit)
+  }
+
+  private func swipeProgress(width: CGFloat) -> CGFloat {
+    min(abs(dragTranslation.width) / max(width * 0.26, 1), 1)
+  }
+
+  private func backScale(progress: CGFloat) -> CGFloat {
+    let lift = reduceMotion ? 0.04 : 0.08
+    return 0.92 + progress * lift
+  }
+
+  private func backOpacity(progress: CGFloat, isTarget: Bool) -> Double {
+    let base = isTarget ? 0.45 : 0.3
+    return Double(base + progress * 0.55)
+  }
+
+  private func indicatorOpacity(progress: CGFloat) -> Double {
+    let visibleProgress = max(progress - 0.12, 0) / 0.88
+    return Double(min(visibleProgress, 1))
+  }
+
+  private func visibleSideDirections(activeDirection: SwipeDirection?, currentIndex: Int) -> [SwipeDirection] {
+    guard stations.count > 1 else { return [] }
+
+    let previousIndex = adjacentIndex(from: currentIndex, direction: .right)
+    let nextIndex = adjacentIndex(from: currentIndex, direction: .left)
+
+    if previousIndex == nextIndex {
+      return [activeDirection ?? .left]
+    }
+
+    return [.right, .left]
+  }
+
+  private func adjacentIndex(from index: Int, direction: SwipeDirection) -> Int {
+    wrappedIndex(index + direction.indexDelta, count: stations.count)
+  }
+
+  private func wrappedIndex(_ index: Int, count: Int) -> Int {
+    guard count > 0 else { return 0 }
+    return (index % count + count) % count
+  }
+
+  private enum SwipeDirection: Hashable {
+    case left
+    case right
+
+    init?(translation: CGFloat) {
+      if translation < -1 {
+        self = .left
+      } else if translation > 1 {
+        self = .right
+      } else {
+        return nil
+      }
+    }
+
+    var indexDelta: Int {
+      switch self {
+      case .left:
+        return 1
+      case .right:
+        return -1
+      }
+    }
+
+    var sign: CGFloat {
+      switch self {
+      case .left:
+        return -1
+      case .right:
+        return 1
+      }
+    }
+
+    var restingOffsetX: CGFloat {
+      switch self {
+      case .left:
+        return 42
+      case .right:
+        return -42
+      }
+    }
+
+    var restingRotation: Double {
+      switch self {
+      case .left:
+        return 3
+      case .right:
+        return -3
+      }
+    }
+
+    var label: String {
+      switch self {
+      case .left:
+        return "下一张"
+      case .right:
+        return "上一张"
+      }
+    }
+
+    var tint: Color {
+      switch self {
+      case .left:
+        return Color(hex: "#426D8F")
+      case .right:
+        return Color(hex: "#D9523A")
+      }
+    }
+
+    var indicatorAlignment: Alignment {
+      switch self {
+      case .left:
+        return .topTrailing
+      case .right:
+        return .topLeading
+      }
+    }
+
+    var indicatorPaddingEdge: Edge.Set {
+      switch self {
+      case .left:
+        return .trailing
+      case .right:
+        return .leading
+      }
+    }
+
+    var indicatorRotation: Double {
+      switch self {
+      case .left:
+        return 8
+      case .right:
+        return -8
+      }
+    }
   }
 }
 
@@ -463,86 +827,6 @@ private struct DiscoverStationDrawer: View {
     .padding(.bottom, 22)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(Color(hex: "#1E1B18"))
-  }
-}
-
-private struct HotStationsList: View {
-  let stations: [DiscoverStation]
-  let favoritedIDs: Set<String>
-  let onPlayStation: (DiscoverStation) -> Void
-  let onToggleFavorite: (DiscoverStation) -> Void
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      Text("热门电台")
-        .font(.system(size: 18, weight: .semibold, design: .rounded))
-        .foregroundStyle(.white)
-        .padding(.bottom, 8)
-
-      ForEach(stations) { station in
-        Button {
-          onPlayStation(station)
-        } label: {
-          HStack(spacing: 13) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(
-                LinearGradient(
-                  colors: [station.color, station.color.opacity(0.72)],
-                  startPoint: .topLeading,
-                  endPoint: .bottomTrailing
-                )
-              )
-              .frame(width: 52, height: 52)
-              .overlay {
-                Text(String(station.title.prefix(1)))
-                  .font(.system(size: 22, weight: .black, design: .rounded))
-                  .foregroundStyle(.white.opacity(0.68))
-              }
-
-            VStack(alignment: .leading, spacing: 3) {
-              Text(station.title)
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-
-              HStack(spacing: 4) {
-                Text(station.hostName)
-                Text("·")
-                Text(station.genre)
-              }
-              .font(.system(size: 13, weight: .medium, design: .rounded))
-              .foregroundStyle(.white.opacity(0.45))
-              .lineLimit(1)
-            }
-
-            Spacer()
-
-            Text(station.formattedFavorites)
-              .font(.system(size: 12, weight: .semibold, design: .rounded))
-              .foregroundStyle(.white.opacity(0.32))
-
-            Image(systemName: favoritedIDs.contains(station.id) ? "heart.fill" : "chevron.right")
-              .font(.system(size: 14, weight: .semibold))
-              .foregroundStyle(favoritedIDs.contains(station.id) ? Color(hex: "#D9523A") : .white.opacity(0.28))
-          }
-          .padding(.vertical, 12)
-          .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-
-        if station.id != stations.last?.id {
-          Divider()
-            .background(.white.opacity(0.08))
-            .padding(.leading, 65)
-        }
-      }
-
-      Text("滑到底了，要听听自己的电台吗？")
-        .font(.system(size: 12, weight: .medium, design: .rounded))
-        .foregroundStyle(.white.opacity(0.3))
-        .frame(maxWidth: .infinity)
-        .padding(.top, 16)
-    }
   }
 }
 

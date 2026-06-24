@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 
 from radio_agent.graph import compress_radio_memory, generate_radio
 from radio_agent.schemas import (
@@ -19,7 +20,11 @@ from radio_agent.schemas import (
   RadioStationItem,
   RadioTrack,
 )
-from radio_agent.speech import synthesize_speech_segments
+from radio_agent.speech import (
+  speech_audio_file_path,
+  speech_audio_mime_type,
+  synthesize_speech_segments,
+)
 
 app = FastAPI(title="Airset Radio Agent", version="0.1.0")
 
@@ -146,6 +151,19 @@ def generate(request: RadioGenerateRequest) -> RadioGenerateResponse:
 def synthesize_speech(request: RadioSpeechSynthesisRequest) -> RadioSpeechSynthesisResponse:
   results, diagnostics = synthesize_speech_segments(request.segments, request.speechAudio)
   return RadioSpeechSynthesisResponse(segments=results, diagnostics=diagnostics)
+
+
+@app.get("/v1/radio/speech/audio/{file_name}")
+def speech_audio_file(file_name: str) -> FileResponse:
+  file_path = speech_audio_file_path(file_name)
+  if not file_path or not file_path.is_file():
+    raise HTTPException(status_code=404, detail="Speech audio not found.")
+
+  return FileResponse(
+    file_path,
+    media_type=speech_audio_mime_type(file_name),
+    filename=file_name,
+  )
 
 
 @app.post("/v1/radio/memory/compress", response_model=RadioMemoryCompressionResponse)

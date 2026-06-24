@@ -251,7 +251,7 @@ final class PlaybackController: RadioPlaybackControlling {
 
     didNotifyTrackFinished = false
     let utterance = AVSpeechUtterance(string: spokenText)
-    utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+    utterance.voice = AVSpeechSynthesisVoice(language: Self.speechVoiceLanguage(for: spokenText))
     utterance.rate = AVSpeechUtteranceDefaultSpeechRate
     speechSynthesizer.speak(utterance)
 
@@ -569,6 +569,10 @@ final class PlaybackController: RadioPlaybackControlling {
   private static func estimatedSpeechDuration(for text: String) -> TimeInterval {
     let wordCount = max(1, text.split(separator: " ").count)
     return max(1.2, Double(wordCount) / 2.7)
+  }
+
+  private static func speechVoiceLanguage(for text: String) -> String {
+    text.range(of: #"\p{Han}"#, options: .regularExpression) == nil ? "en-US" : "zh-CN"
   }
 }
 
