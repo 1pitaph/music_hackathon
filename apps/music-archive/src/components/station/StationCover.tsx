@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, Image, StyleSheet } from 'react-native';
 import { StationItem, getCoverColor } from '../../data/mockData';
 
 interface StationCoverProps {
@@ -8,6 +8,8 @@ interface StationCoverProps {
 }
 
 export default function StationCover({ station, size = 'list' }: StationCoverProps) {
+  const [imageFailed, setImageFailed] = useState(false);
+
   const dim =
     size === 'detail' ? 120 :
     size === 'grid' ? 150 :
@@ -24,6 +26,9 @@ export default function StationCover({ station, size = 'list' }: StationCoverPro
     size === 'recent' ? 40 :
     size === 'mini' ? 18 : 22;
 
+  const hasCover = station.coverImage && !imageFailed;
+  const bgColor = getCoverColor(station.id);
+
   return (
     <View
       style={[
@@ -32,13 +37,29 @@ export default function StationCover({ station, size = 'list' }: StationCoverPro
           width: dim,
           height: dim,
           borderRadius: radius,
-          backgroundColor: getCoverColor(station.id),
+          backgroundColor: hasCover ? 'transparent' : bgColor,
         },
       ]}
     >
-      <Text style={[styles.letter, { fontSize }]}>
-        {station.name.charAt(0)}
-      </Text>
+      {hasCover ? (
+        <Image
+          source={station.coverImage}
+          style={[
+            styles.image,
+            {
+              width: dim,
+              height: dim,
+              borderRadius: radius,
+            },
+          ]}
+          onError={() => setImageFailed(true)}
+          resizeMode="cover"
+        />
+      ) : (
+        <Text style={[styles.letter, { fontSize }]}>
+          {station.name.charAt(0)}
+        </Text>
+      )}
     </View>
   );
 }
@@ -47,6 +68,10 @@ const styles = StyleSheet.create({
   cover: {
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+  },
+  image: {
+    position: 'absolute',
   },
   letter: {
     color: 'rgba(255,255,255,0.7)',

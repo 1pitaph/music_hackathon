@@ -3,11 +3,14 @@ import {
   View,
   Text,
   TextInput,
+  Image,
   TouchableOpacity,
   ScrollView,
+  Alert,
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 import { ProfilePageProps } from './types';
 import SettingsHeader from './SettingsHeader';
 
@@ -22,9 +25,37 @@ export default function ProfilePage({
   const [nickname, setNickname] = useState(profile.nickname);
   const [bio, setBio] = useState(profile.bio);
   const [selectedColor, setSelectedColor] = useState(profile.avatarColor);
+  const [avatarSource, setAvatarSource] = useState<any>(profile.avatarImage);
+  const [avatarFailed, setAvatarFailed] = useState(false);
+
+  const handlePickAvatar = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('需要相册权限', '请在系统设置中允许访问相册后重试');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets.length > 0) {
+      setAvatarSource({ uri: result.assets[0].uri });
+      setAvatarFailed(false);
+    }
+  };
 
   const handleSave = () => {
-    onSave({ ...profile, nickname, bio, avatarColor: selectedColor });
+    onSave({
+      ...profile,
+      nickname,
+      bio,
+      avatarColor: selectedColor,
+      avatarImage: avatarSource,
+    });
     onSaveAndBackToMine();
   };
 
@@ -37,7 +68,38 @@ export default function ProfilePage({
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.label}>昵称</Text>
+        {/* Avatar Preview + Upload */}
+        <Text style={styles.label}>头像图片</Text>
+        <View style={styles.avatarRow}>
+          <View
+            style={[
+              styles.avatarPreview,
+              { backgroundColor: avatarFailed || !avatarSource ? selectedColor : 'transparent' },
+            ]}
+          >
+            {avatarSource && !avatarFailed ? (
+              <Image
+                source={avatarSource}
+                style={styles.avatarPreviewImage}
+                onError={() => setAvatarFailed(true)}
+                resizeMode="cover"
+              />
+            ) : (
+              <Text style={styles.avatarPreviewText}>
+                {nickname.charAt(0) || profile.nickname.charAt(0)}
+              </Text>
+            )}
+          </View>
+          <TouchableOpacity
+            style={styles.pickButton}
+            onPress={handlePickAvatar}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.pickButtonText}>更换头像</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={[styles.label, styles.fieldGap]}>昵称</Text>
         <TextInput
           style={styles.input}
           value={nickname}
@@ -58,7 +120,7 @@ export default function ProfilePage({
           maxLength={60}
         />
 
-        <Text style={[styles.label, styles.fieldGap]}>头像颜色</Text>
+        <Text style={[styles.label, styles.fieldGap]}>头像颜色（无图片时作为头像底色）</Text>
         <View style={styles.colorGrid}>
           {PRESET_COLORS.map((color) => {
             const isSelected = selectedColor === color;
@@ -107,12 +169,51 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 40,
   },
+
+  /* ---- Avatar ---- */
   label: {
     color: 'rgba(255,255,255,0.6)',
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 12,
   },
+  avatarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 20,
+  },
+  avatarPreview: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  avatarPreviewImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+  },
+  avatarPreviewText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 28,
+    fontWeight: '600',
+  },
+  pickButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  pickButtonText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+
+  /* ---- Fields ---- */
   fieldGap: {
     marginTop: 32,
   },
@@ -123,6 +224,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(255,255,255,0.2)',
   },
+
+  /* ---- Colors ---- */
   colorGrid: {
     flexDirection: 'row',
     gap: 16,
@@ -144,6 +247,8 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
+
+  /* ---- Save ---- */
   saveButton: {
     marginTop: 48,
     backgroundColor: '#fff',

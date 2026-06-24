@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
+  Image,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
@@ -55,6 +56,7 @@ export default function MineScreen({
     recentlyPlayed: true,
     saved: true,
   });
+  const [avatarFailed, setAvatarFailed] = useState(false);
 
   const togglePanel = (key: PanelKey) => {
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -113,9 +115,18 @@ export default function MineScreen({
         {/* Identity Card */}
         <View style={styles.identityCard}>
           <View style={[styles.avatar, { backgroundColor: profile.avatarColor }]}>
-            <Text style={styles.avatarText}>
-              {profile.nickname.charAt(0)}
-            </Text>
+            {profile.avatarImage && !avatarFailed ? (
+              <Image
+                source={profile.avatarImage}
+                style={styles.avatarImage}
+                onError={() => setAvatarFailed(true)}
+                resizeMode="cover"
+              />
+            ) : (
+              <Text style={styles.avatarText}>
+                {profile.nickname.charAt(0)}
+              </Text>
+            )}
           </View>
           <Text style={styles.title}>{profile.nickname}</Text>
           <Text style={styles.bio}>{profile.bio}</Text>
@@ -282,6 +293,12 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.15)',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
   },
   avatarText: {
     color: 'rgba(255,255,255,0.7)',
