@@ -53,6 +53,7 @@ final class RadioStationClientTests: XCTestCase {
     let session = makeSession { request in
       XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/stations/generate")
       XCTAssertEqual(request.httpMethod, "POST")
+      XCTAssertEqual(request.timeoutInterval, 45.0)
 
       let body = try JSONSerialization.jsonObject(with: self.bodyData(from: request)) as? [String: Any]
       XCTAssertEqual(body?["stationID"] as? String, "airset-personal")

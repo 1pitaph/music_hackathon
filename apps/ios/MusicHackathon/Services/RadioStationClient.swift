@@ -197,17 +197,20 @@ struct RadioStationClient: RadioStationFetching {
   private let baseURL: URL?
   private let session: URLSession
   private let timeout: TimeInterval
+  private let generationTimeout: TimeInterval
   private let decoder: JSONDecoder
   private let encoder: JSONEncoder
 
   init(
     baseURL: URL? = Self.defaultBaseURL,
     session: URLSession = .shared,
-    timeout: TimeInterval = 15.0
+    timeout: TimeInterval = 15.0,
+    generationTimeout: TimeInterval = 45.0
   ) {
     self.baseURL = baseURL
     self.session = session
     self.timeout = timeout
+    self.generationTimeout = generationTimeout
     decoder = JSONDecoder()
     encoder = JSONEncoder()
   }
@@ -240,7 +243,7 @@ struct RadioStationClient: RadioStationFetching {
     }
 
     let endpoint = baseURL.appending(path: "v1/radio/stations/generate")
-    var request = URLRequest(url: endpoint, timeoutInterval: timeout)
+    var request = URLRequest(url: endpoint, timeoutInterval: generationTimeout)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = try encoder.encode(context)
