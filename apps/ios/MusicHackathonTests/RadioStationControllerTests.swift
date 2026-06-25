@@ -101,6 +101,10 @@ final class RadioStationControllerTests: XCTestCase {
 
     XCTAssertEqual(stationClient.contexts.map(\.action), ["start", "continue"])
     XCTAssertEqual(stationClient.contexts.map(\.speechLanguage), ["en-US", "en-US"])
+    XCTAssertEqual(
+      stationClient.contexts.map(\.speechAudio.speaker),
+      ["en_female_lauren_moon_bigtts", "en_female_lauren_moon_bigtts"]
+    )
     XCTAssertEqual(stationClient.contexts.map(\.speechAudio.explicitLanguage), ["en-US", "en-US"])
   }
 

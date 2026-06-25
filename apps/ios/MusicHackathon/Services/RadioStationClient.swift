@@ -91,9 +91,7 @@ struct RadioStationGenerationContext: Encodable, Equatable {
     self.queuedTrackKeys = queuedTrackKeys
     self.recentlyPlayedTrackKeys = recentlyPlayedTrackKeys
     self.speechLanguage = speechLanguage.speechLanguageCode
-    if let hostSpeakerID = hostSpeakerID?.trimmedNilIfEmpty {
-      speechAudio.speaker = hostSpeakerID
-    }
+    speechAudio.speaker = speechLanguage.resolvedHostSpeakerID(preferredSpeakerID: hostSpeakerID)
     speechAudio.explicitLanguage = speechLanguage.speechLanguageCode
     memory = RadioMemoryRequest(
       recentlyPlayedTrackKeys: memoryContext.recentlyPlayedTrackKeys,

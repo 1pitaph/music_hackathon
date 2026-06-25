@@ -347,7 +347,9 @@ struct SettingsView: View {
     if let voice = catalog.voice(for: selectedHostSpeakerID) {
       return voice
     }
-    return catalog.voice(for: catalog.defaultSpeaker)
+    guard selectedHostSpeakerID.isEmpty else { return nil }
+    return catalog.voice(for: defaultHostSpeakerID(for: selectedSpeechLanguage, in: catalog))
+      ?? catalog.voice(for: catalog.defaultSpeaker)
   }
 
   private var speechLanguageBinding: Binding<String> {
@@ -356,7 +358,12 @@ struct SettingsView: View {
     } set: { newValue in
       let language = RadioSpeechLanguage(rawValue: newValue) ?? .chinese
       selectedSpeechLanguageRawValue = language.rawValue
+      syncSelectedHostSpeaker(for: language)
     }
+  }
+
+  private var selectedSpeechLanguage: RadioSpeechLanguage {
+    RadioSpeechLanguage(rawValue: selectedSpeechLanguageRawValue) ?? .chinese
   }
 
   private var selectedHostVoiceName: String {
@@ -663,13 +670,40 @@ struct SettingsView: View {
     syncSelectedHostSpeaker()
   }
 
-  private func syncSelectedHostSpeaker() {
-    guard let catalog = radioStation.speechVoiceCatalog, !catalog.voices.isEmpty else { return }
-    if selectedHostSpeakerID.isEmpty {
-      selectedHostSpeakerID = catalog.defaultSpeaker
-    } else if catalog.voice(for: selectedHostSpeakerID) == nil {
-      selectedHostSpeakerID = catalog.defaultSpeaker
+  private func syncSelectedHostSpeaker(for language: RadioSpeechLanguage? = nil) {
+    let language = language ?? selectedSpeechLanguage
+    guard let catalog = radioStation.speechVoiceCatalog, !catalog.voices.isEmpty else {
+      selectedHostSpeakerID = language.resolvedHostSpeakerID(preferredSpeakerID: selectedHostSpeakerID)
+      return
     }
+
+    let defaultSpeakerID = defaultHostSpeakerID(for: language, in: catalog)
+    if selectedHostSpeakerID.isEmpty || language.isKnownLanguageMismatch(speakerID: selectedHostSpeakerID) {
+      selectedHostSpeakerID = defaultSpeakerID
+    } else if catalog.voice(for: selectedHostSpeakerID) == nil {
+      selectedHostSpeakerID = defaultSpeakerID
+    }
+  }
+
+  private func defaultHostSpeakerID(
+    for language: RadioSpeechLanguage,
+    in catalog: RadioSpeechVoiceCatalog
+  ) -> String {
+    if let voice = catalog.voice(for: language.defaultHostSpeakerID),
+       language.matchesVoiceLanguage(voice.language) {
+      return voice.id
+    }
+
+    if let defaultVoice = catalog.voice(for: catalog.defaultSpeaker),
+       language.matchesVoiceLanguage(defaultVoice.language) {
+      return defaultVoice.id
+    }
+
+    if !language.isKnownLanguageMismatch(speakerID: catalog.defaultSpeaker) {
+      return catalog.defaultSpeaker
+    }
+
+    return language.defaultHostSpeakerID
   }
 }
 

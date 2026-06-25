@@ -21,6 +21,46 @@ enum RadioSpeechLanguage: String, CaseIterable, Identifiable {
     rawValue
   }
 
+  var defaultHostSpeakerID: String {
+    switch self {
+    case .chinese:
+      "zh_female_shuangkuaisisi_moon_bigtts"
+    case .english:
+      "en_female_lauren_moon_bigtts"
+    }
+  }
+
+  func resolvedHostSpeakerID(preferredSpeakerID: String?) -> String {
+    guard
+      let speakerID = preferredSpeakerID?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !speakerID.isEmpty
+    else {
+      return defaultHostSpeakerID
+    }
+
+    return isKnownLanguageMismatch(speakerID: speakerID) ? defaultHostSpeakerID : speakerID
+  }
+
+  func isKnownLanguageMismatch(speakerID: String) -> Bool {
+    let normalizedSpeakerID = speakerID.lowercased()
+    switch self {
+    case .chinese:
+      return normalizedSpeakerID.hasPrefix("en_")
+    case .english:
+      return normalizedSpeakerID.hasPrefix("zh_")
+    }
+  }
+
+  func matchesVoiceLanguage(_ language: String) -> Bool {
+    let normalizedLanguage = language.lowercased()
+    switch self {
+    case .chinese:
+      return normalizedLanguage.hasPrefix("zh")
+    case .english:
+      return normalizedLanguage.hasPrefix("en")
+    }
+  }
+
   static func stored(in defaults: UserDefaults = .standard) -> RadioSpeechLanguage {
     guard
       let rawValue = defaults.string(forKey: storageKey),

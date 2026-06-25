@@ -183,9 +183,9 @@
 "radio.subtitle.stationIntro" = "Station intro";
 "radio.subtitle.transitionActive" = "Radio transition";
 "radio.subtitle.transitionNext" = "Next transition";
-"radioSpeech.stationIntro" = "Tune to %@, starting with %@.";
+"radioSpeech.stationIntro" = "Tune to %@. We'll start with %@ and settle in together for a minute.";
 "radioSpeech.nextTrack" = "Next up: %@ by %@.";
-"radioSpeech.transition" = "Move from %@ into %@. %@";
+"radioSpeech.transition" = "We just came from %@, so let's take the turn gently. %@ is next; %@";
 "radioClient.error.disabled" = "Radio station API is disabled for this build.";
 "radioClient.error.invalidResponse" = "Radio station API returned an invalid response.";
 "radioClient.error.serverStatus" = "Radio station API returned HTTP %d.";

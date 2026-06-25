@@ -25,6 +25,13 @@ BUILTIN_VOICES = [
     gender="female",
     style="轻快亲和",
   ),
+  RadioSpeechVoice(
+    id="en_female_lauren_moon_bigtts",
+    name="Lauren",
+    language="en-us",
+    gender="female",
+    style="Natural English host",
+  ),
 ]
 
 

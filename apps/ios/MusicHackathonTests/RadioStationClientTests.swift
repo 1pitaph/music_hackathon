@@ -226,6 +226,7 @@ final class RadioStationClientTests: XCTestCase {
       let body = try JSONSerialization.jsonObject(with: self.bodyData(from: request)) as? [String: Any]
       XCTAssertEqual(body?["speechLanguage"] as? String, "en-US")
       let speechAudio = body?["speechAudio"] as? [String: Any]
+      XCTAssertEqual(speechAudio?["speaker"] as? String, "en_female_lauren_moon_bigtts")
       XCTAssertEqual(speechAudio?["explicitLanguage"] as? String, "en-US")
 
       let data = """
@@ -257,6 +258,19 @@ final class RadioStationClientTests: XCTestCase {
     let result = try await client.generateStation(context: context)
 
     XCTAssertEqual(result.station.subtitle, "English station intro.")
+  }
+
+  func testEnglishSpeechLanguageUsesLaurenWhenPreferredSpeakerIsChinese() {
+    let context = RadioStationGenerationContext(
+      seedTracks: [makeTrack(title: "Seed")],
+      catalogCandidates: [],
+      memoryContext: RadioMemoryContext(),
+      hostSpeakerID: "zh_female_shuangkuaisisi_moon_bigtts",
+      speechLanguage: .english
+    )
+
+    XCTAssertEqual(context.speechAudio.speaker, "en_female_lauren_moon_bigtts")
+    XCTAssertEqual(context.speechAudio.explicitLanguage, "en-US")
   }
 
   func testContinueStationPostsRollingQueueContextAndDecodesAliases() async throws {

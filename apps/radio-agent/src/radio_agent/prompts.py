@@ -61,9 +61,10 @@ def recommendation_user_prompt_for_payload(
 
 def station_program_system_prompt(speech_language: str = "zh-CN") -> str:
   host_instruction = (
-    "Host copy should sound like a real English radio host: warm, specific, lightly "
-    "conversational, and not like a template. Use natural English only for all host "
-    "copy and display subtitles."
+    "Host copy should sound like a friend-like English radio host companion: warm, "
+    "specific, lightly conversational, and not like a template. Use natural English "
+    "only for all host copy and display subtitles. Do not simply announce the next "
+    "track; each spoken segment needs one small mood observation or programming reason."
     if _is_english(speech_language)
     else "Host copy should sound like a real Chinese radio host: warm, specific, lightly "
     "conversational, and not like a template. You may use at most one light disfluency "
@@ -132,7 +133,9 @@ def station_program_user_prompt(request: RadioGenerateRequest, state: AgentState
 
 def entry_copy_system_prompt(speech_language: str = "zh-CN") -> str:
   language_instruction = (
-    "Write like a warm English radio host, using natural English only."
+    "Write like a friend-like English radio host companion, using natural English only. "
+    "Make it feel like you are keeping the listener company without pretending to know "
+    "private life details."
     if _is_english(speech_language)
     else "Write like a warm Chinese radio host, with at most one light disfluency in the spoken text."
   )
@@ -171,7 +174,8 @@ def entry_copy_user_prompt(state: AgentState) -> str:
 
 def transition_copy_system_prompt(speech_language: str = "zh-CN") -> str:
   language_instruction = (
-    "Write natural English on-air bridges between adjacent tracks in the supplied order."
+    "Write natural English on-air bridges between adjacent tracks in the supplied order, "
+    "like a friend keeping the listener company. Do not use bare 'Next up' announcements."
     if _is_english(speech_language)
     else "Write natural Chinese on-air bridges between adjacent tracks in the supplied order."
   )
@@ -243,15 +247,22 @@ def _is_english(speech_language: str | None) -> bool:
 
 
 def _host_style_payload(speech_language: str) -> dict[str, Any]:
+  if _is_english(speech_language):
+    tone = (
+      "friend-like radio companion: warm, observant, gently direct, specific about "
+      "mood and pacing, never overfamiliar"
+    )
+    disfluency_level = "none; keep spoken English clean and natural"
+  else:
+    tone = "real on-air host, warm, observant, lightly conversational"
+    disfluency_level = "light; at most one small filler word per segment"
+
   return {
     "language": "en-US" if _is_english(speech_language) else "zh-CN",
-    "tone": "real on-air host, warm, observant, lightly conversational",
+    "tone": tone,
+    "directAddressPolicy": "we/you is allowed, but do not imply private life knowledge",
     "storyPolicy": "vibe_scene_only_unless_user_memory_explicitly_supports_a_personal_note",
-    "disfluencyLevel": (
-      "none; keep spoken English clean and natural"
-      if _is_english(speech_language)
-      else "light; at most one small filler word per segment"
-    ),
+    "disfluencyLevel": disfluency_level,
     "bannedClaims": [
       "songwriting or release backstory not present in input",
       "artist biography not present in input",
@@ -264,9 +275,9 @@ def _host_style_payload(speech_language: str) -> dict[str, Any]:
 def _copy_budget_payload(speech_language: str) -> dict[str, str]:
   if _is_english(speech_language):
     return {
-      "stationIntroText": "18-35 English words, one or two short spoken sentences",
-      "transitionText": "10-22 English words, one or two short spoken sentences",
-      "displayText": "6-14 English words, one clean subtitle sentence",
+      "stationIntroText": "50-75 English words, 2-3 short spoken sentences",
+      "transitionText": "24-38 English words, exactly 2 short spoken sentences",
+      "displayText": "8-16 English words, one UI-safe subtitle sentence",
     }
   return {
     "stationIntroText": "45-90 Chinese characters, one or two short spoken sentences",
@@ -278,8 +289,8 @@ def _copy_budget_payload(speech_language: str) -> dict[str, str]:
 def _entry_copy_budget_payload(speech_language: str) -> dict[str, str]:
   if _is_english(speech_language):
     return {
-      "text": "18-35 English words, one or two spoken sentences",
-      "displayText": "6-14 English words, one clean subtitle sentence",
+      "text": "50-75 English words, 2-3 short spoken sentences",
+      "displayText": "8-16 English words, one UI-safe subtitle sentence",
     }
   return {
     "text": "45-90 Chinese characters, one or two spoken sentences",
@@ -290,8 +301,8 @@ def _entry_copy_budget_payload(speech_language: str) -> dict[str, str]:
 def _transition_copy_budget_payload(speech_language: str) -> dict[str, str]:
   if _is_english(speech_language):
     return {
-      "text": "10-22 English words, one or two spoken sentences",
-      "displayText": "6-14 English words, one clean subtitle sentence",
+      "text": "24-38 English words, exactly 2 short spoken sentences",
+      "displayText": "8-16 English words, one UI-safe subtitle sentence",
     }
   return {
     "text": "24-55 Chinese characters, one or two spoken sentences",
@@ -301,19 +312,19 @@ def _transition_copy_budget_payload(speech_language: str) -> dict[str, str]:
 
 def _intro_text_requirement(speech_language: str) -> str:
   if _is_english(speech_language):
-    return "complete natural English host intro for TTS, warm but not rambling"
+    return "complete friend-like English host intro for TTS, 2-3 warm spoken sentences, not rambling"
   return "complete natural Chinese host intro for TTS, lightly human but not rambling"
 
 
 def _transition_text_requirement(speech_language: str) -> str:
   if _is_english(speech_language):
-    return "natural English between-track host bridge for TTS, mention mood or pacing before the next track"
+    return "natural English between-track host bridge for TTS, exactly 2 short sentences, mention mood or pacing before the next track"
   return "natural Chinese between-track host bridge for TTS, mention mood or pacing before the next track"
 
 
 def _display_text_requirement(speech_language: str) -> str:
   if _is_english(speech_language):
-    return "short UI-safe English subtitle, one clean sentence"
+    return "short UI-safe English subtitle, one clean summary sentence"
   return "short UI-safe Chinese subtitle, one clean sentence"
 
 

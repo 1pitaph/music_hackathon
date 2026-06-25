@@ -28,8 +28,10 @@ from radio_agent.state_helpers import (
 )
 
 ENTRY_TEXT_MAX_CHARS = 120
+ENGLISH_ENTRY_TEXT_MAX_CHARS = 480
 ENTRY_DISPLAY_MAX_CHARS = 80
 TRANSITION_TEXT_MAX_CHARS = 78
+ENGLISH_TRANSITION_TEXT_MAX_CHARS = 260
 TRANSITION_DISPLAY_MAX_CHARS = 42
 
 SPOKEN_FILLERS = ("嗯", "呃", "啊", "怎么说呢", "好，", "好,")
@@ -189,6 +191,9 @@ def validate_station_program(state: AgentState) -> dict[str, Any]:
 
 
 def validate_entry_copy(state: AgentState) -> dict[str, Any]:
+  is_english = _is_english_request(state.get("request"))
+  terminal = "." if is_english else "。"
+  text_max_chars = ENGLISH_ENTRY_TEXT_MAX_CHARS if is_english else ENTRY_TEXT_MAX_CHARS
   diagnostics = list(state.get("diagnostics", []))
   raw_entry = state.get("rawEntryCopy")
   payload = parse_generation(raw_entry)
@@ -217,10 +222,10 @@ def validate_entry_copy(state: AgentState) -> dict[str, Any]:
     display_text = str(payload["displayText"])
     target_item_id = payload.get("targetItemId")
 
-  text = _clean_spoken_text(text, ENTRY_TEXT_MAX_CHARS)
-  display_text = _clean_display_text(display_text, ENTRY_DISPLAY_MAX_CHARS)
+  text = _clean_spoken_text(text, text_max_chars, terminal)
+  display_text = _clean_display_text(display_text, ENTRY_DISPLAY_MAX_CHARS, terminal)
   if not display_text:
-    display_text = _clean_display_text(text, ENTRY_DISPLAY_MAX_CHARS)
+    display_text = _clean_display_text(text, ENTRY_DISPLAY_MAX_CHARS, terminal)
 
   entry_copy = RadioEntryCopy(
     id=str(payload.get("id") or "station-intro"),
@@ -233,6 +238,9 @@ def validate_entry_copy(state: AgentState) -> dict[str, Any]:
 
 
 def validate_transition_copy(state: AgentState) -> dict[str, Any]:
+  is_english = _is_english_request(state.get("request"))
+  terminal = "." if is_english else "。"
+  text_max_chars = ENGLISH_TRANSITION_TEXT_MAX_CHARS if is_english else TRANSITION_TEXT_MAX_CHARS
   diagnostics = list(state.get("diagnostics", []))
   payload = parse_generation(state.get("rawTransitionCopy"))
   if payload is None:
@@ -273,10 +281,10 @@ def validate_transition_copy(state: AgentState) -> dict[str, Any]:
     if opening_key:
       seen_opening_keys.add(opening_key)
 
-    text = _clean_spoken_text(text, TRANSITION_TEXT_MAX_CHARS)
-    display_text = _clean_display_text(display_text, TRANSITION_DISPLAY_MAX_CHARS)
+    text = _clean_spoken_text(text, text_max_chars, terminal)
+    display_text = _clean_display_text(display_text, TRANSITION_DISPLAY_MAX_CHARS, terminal)
     if not display_text:
-      display_text = _clean_display_text(text, TRANSITION_DISPLAY_MAX_CHARS)
+      display_text = _clean_display_text(text, TRANSITION_DISPLAY_MAX_CHARS, terminal)
     if not text or not display_text:
       continue
 
@@ -296,18 +304,18 @@ def validate_transition_copy(state: AgentState) -> dict[str, Any]:
   return {**state, "transitionCopies": transition_copies, "diagnostics": diagnostics}
 
 
-def _clean_spoken_text(text: str, max_chars: int) -> str:
+def _clean_spoken_text(text: str, max_chars: int, terminal: str = "。") -> str:
   cleaned = _normalize_text(text)
   cleaned = _limit_fillers(cleaned)
-  return _trim_to_limit(cleaned, max_chars)
+  return _trim_to_limit(cleaned, max_chars, terminal)
 
 
-def _clean_display_text(text: str, max_chars: int) -> str:
+def _clean_display_text(text: str, max_chars: int, terminal: str = "。") -> str:
   cleaned = _normalize_text(text)
   for filler in SPOKEN_FILLERS:
     cleaned = cleaned.replace(filler, "")
   cleaned = cleaned.strip(" ，,。")
-  return _trim_to_limit(cleaned, max_chars)
+  return _trim_to_limit(cleaned, max_chars, terminal)
 
 
 def _normalize_text(text: str) -> str:
@@ -335,7 +343,7 @@ def _limit_fillers(text: str) -> str:
   return _normalize_text("".join(pieces))
 
 
-def _trim_to_limit(text: str, max_chars: int) -> str:
+def _trim_to_limit(text: str, max_chars: int, terminal: str = "。") -> str:
   if len(text) <= max_chars:
     return text
 
@@ -350,7 +358,12 @@ def _trim_to_limit(text: str, max_chars: int) -> str:
   )
   if sentence_end >= max(12, int(max_chars * 0.45)):
     return clipped[: sentence_end + 1].strip()
-  return clipped.rstrip("。.!！?？") + "。"
+  return clipped.rstrip("。.!！?？") + terminal
+
+
+def _is_english_request(request: Any) -> bool:
+  speech_language = getattr(request, "speechLanguage", "")
+  return str(speech_language).strip().lower().startswith("en")
 
 
 def _contains_unverified_fact(text: str) -> bool:

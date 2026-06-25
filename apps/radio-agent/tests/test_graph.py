@@ -1,4 +1,5 @@
 import json
+import re
 
 from radio_agent.graph import (
   generate_radio,
@@ -78,10 +79,13 @@ def test_english_speech_language_shapes_station_program_prompt():
   system_prompt = station_program_system_prompt(request.speechLanguage)
   payload = json.loads(station_program_user_prompt(request, state))
 
-  assert "English radio host" in system_prompt
+  assert "friend-like English radio host companion" in system_prompt
   assert payload["hostStyle"]["language"] == "en-US"
-  assert payload["copyBudget"]["stationIntroText"].startswith("18-35 English words")
-  assert "natural English host intro" in payload["requiredShape"]["speech"]["stationIntro"]["text"]
+  assert payload["hostStyle"]["tone"].startswith("friend-like radio companion")
+  assert payload["copyBudget"]["stationIntroText"].startswith("50-75 English words")
+  assert payload["copyBudget"]["transitionText"].startswith("24-38 English words")
+  assert payload["copyBudget"]["displayText"].startswith("8-16 English words")
+  assert "friend-like English host intro" in payload["requiredShape"]["speech"]["stationIntro"]["text"]
 
 
 def test_mock_english_response_contains_english_speech(monkeypatch):
@@ -93,7 +97,11 @@ def test_mock_english_response_contains_english_speech(monkeypatch):
   assert response.speech is not None
   assert response.speech.stationIntro is not None
   assert response.stationIntro.startswith("Opening with A")
+  assert _sentence_count(response.speech.stationIntro.text) >= 2
+  assert len(response.speech.stationIntro.text.split()) > len(response.stationIntro.split())
+  assert _sentence_count(response.speech.betweenTracks[0].text) == 2
   assert response.speech.betweenTracks[0].displayText.startswith("Another side of the album")
+  assert len(response.speech.betweenTracks[0].displayText.split()) <= 16
   assert "《" not in response.stationIntro
 
 
@@ -495,6 +503,60 @@ def test_transition_copy_sanitizes_long_text_and_drops_unverified_claims():
   assert "unverified factual claims" in " ".join(result["diagnostics"])
 
 
+def test_english_copy_keeps_long_spoken_text_with_english_periods():
+  request = _request_with_two_tracks().model_copy(update={"speechLanguage": "en-US"})
+  state = {
+    "request": request,
+    "candidateByID": {track.radioIdentity: track for track in request.seedTracks},
+    "recommendedItems": [
+      RadioGeneratedItem(radioIdentity="song-1", reason="first", role="opener", score=99, source="playlist"),
+      RadioGeneratedItem(radioIdentity="song-2", reason="second", role="bridge", score=90, source="playlist"),
+    ],
+    "rawEntryCopy": {
+      "id": "long-intro",
+      "text": (
+        "Hey, stay with me for a minute. This opening stretch is meant to feel warm, "
+        "close, and easy while A gets the room settled. I will keep one ear on the "
+        "familiar side of the set and one ear open for small surprises. "
+      ) * 4,
+      "displayText": (
+        "A warm opening stretch with room for a small surprise while A settles in. "
+      ) * 3,
+      "targetItemId": "song-1",
+    },
+    "rawTransitionCopy": {
+      "betweenTracks": [
+        {
+          "id": "long-english-transition",
+          "fromItemId": "song-1",
+          "toItemId": "song-2",
+          "text": (
+            "That first track gave us a bright little landing place. Let us carry "
+            "that warmth into B without making the turn feel too sharp. The next "
+            "song should keep the room open while adding a softer edge. "
+          ) * 4,
+          "displayText": "Warmth carries into B with a softer edge.",
+        }
+      ]
+    },
+    "diagnostics": [],
+  }
+
+  entry_result = validate_entry_copy(state)
+  transition_result = validate_transition_copy(state)
+  transition = transition_result["transitionCopies"][0]
+
+  assert len(entry_result["entryCopy"].text) <= 480
+  assert _sentence_count(entry_result["entryCopy"].text) >= 2
+  assert entry_result["entryCopy"].text.endswith(".")
+  assert not entry_result["entryCopy"].text.endswith("。")
+  assert len(transition.text) <= 260
+  assert _sentence_count(transition.text) >= 2
+  assert transition.text.endswith(".")
+  assert not transition.text.endswith("。")
+  assert transition.displayText == "Warmth carries into B with a softer edge."
+
+
 def test_transition_copy_drops_repetitive_template_openings():
   request = _request_with_three_tracks()
   state = {
@@ -600,3 +662,7 @@ def _request_with_three_tracks():
       ),
     ],
   )
+
+
+def _sentence_count(text: str) -> int:
+  return len([part for part in re.split(r"[.!?]+", text) if part.strip()])

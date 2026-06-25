@@ -86,7 +86,10 @@ def test_generate_station_honors_english_speech_language(monkeypatch):
   body = response.json()
   assert body["subtitle"].startswith("Opening with A")
   assert body["speech"]["stationIntro"]["text"].startswith("Welcome to Airset")
+  assert body["speech"]["stationIntro"]["text"] != body["subtitle"]
+  assert len(body["speech"]["stationIntro"]["text"].split()) > len(body["subtitle"].split())
   assert body["speech"]["betweenTracks"][0]["displayText"].startswith("Another side of the album")
+  assert body["speech"]["betweenTracks"][0]["text"] != body["speech"]["betweenTracks"][0]["displayText"]
   assert body["items"][1]["handoffText"] == body["speech"]["betweenTracks"][0]["displayText"]
   assert "《" not in body["subtitle"]
 
@@ -215,6 +218,23 @@ def test_speech_voices_returns_configured_catalog(monkeypatch):
   assert [voice["id"] for voice in body["voices"]] == ["voice-b", "voice-c"]
   assert body["voices"][0]["name"] == "Voice B"
   assert body["voices"][1]["style"] == "自定义音色"
+
+
+def test_speech_voices_include_builtin_english_lauren(monkeypatch):
+  monkeypatch.delenv("VOLCENGINE_TTS_SPEAKER", raising=False)
+  monkeypatch.delenv("VOLCENGINE_TTS_VOICE_TYPE", raising=False)
+  monkeypatch.delenv("VOLCENGINE_TTS_ALLOWED_SPEAKERS", raising=False)
+  monkeypatch.delenv("VOLCENGINE_TTS_VOICES_JSON", raising=False)
+  client = TestClient(app)
+
+  response = client.get("/v1/radio/speech/voices")
+
+  assert response.status_code == 200
+  body = response.json()
+  voices = {voice["id"]: voice for voice in body["voices"]}
+  assert "en_female_lauren_moon_bigtts" in voices
+  assert voices["en_female_lauren_moon_bigtts"]["name"] == "Lauren"
+  assert voices["en_female_lauren_moon_bigtts"]["language"] == "en-us"
 
 
 def test_speech_voices_ignores_legacy_openai_model(monkeypatch):
@@ -646,6 +666,10 @@ def test_generate_station_can_attach_volcengine_speech_audio(monkeypatch, tmp_pa
   assert intro_audio["audioURL"].startswith("https://speech.test/audio/speech_")
   assert calls
   assert all(call["req_params"]["explicit_language"] == "en-US" for call in calls)
+  sent_texts = {call["req_params"]["text"] for call in calls}
+  assert body["speech"]["stationIntro"]["text"] in sent_texts
+  assert body["speech"]["betweenTracks"][0]["text"] in sent_texts
+  assert body["subtitle"] not in sent_texts
 
   audio_response = client.get(f"/v1/radio/speech/audio/{intro_audio['cacheKey']}.mp3")
 

@@ -28,10 +28,13 @@ def mock_entry_payload(state: AgentState) -> dict[str, Any]:
     mood = _mood_label(first_track)
     if is_english:
       text = (
-        f"Welcome to Airset. We'll open with {first_track['title']} and let "
-        f"{first_track['artist']}'s {mood} tone set the room."
+        f"Welcome to Airset. We'll start with {first_track['title']}, because "
+        f"{first_track['artist']}'s {mood} tone gives us an easy place to land. "
+        "Stay with me for a minute; I'll keep the set close enough to feel familiar, "
+        "with a little room for something new. Nothing dramatic, just a friendly "
+        "opening stretch while the first track settles in."
       )
-      display_text = f"Opening with {first_track['title']} for a {mood} radio set."
+      display_text = f"Opening with {first_track['title']}, keeping this stretch warm and familiar."
     else:
       text = (
         f"嗯，欢迎调到 Airset。我们先从《{first_track['title']}》开始，"
@@ -40,7 +43,8 @@ def mock_entry_payload(state: AgentState) -> dict[str, Any]:
       display_text = f"从《{first_track['title']}》开始，进入这段{mood}电台。"
   else:
     text = (
-      "No playable candidates are available for this station yet."
+      "No playable candidates are available for this station yet. "
+      "I'll keep the dial warm until a playable track is ready."
       if is_english
       else "这个电台暂时没有可播放候选。"
     )
@@ -81,7 +85,8 @@ def mock_transition_copy(state: AgentState, pair: tuple[str, str]) -> RadioTrans
     )
   else:
     text = (
-      "Airset is keeping the station moving into the next track."
+      "Airset is keeping the station moving, so the silence does not have to do all the work. "
+      "Stay with me; the next playable track is almost ready."
       if _is_english(state["request"])
       else "Airset 正在把电台带向下一首。"
     )
@@ -113,8 +118,9 @@ def _transition_copy_for_pair(
   if _same_clean_value(from_track.get("artist"), to_track.get("artist")):
     if is_english:
       return (
-        f"{from_title} keeps us in the same lane. We'll stay with {to_artist} as {to_title} pushes the thread forward.",
-        f"Staying with {to_artist}, next is {to_title}.",
+        f"{from_title} keeps us close to {to_artist}, so we do not need to hurry the turn. "
+        f"Stay with me; {to_title} carries the same thread a little farther.",
+        f"Staying with {to_artist} as {to_title} carries the thread forward.",
       )
     return (
       f"好，刚才的《{from_title}》还在同一个气口里。我们继续听 {to_artist}，让《{to_title}》把这条线再往前推一点。",
@@ -124,7 +130,8 @@ def _transition_copy_for_pair(
   if _same_clean_value(from_track.get("album"), to_track.get("album")):
     if is_english:
       return (
-        f"These two feel like different light from the same room. After {from_title}, {to_title} softens the edge.",
+        f"These two feel like different light from the same room, so let's not rush the door closed. "
+        f"After {from_title}, {to_title} gives the set a softer edge.",
         f"Another side of the album: {to_title}.",
       )
     return (
@@ -137,8 +144,9 @@ def _transition_copy_for_pair(
   if "familiar" in lane or "anchor" in lane or "familiar" in signals:
     if is_english:
       return (
-        f"That last track warmed up the room. We'll hold the familiar glow a little longer with {to_title}.",
-        f"Holding the familiar glow with {to_title}.",
+        f"That last track warmed up the room, and I would rather hold that glow than snap away from it. "
+        f"Next, {to_title} keeps the familiar part of the set close.",
+        f"Holding the familiar glow a little longer with {to_title}.",
       )
     return (
       f"刚才那首把耳朵热起来了。下一段我们不急着跳开，用《{to_title}》留住一点熟悉的温度。",
@@ -148,8 +156,9 @@ def _transition_copy_for_pair(
   if "discover" in lane or "catalog" in str(to_track.get("source") or "").lower():
     if is_english:
       return (
-        f"Let's turn the corner a bit. After {from_title}, {to_artist}'s {to_title} brings in a new color.",
-        f"Turning the mood toward {to_title}.",
+        f"Let's turn the corner gently here, just enough to let a new color into the set. "
+        f"After {from_title}, {to_artist}'s {to_title} gives us that small change of light.",
+        f"Turning the mood toward {to_title} with a new color.",
       )
     return (
       f"怎么说呢，这里可以稍微拐个弯。《{from_title}》之后，试试 {to_artist} 的《{to_title}》，会有一点新的颜色。",
@@ -159,16 +168,19 @@ def _transition_copy_for_pair(
   if is_english:
     templates = [
       (
-        f"{from_title} opened up the {from_mood} side. Now {to_title} carries us toward something more {to_mood}.",
-        f"Moving from {from_title} into {to_title}.",
+        f"{from_title} opened up the {from_mood} side, and I want to let that feeling breathe for a second. "
+        f"Now {to_title} carries us toward something more {to_mood}.",
+        f"Moving from {from_title} toward {to_title}'s {to_mood} side.",
       ),
       (
-        f"Let's not make the cut too sharp. {to_title} carries the afterglow forward and dims the room a little.",
+        f"Let's keep the turn gentle here, like lowering the lights instead of changing rooms. "
+        f"{to_title} carries the afterglow forward and gives the set a softer landing.",
         f"{to_title} carries the afterglow forward.",
       ),
       (
-        f"Let's hear it from another angle. {to_artist}'s {to_title} moves this set into a more {to_mood} place.",
-        f"Another angle now: {to_title}.",
+        f"Let's hear this from another angle before the set gets too settled. "
+        f"{to_artist}'s {to_title} moves us into a more {to_mood} place without breaking the mood.",
+        f"Another angle now: {to_title} moves the set toward {to_mood}.",
       ),
     ]
     return templates[index % len(templates)]
@@ -304,10 +316,19 @@ def default_intro(request: RadioGenerateRequest) -> str:
   playlist_names = sorted({track.playlistName for track in request.seedTracks if track.playlistName})
   if _is_english(request):
     if len(playlist_names) == 1:
-      return f"Tuned from {playlist_names[0]}, with a little room for discovery."
+      return (
+        f"We're tuned from {playlist_names[0]}, so the first part can stay close to something familiar. "
+        "I'll leave a little room for discovery without pulling the set too far away."
+      )
     if len(playlist_names) > 1:
-      return f"Blending {len(playlist_names)} playlists into a personal radio set."
-    return "Airset is shaping a personal radio set from your current music seeds."
+      return (
+        f"I'm blending {len(playlist_names)} playlists into one personal radio set. "
+        "We'll keep the handoff gentle, like a friend sorting through records beside you."
+      )
+    return (
+      "Airset is shaping a personal radio set from your current music seeds. "
+      "I'll keep it warm and specific, with a little space for a good surprise."
+    )
 
   if len(playlist_names) == 1:
     return f"从 {playlist_names[0]} 调出这一段，留一点发现新歌的空间。"

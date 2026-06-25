@@ -261,7 +261,11 @@ final class RadioStationController {
         DiagnosticsPayload.track(nextItem.track)
       )
     )
-    playbackController.play(track: nextItem.track, policy: .mixablePreferred, preservesSpeech: false)
+    playbackController.play(
+      track: nextItem.track,
+      policy: playbackPolicy(for: nextItem.track),
+      preservesSpeech: false
+    )
     prefetchStationExtensionIfNeeded()
   }
 
@@ -285,7 +289,11 @@ final class RadioStationController {
       try? await memoryStore.record(RadioMemoryEvent(type: "replay", track: previousItem.track))
       await refreshMemoryStatus()
     }
-    playbackController.play(track: previousItem.track, policy: .mixablePreferred, preservesSpeech: false)
+    playbackController.play(
+      track: previousItem.track,
+      policy: playbackPolicy(for: previousItem.track),
+      preservesSpeech: false
+    )
   }
 
   func refreshStation() async {
@@ -824,7 +832,11 @@ final class RadioStationController {
         DiagnosticsPayload.track(nextItem.track)
       )
     )
-    playbackController.play(track: nextItem.track, policy: .mixablePreferred, preservesSpeech: preservesSpeech)
+    playbackController.play(
+      track: nextItem.track,
+      policy: playbackPolicy(for: nextItem.track),
+      preservesSpeech: preservesSpeech
+    )
     prefetchStationExtensionIfNeeded()
   }
 
@@ -945,7 +957,15 @@ final class RadioStationController {
   }
 
   private func canUseOverlayTransition(from finishedItem: RadioQueueItem, to nextItem: RadioQueueItem) -> Bool {
-    finishedItem.track.previewURL != nil && nextItem.track.previewURL != nil
+    isPreviewOnly(finishedItem.track) && isPreviewOnly(nextItem.track)
+  }
+
+  private func playbackPolicy(for track: Track) -> RadioTrackPlaybackPolicy {
+    isPreviewOnly(track) ? .mixablePreferred : .fullSongPreferred
+  }
+
+  private func isPreviewOnly(_ track: Track) -> Bool {
+    track.normalizedAppleMusicID == nil && track.previewURL != nil
   }
 
   private func idsMatch(_ id: String, _ item: RadioQueueItem) -> Bool {

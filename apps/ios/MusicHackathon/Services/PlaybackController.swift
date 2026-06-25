@@ -320,7 +320,9 @@ final class PlaybackController: RadioPlaybackControlling {
     }
     didNotifyPlaybackFailed = false
     resetPlaybackProgress()
-    let shouldPreferPreview = policy == .mixablePreferred && track.previewURL != nil
+    let shouldPreferPreview = policy == .mixablePreferred
+      && track.normalizedAppleMusicID == nil
+      && track.previewURL != nil
     diagnostics?.record(
       .notice,
       chain: shouldPreferPreview || track.normalizedAppleMusicID == nil ? .playbackPreview : .playbackAppleMusic,
