@@ -5,13 +5,17 @@ struct PlayerView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(PlaybackController.self) private var playbackController
   @Environment(RadioStationController.self) private var radioStation
+  @Environment(ImageAssetStore.self) private var imageAssetStore
+  @Environment(ArtworkAnalysisStore.self) private var analysisStore
 
   let showsPresentationHandle: Bool
 
   @State private var presentedSheet: PlayerSheet?
   @GestureState private var verticalDragOffset: CGFloat = 0
 
-  private let accentColor = Color(hex: "#D9523A")
+  private var accentColor: Color {
+    Color(hex: activeArtworkAnalysis?.dominantHex ?? "#D9523A")
+  }
 
   init(showsPresentationHandle: Bool = true) {
     self.showsPresentationHandle = showsPresentationHandle
@@ -111,7 +115,7 @@ struct PlayerView: View {
 
   private func artworkStage(size: CGSize) -> some View {
     PlayerArtworkStage(
-      artworkURLs: artworkURLs,
+      artworkResolution: playerArtworkResolution,
       fallbackSeed: fallbackArtworkSeed,
       accentColor: accentColor
     )
@@ -267,6 +271,44 @@ struct PlayerView: View {
       playbackController.currentTrack?.artworkURL,
       radioStation.currentItem?.track.artworkURL
     ]
+  }
+
+  private var playerArtworkResolution: ArtworkResolution {
+    let stationID = radioStation.station?.id ?? radioStation.stationTitle
+    let hasRemoteArtwork = artworkURLs.compactMap { $0 }.isEmpty == false
+    return ArtworkResolution(
+      overrideSource: hasRemoteArtwork
+        ? nil
+        : (radioStation.station.flatMap { imageAssetStore.coverSource(for: $0.id) } ?? imageAssetStore.profileAvatarSource),
+      remoteURLs: artworkURLs,
+      bundledFallback: BundledCoverCatalog.fallbackSource(
+        forID: stationID,
+        title: radioStation.stationTitle,
+        genre: nil
+      ),
+      fallbackSeed: fallbackArtworkSeed,
+      fallbackTitle: playbackTitle,
+      fallbackColorHex: "#D9523A"
+    )
+  }
+
+  private var activeArtworkAnalysis: ArtworkAnalysisResult? {
+    if let overrideSource = playerArtworkResolution.overrideSource,
+       let analysis = analysisStore.analysis(for: overrideSource.id) {
+      return analysis
+    }
+
+    if let remoteURL = artworkURLs.compactMap({ $0 }).first,
+       let analysis = analysisStore.analysis(for: "remote:\(remoteURL.absoluteString)") {
+      return analysis
+    }
+
+    if let bundledFallback = playerArtworkResolution.bundledFallback,
+       let analysis = analysisStore.analysis(for: bundledFallback.id) {
+      return analysis
+    }
+
+    return nil
   }
 
   private var fallbackArtworkSeed: String {
@@ -425,20 +467,20 @@ private struct PlayerBackgroundSurface: View {
 }
 
 private struct PlayerArtworkStage: View {
-  let artworkURLs: [URL?]
+  let artworkResolution: ArtworkResolution
   let fallbackSeed: String
   let accentColor: Color
 
   var body: some View {
     GeometryReader { proxy in
       ZStack(alignment: .bottom) {
-        RemoteArtworkView(urls: artworkURLs, showsLoadingIndicator: false) {
+        ArtworkImageView(resolution: artworkResolution, showsLoadingIndicator: false) {
           fallbackArtwork
         }
         .frame(width: proxy.size.width, height: proxy.size.height)
         .clipped()
 
-        RemoteArtworkView(urls: artworkURLs, showsLoadingIndicator: false) {
+        ArtworkImageView(resolution: artworkResolution, showsLoadingIndicator: false) {
           fallbackArtwork
         }
         .frame(width: proxy.size.width, height: proxy.size.height)
@@ -1035,6 +1077,8 @@ private struct EmptySheetMessage: View {
   return PlayerView()
     .environment(playbackController)
     .environment(RadioStationController(playbackController: playbackController))
+    .environment(ImageAssetStore())
+    .environment(ArtworkAnalysisStore())
 }
 
 #Preview("Loading") {
@@ -1046,6 +1090,8 @@ private struct EmptySheetMessage: View {
   return PlayerView()
     .environment(playbackController)
     .environment(RadioStationController(playbackController: playbackController))
+    .environment(ImageAssetStore())
+    .environment(ArtworkAnalysisStore())
 }
 
 #Preview("Speech") {
@@ -1066,4 +1112,6 @@ private struct EmptySheetMessage: View {
   return PlayerView()
     .environment(playbackController)
     .environment(RadioStationController(playbackController: playbackController))
+    .environment(ImageAssetStore())
+    .environment(ArtworkAnalysisStore())
 }

@@ -45,6 +45,7 @@ struct RemoteArtworkView<Fallback: View>: View {
   private let candidateURLs: [URL]
   private let loadingTimeout: TimeInterval
   private let showsLoadingIndicator: Bool
+  private let onImageLoaded: ((UIImage, URL) -> Void)?
   private let fallback: () -> Fallback
 
   @State private var image: UIImage?
@@ -54,11 +55,13 @@ struct RemoteArtworkView<Fallback: View>: View {
     urls: [URL?],
     loadingTimeout: TimeInterval = 1.2,
     showsLoadingIndicator: Bool = true,
+    onImageLoaded: ((UIImage, URL) -> Void)? = nil,
     @ViewBuilder fallback: @escaping () -> Fallback
   ) {
     self.candidateURLs = ArtworkURLCandidates.unique(from: urls)
     self.loadingTimeout = loadingTimeout
     self.showsLoadingIndicator = showsLoadingIndicator
+    self.onImageLoaded = onImageLoaded
     self.fallback = fallback
   }
 
@@ -66,11 +69,13 @@ struct RemoteArtworkView<Fallback: View>: View {
     urls: [URL],
     loadingTimeout: TimeInterval = 1.2,
     showsLoadingIndicator: Bool = true,
+    onImageLoaded: ((UIImage, URL) -> Void)? = nil,
     @ViewBuilder fallback: @escaping () -> Fallback
   ) {
     self.candidateURLs = ArtworkURLCandidates.unique(from: urls.map(Optional.some))
     self.loadingTimeout = loadingTimeout
     self.showsLoadingIndicator = showsLoadingIndicator
+    self.onImageLoaded = onImageLoaded
     self.fallback = fallback
   }
 
@@ -118,6 +123,7 @@ struct RemoteArtworkView<Fallback: View>: View {
     for url in candidateURLs {
       if let cachedImage = RemoteArtworkImageCache.shared.object(forKey: url as NSURL) {
         image = cachedImage
+        onImageLoaded?(cachedImage, url)
         return
       }
 
@@ -127,6 +133,7 @@ struct RemoteArtworkView<Fallback: View>: View {
         guard let loadedImage = UIImage(data: data) else { continue }
         RemoteArtworkImageCache.shared.setObject(loadedImage, forKey: url as NSURL)
         image = loadedImage
+        onImageLoaded?(loadedImage, url)
         return
       } catch is CancellationError {
         return

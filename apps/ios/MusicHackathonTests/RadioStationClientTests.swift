@@ -50,6 +50,46 @@ final class RadioStationClientTests: XCTestCase {
     XCTAssertEqual(station.items[1].track.previewURL?.absoluteString, "https://example.com/preview.m4a")
   }
 
+  func testFetchCurrentStationFiltersInvalidPlayableFieldsAndPreservesSourceLane() async throws {
+    let session = makeSession { request in
+      let data = """
+      {
+        "stationID": "station-1",
+        "title": "Backend Radio",
+        "items": [
+          {
+            "id": "bad-item",
+            "title": "Missing",
+            "artist": "Artist A",
+            "appleMusicID": "   ",
+            "previewURL": "ftp://example.com/not-playable.m4a"
+          },
+          {
+            "id": "good-item",
+            "title": "Signal",
+            "artist": "Artist B",
+            "appleMusicId": "  song-2  ",
+            "previewUrl": "https://example.com/signal.m4a",
+            "source": "virtual_music_library_json",
+            "sourceLane": "familiar_anchor"
+          }
+        ]
+      }
+      """.data(using: .utf8)!
+      return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+    }
+    let client = RadioStationClient(baseURL: URL(string: "http://station.test")!, session: session)
+
+    let station = try await client.fetchCurrentStation()
+
+    XCTAssertEqual(station.items.map(\.id), ["good-item"])
+    XCTAssertEqual(station.items[0].track.appleMusicID, "song-2")
+    XCTAssertEqual(station.items[0].track.previewURL?.absoluteString, "https://example.com/signal.m4a")
+    XCTAssertEqual(station.items[0].track.source, "virtual_music_library_json")
+    XCTAssertEqual(station.items[0].track.sourceLane, "familiar_anchor")
+    XCTAssertEqual(station.items[0].sourceTitle, "familiar_anchor")
+  }
+
   func testGenerateStationPostsMemoryContextAndDecodesResult() async throws {
     let session = makeSession { request in
       XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/stations/generate")
@@ -395,7 +435,7 @@ final class RadioStationClientTests: XCTestCase {
     }
   }
 
-  func testThrowsForUnplayableItem() async {
+  func testThrowsForEmptyStationWhenAllItemsAreUnplayable() async {
     let session = makeSession { request in
       let data = """
       {
@@ -415,9 +455,9 @@ final class RadioStationClientTests: XCTestCase {
 
     do {
       _ = try await client.fetchCurrentStation()
-      XCTFail("Expected unplayable item error")
+      XCTFail("Expected empty station error")
     } catch let error as RadioStationClientError {
-      XCTAssertEqual(error, .unplayableItem("Missing"))
+      XCTAssertEqual(error, .emptyStation)
     } catch {
       XCTFail("Unexpected error: \(error)")
     }

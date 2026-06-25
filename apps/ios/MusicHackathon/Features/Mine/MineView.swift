@@ -1,8 +1,10 @@
+import PhotosUI
 import SwiftUI
 
 struct MineView: View {
   @Environment(MusicAuthorizationService.self) private var musicAuthorization
   @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
+  @Environment(ImageAssetStore.self) private var imageAssetStore
 
   @AppStorage("mine.profile.avatarSeed") private var profileAvatarSeed = ""
   @AppStorage("mine.profile.nickname") private var profileNickname = ""
@@ -12,6 +14,7 @@ struct MineView: View {
   @State private var recentlyPlayedExpanded = true
   @State private var savedExpanded = true
   @State private var transientAvatarSeed = MineAvatarSeed.make()
+  @State private var coverEditorStation: ArchiveStationItem?
 
   var body: some View {
     let currentProfile = displayProfile
@@ -23,7 +26,12 @@ struct MineView: View {
 
         if hasLibraryContent {
           recentArchiveSection(profile: currentProfile)
-          stationPanel(title: "Songs", items: currentProfile.recentlyPlayed, isExpanded: $recentlyPlayedExpanded)
+          stationPanel(
+            title: "Songs",
+            items: Array(currentProfile.recentlyPlayed.prefix(24)),
+            isExpanded: $recentlyPlayedExpanded,
+            seeAllDestination: .archive(initialTab: .curated)
+          )
           stationPanel(title: "Artists", items: currentProfile.saved, isExpanded: $savedExpanded)
         }
       }
@@ -45,11 +53,13 @@ struct MineView: View {
       case .settings:
         SettingsView()
           .navigationTitle("设置")
-      case .archive:
-        ArchiveGridPage(profile: currentProfile)
+      case let .archive(initialTab):
+        ArchiveGridPage(profile: currentProfile, initialTab: initialTab)
           .navigationTitle("Apple Music")
       case let .station(station):
-        ArchiveStationDetailPage(station: station)
+        ArchiveStationDetailPage(station: station) {
+          coverEditorStation = station
+        }
           .navigationTitle(station.name)
       case .profile:
         ProfileEditorPage(
@@ -60,6 +70,12 @@ struct MineView: View {
         )
           .navigationTitle("个人电台")
       }
+    }
+    .sheet(item: $coverEditorStation) { station in
+      StationCoverEditorSheet(station: station)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .preferredColorScheme(.dark)
     }
     .task {
       ensurePersistentAvatarSeed()
@@ -107,7 +123,9 @@ struct MineView: View {
 
     return VStack(spacing: 16) {
       NavigationLink(value: MineRoute.profile) {
-        MarbleAvatarView(seed: avatarSeed, size: 82, accessibilityLabel: avatarAccessibilityLabel)
+        ProfileAvatarImageView(size: 82) {
+          MarbleAvatarView(seed: avatarSeed, size: 82, accessibilityLabel: avatarAccessibilityLabel)
+        }
       }
       .buttonStyle(.plain)
       .accessibilityLabel("编辑个人资料")
@@ -209,7 +227,7 @@ struct MineView: View {
 
         Spacer()
 
-        NavigationLink(value: MineRoute.archive) {
+        NavigationLink(value: MineRoute.archive(initialTab: .history)) {
           Text("See All")
             .font(.system(size: 13, weight: .semibold, design: .rounded))
             .foregroundStyle(.white.opacity(0.42))
@@ -258,31 +276,47 @@ struct MineView: View {
     await appleMusicLibrary.refresh(authorizationStatus: musicAuthorization.status)
   }
 
-  private func stationPanel(title: String, items: [ArchiveStationItem], isExpanded: Binding<Bool>) -> some View {
+  private func stationPanel(
+    title: String,
+    items: [ArchiveStationItem],
+    isExpanded: Binding<Bool>,
+    seeAllDestination: MineRoute? = nil
+  ) -> some View {
     VStack(spacing: 0) {
-      Button {
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
-          isExpanded.wrappedValue.toggle()
-        }
-      } label: {
-        HStack {
-          Text(title)
-            .font(.system(size: 16, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white)
+      HStack(spacing: 14) {
+        Button {
+          withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+            isExpanded.wrappedValue.toggle()
+          }
+        } label: {
+          HStack(spacing: 8) {
+            Text(title)
+              .font(.system(size: 16, weight: .semibold, design: .rounded))
+              .foregroundStyle(.white)
 
-          Spacer()
-
-          Image(systemName: isExpanded.wrappedValue ? "chevron.down" : "chevron.forward")
-            .font(.system(size: 14, weight: .bold))
-            .foregroundStyle(.white.opacity(0.38))
+            Image(systemName: isExpanded.wrappedValue ? "chevron.down" : "chevron.forward")
+              .font(.system(size: 14, weight: .bold))
+              .foregroundStyle(.white.opacity(0.38))
+          }
+          .contentShape(Rectangle())
+          .padding(.vertical, 14)
         }
-        .contentShape(Rectangle())
-        .padding(.vertical, 14)
+        .buttonStyle(.plain)
+
+        Spacer()
+
+        if let seeAllDestination {
+          NavigationLink(value: seeAllDestination) {
+            Text("See All")
+              .font(.system(size: 13, weight: .semibold, design: .rounded))
+              .foregroundStyle(.white.opacity(0.42))
+          }
+          .buttonStyle(.plain)
+        }
       }
-      .buttonStyle(.plain)
 
       if isExpanded.wrappedValue {
-        VStack(spacing: 0) {
+        LazyVStack(spacing: 0) {
           if items.isEmpty {
             Text("Nothing here yet.")
               .font(.system(size: 14, weight: .medium, design: .rounded))
@@ -400,14 +434,14 @@ private struct MineLibraryStatusPanel: View {
 
 private enum MineRoute: Hashable {
   case settings
-  case archive
+  case archive(initialTab: ArchiveGridTab)
   case station(ArchiveStationItem)
   case profile
 }
 
 private struct ArchiveGridPage: View {
   let profile: ArchiveProfile
-  @State private var selectedTab: ArchiveGridTab = .history
+  @State private var selectedTab: ArchiveGridTab
 
   private let columns = [
     GridItem(.flexible(), spacing: 14),
@@ -418,6 +452,11 @@ private struct ArchiveGridPage: View {
     GridItem(.flexible(), spacing: 16),
     GridItem(.flexible(), spacing: 16)
   ]
+
+  init(profile: ArchiveProfile, initialTab: ArchiveGridTab) {
+    self.profile = profile
+    _selectedTab = State(initialValue: initialTab)
+  }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -435,7 +474,7 @@ private struct ArchiveGridPage: View {
           if profile.recentlyPlayed.isEmpty {
             emptyText("No songs found")
           } else {
-            stationGrid(stations: profile.recentlyPlayed, showsGenres: false)
+            songList(stations: profile.recentlyPlayed)
           }
         case .artists:
           if profile.saved.isEmpty {
@@ -519,6 +558,44 @@ private struct ArchiveGridPage: View {
     .padding(.bottom, 40)
   }
 
+  private func songList(stations: [ArchiveStationItem]) -> some View {
+    LazyVStack(spacing: 0) {
+      ForEach(stations) { station in
+        NavigationLink(value: MineRoute.station(station)) {
+          HStack(spacing: 12) {
+            ArchiveStationCover(station: station, size: 56)
+
+            VStack(alignment: .leading, spacing: 4) {
+              Text(station.name)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+
+              Text(station.displaySubtitle)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.38))
+                .lineLimit(1)
+            }
+
+            Spacer()
+          }
+          .padding(.vertical, 10)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+
+        if station.id != stations.last?.id {
+          Divider()
+            .background(.white.opacity(0.08))
+            .padding(.leading, 68)
+        }
+      }
+    }
+    .padding(.horizontal, 20)
+    .padding(.top, 10)
+    .padding(.bottom, 40)
+  }
+
   private func stationGrid(stations: [ArchiveStationItem], showsGenres: Bool) -> some View {
     VStack(alignment: .leading, spacing: 18) {
       if showsGenres {
@@ -575,7 +652,7 @@ private struct ArchiveGridPage: View {
   }
 }
 
-private enum ArchiveGridTab: CaseIterable, Identifiable {
+private enum ArchiveGridTab: CaseIterable, Identifiable, Hashable {
   case history
   case curated
   case artists
@@ -596,11 +673,23 @@ private enum ArchiveGridTab: CaseIterable, Identifiable {
 
 private struct ArchiveStationDetailPage: View {
   let station: ArchiveStationItem
+  let editCoverAction: () -> Void
 
   var body: some View {
     ScrollView(.vertical, showsIndicators: false) {
       VStack(spacing: 24) {
         ArchiveStationCover(station: station, size: 122)
+
+        Button(action: editCoverAction) {
+          Label("编辑封面", systemImage: "photo.on.rectangle.angled")
+            .font(.system(size: 14, weight: .semibold, design: .rounded))
+            .foregroundStyle(Color(hex: "#121212"))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("编辑 \(station.name) 的封面")
 
         VStack(spacing: 10) {
           Text(station.name)
@@ -620,8 +709,8 @@ private struct ArchiveStationDetailPage: View {
               .font(.system(size: 16, weight: .semibold, design: .rounded))
               .foregroundStyle(.white)
 
-            VStack(spacing: 0) {
-              ForEach(Array(station.tracks.prefix(16))) { track in
+            LazyVStack(spacing: 0) {
+              ForEach(station.tracks) { track in
                 HStack(spacing: 12) {
                   MineTrackArtwork(track: track, size: 44)
 
@@ -641,7 +730,7 @@ private struct ArchiveStationDetailPage: View {
                 }
                 .padding(.vertical, 9)
 
-                if track.id != station.tracks.prefix(16).last?.id {
+                if track.id != station.tracks.last?.id {
                   Divider()
                     .background(.white.opacity(0.08))
                     .padding(.leading, 56)
@@ -666,10 +755,14 @@ private struct ProfileEditorPage: View {
   @Binding var bio: String
   @Binding var avatarSeed: String
   @Environment(\.dismiss) private var dismiss
+  @Environment(ImageAssetStore.self) private var imageAssetStore
 
   @State private var draftNickname: String
   @State private var draftBio: String
   @State private var draftAvatarSeed: String
+  @State private var selectedAvatarItem: PhotosPickerItem?
+  @State private var avatarErrorMessage: String?
+  @State private var isSavingAvatar = false
 
   init(
     initialNickname: String,
@@ -700,29 +793,69 @@ private struct ProfileEditorPage: View {
         }
 
         VStack(alignment: .leading, spacing: 12) {
-          Text("随机头像")
+          Text("头像")
             .font(.system(size: 14, weight: .semibold, design: .rounded))
             .foregroundStyle(.white.opacity(0.62))
 
-          HStack(spacing: 18) {
-            MarbleAvatarView(seed: draftAvatarSeed, size: 96, accessibilityLabel: "当前头像")
-
-            Button {
-              withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                draftAvatarSeed = MineAvatarSeed.make()
+          VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 18) {
+              ProfileAvatarImageView(size: 96) {
+                MarbleAvatarView(seed: draftAvatarSeed, size: 96, accessibilityLabel: "当前头像")
               }
-            } label: {
-              Label("换一个", systemImage: "shuffle")
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color(hex: "#121212"))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 11)
-                .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("重新生成头像")
 
-            Spacer(minLength: 0)
+              VStack(alignment: .leading, spacing: 10) {
+                PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
+                  Label("选择照片", systemImage: "photo")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color(hex: "#121212"))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 11)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(isSavingAvatar)
+                .accessibilityLabel("选择头像照片")
+
+                Button {
+                  withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                    imageAssetStore.clearProfileAvatar()
+                    draftAvatarSeed = MineAvatarSeed.make()
+                  }
+                } label: {
+                  Label("随机头像", systemImage: "shuffle")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.76))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("重新生成随机头像")
+
+                if imageAssetStore.profileAvatarSource != nil {
+                  Button {
+                    imageAssetStore.clearProfileAvatar()
+                  } label: {
+                    Label("移除照片", systemImage: "trash")
+                      .font(.system(size: 14, weight: .semibold, design: .rounded))
+                      .foregroundStyle(Color(hex: "#FFD5C8"))
+                  }
+                  .buttonStyle(.plain)
+                  .accessibilityLabel("移除头像照片")
+                }
+              }
+
+              Spacer(minLength: 0)
+            }
+
+            if isSavingAvatar {
+              ProgressView("正在保存头像")
+                .font(.footnote)
+                .foregroundStyle(.white.opacity(0.62))
+            }
+
+            if let avatarErrorMessage {
+              Text(avatarErrorMessage)
+                .font(.footnote)
+                .foregroundStyle(Color(hex: "#FFD5C8"))
+            }
           }
         }
 
@@ -740,6 +873,12 @@ private struct ProfileEditorPage: View {
       .padding(.horizontal, 20)
       .padding(.top, 24)
       .padding(.bottom, 40)
+    }
+    .onChange(of: selectedAvatarItem) { _, item in
+      guard let item else { return }
+      Task {
+        await saveAvatar(item)
+      }
     }
   }
 
@@ -768,6 +907,25 @@ private struct ProfileEditorPage: View {
     avatarSeed = draftAvatarSeed
     dismiss()
   }
+
+  private func saveAvatar(_ item: PhotosPickerItem) async {
+    isSavingAvatar = true
+    avatarErrorMessage = nil
+    defer {
+      isSavingAvatar = false
+      selectedAvatarItem = nil
+    }
+
+    do {
+      guard let data = try await item.loadTransferable(type: Data.self) else {
+        avatarErrorMessage = "无法读取这张照片。"
+        return
+      }
+      try await imageAssetStore.savePickedImage(data: data, purpose: .profileAvatar)
+    } catch {
+      avatarErrorMessage = "头像保存失败，请换一张照片重试。"
+    }
+  }
 }
 
 private enum MineAvatarSeed {
@@ -776,7 +934,165 @@ private enum MineAvatarSeed {
   }
 }
 
+private struct StationCoverEditorSheet: View {
+  @Environment(\.dismiss) private var dismiss
+  @Environment(ImageAssetStore.self) private var imageStore
+
+  let station: ArchiveStationItem
+
+  @State private var selectedCoverItem: PhotosPickerItem?
+  @State private var isSavingPhoto = false
+  @State private var errorMessage: String?
+
+  private let columns = [
+    GridItem(.adaptive(minimum: 92), spacing: 12)
+  ]
+
+  var body: some View {
+    NavigationStack {
+      ScrollView(.vertical, showsIndicators: false) {
+        VStack(alignment: .leading, spacing: 24) {
+          VStack(alignment: .center, spacing: 14) {
+            ArchiveStationCover(station: station, size: 156)
+
+            Text(station.name)
+              .font(.system(size: 20, weight: .bold, design: .rounded))
+              .foregroundStyle(.white)
+              .lineLimit(2)
+              .multilineTextAlignment(.center)
+          }
+          .frame(maxWidth: .infinity)
+
+          VStack(alignment: .leading, spacing: 12) {
+            Text("照片")
+              .font(.system(size: 14, weight: .semibold, design: .rounded))
+              .foregroundStyle(.white.opacity(0.62))
+
+            PhotosPicker(selection: $selectedCoverItem, matching: .images) {
+              Label(isSavingPhoto ? "正在保存" : "选择照片", systemImage: "photo")
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color(hex: "#121212"))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 13)
+                .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(isSavingPhoto)
+
+            if let errorMessage {
+              Text(errorMessage)
+                .font(.footnote)
+                .foregroundStyle(Color(hex: "#FFD5C8"))
+            }
+          }
+
+          VStack(alignment: .leading, spacing: 12) {
+            Text("内置封面")
+              .font(.system(size: 14, weight: .semibold, design: .rounded))
+              .foregroundStyle(.white.opacity(0.62))
+
+            LazyVGrid(columns: columns, spacing: 12) {
+              ForEach(BundledCoverCatalog.covers) { cover in
+                Button {
+                  imageStore.setBundledCover(id: cover.id, for: station.id)
+                } label: {
+                  bundledCoverButton(cover)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("选择 \(cover.title) 封面")
+              }
+            }
+          }
+
+          Button {
+            imageStore.clearCover(for: station.id)
+          } label: {
+            Label("恢复自动封面", systemImage: "arrow.counterclockwise")
+              .font(.system(size: 15, weight: .semibold, design: .rounded))
+              .foregroundStyle(.white.opacity(0.78))
+              .frame(maxWidth: .infinity)
+              .padding(.vertical, 13)
+              .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+          }
+          .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 24)
+        .padding(.bottom, 40)
+      }
+      .background(Color(hex: "#121212").ignoresSafeArea())
+      .navigationTitle("编辑封面")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button("完成") {
+            dismiss()
+          }
+        }
+      }
+    }
+    .onChange(of: selectedCoverItem) { _, item in
+      guard let item else { return }
+      Task {
+        await saveCover(item)
+      }
+    }
+  }
+
+  private func bundledCoverButton(_ cover: BundledCover) -> some View {
+    VStack(alignment: .leading, spacing: 7) {
+      ZStack {
+        if let image = imageStore.image(for: .bundledCover(id: cover.id)) {
+          Image(uiImage: image)
+            .resizable()
+            .scaledToFill()
+        } else {
+          Color(hex: station.colorHex)
+        }
+      }
+      .aspectRatio(1, contentMode: .fit)
+      .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+      .overlay {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .stroke(selectedStrokeColor(for: cover), lineWidth: 2)
+      }
+
+      Text(cover.title)
+        .font(.system(size: 11, weight: .semibold, design: .rounded))
+        .foregroundStyle(.white.opacity(0.62))
+        .lineLimit(1)
+    }
+  }
+
+  private func selectedStrokeColor(for cover: BundledCover) -> Color {
+    imageStore.coverSource(for: station.id) == .bundledCover(id: cover.id)
+      ? .white
+      : .white.opacity(0.12)
+  }
+
+  private func saveCover(_ item: PhotosPickerItem) async {
+    isSavingPhoto = true
+    errorMessage = nil
+    defer {
+      isSavingPhoto = false
+      selectedCoverItem = nil
+    }
+
+    do {
+      guard let data = try await item.loadTransferable(type: Data.self) else {
+        errorMessage = "无法读取这张照片。"
+        return
+      }
+      try await imageStore.savePickedImage(data: data, purpose: .stationCover, key: station.id)
+    } catch {
+      errorMessage = "封面保存失败，请换一张照片重试。"
+    }
+  }
+}
+
 private struct ArchiveStationCover: View {
+  @Environment(ImageAssetStore.self) private var imageStore
+
   let station: ArchiveStationItem
   let size: CGFloat?
 
@@ -786,7 +1102,7 @@ private struct ArchiveStationCover: View {
   }
 
   var body: some View {
-    RemoteArtworkView(urls: [station.artworkURL] + station.tracks.map(\.artworkURL)) {
+    ArtworkImageView(resolution: artworkResolution) {
       fallback
     }
     .aspectRatio(1, contentMode: .fit)
@@ -794,6 +1110,21 @@ private struct ArchiveStationCover: View {
     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     .clipped()
     .accessibilityHidden(true)
+  }
+
+  private var artworkResolution: ArtworkResolution {
+    ArtworkResolution(
+      overrideSource: imageStore.coverSource(for: station.id),
+      remoteURLs: [station.artworkURL] + station.tracks.map(\.artworkURL),
+      bundledFallback: BundledCoverCatalog.fallbackSource(
+        forID: station.id,
+        title: station.name,
+        genre: station.genre
+      ),
+      fallbackSeed: station.id,
+      fallbackTitle: station.name,
+      fallbackColorHex: station.colorHex
+    )
   }
 
   private var fallback: some View {
@@ -858,4 +1189,6 @@ private struct MineTrackArtwork: View {
   .environment(MusicAuthorizationService())
   .environment(AppleMusicLibraryStore())
   .environment(DiagnosticsStore.preview())
+  .environment(ImageAssetStore())
+  .environment(ArtworkAnalysisStore())
 }

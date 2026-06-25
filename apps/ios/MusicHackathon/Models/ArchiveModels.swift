@@ -200,7 +200,7 @@ extension ArchiveProfile {
   ) -> ArchiveProfile {
     let allTracks = uniqueTracks(from: playlists.flatMap(\.tracks) + libraryTracks)
     let playlistItems = playlists.map(archiveItem(from:))
-    let songItems = allTracks.prefix(24).map(archiveItem(from:))
+    let songItems = allTracks.map(archiveItem(from:))
     let artistItems = archiveArtistItems(from: allTracks)
     let totalDuration = allTracks.reduce(0) { $0 + $1.duration }
 

@@ -6,6 +6,7 @@ struct AppView: View {
   @Environment(RadioStationController.self) private var radioStation
   @Environment(MusicAuthorizationService.self) private var musicAuthorization
   @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
+  @Environment(ImageAssetStore.self) private var imageAssetStore
   @Environment(\.scenePhase) private var scenePhase
 
   @State private var selectedTab: AppTab = .radio
@@ -119,7 +120,7 @@ struct AppView: View {
     GlobalMiniPlayer(
       title: miniPlayerTitle,
       subtitle: miniPlayerSubtitle,
-      artworkURLs: miniPlayerArtworkURLs,
+      artworkResolution: miniPlayerArtworkResolution,
       fallbackSeed: miniPlayerFallbackSeed,
       isPlaying: playbackController.state == .playing,
       isLoading: playbackController.state == .loading,
@@ -134,6 +135,27 @@ struct AppView: View {
           await radioStation.playNext(reason: .manual)
         }
       }
+    )
+  }
+
+  private var miniPlayerArtworkResolution: ArtworkResolution {
+    let stationID = radioStation.station?.id ?? radioStation.stationTitle
+    let hasRemoteArtwork = miniPlayerArtworkURLs.compactMap { $0 }.isEmpty == false
+    let fallbackSource = BundledCoverCatalog.fallbackSource(
+      forID: stationID,
+      title: radioStation.stationTitle,
+      genre: nil
+    )
+
+    return ArtworkResolution(
+      overrideSource: hasRemoteArtwork
+        ? nil
+        : (radioStation.station.flatMap { imageAssetStore.coverSource(for: $0.id) } ?? imageAssetStore.profileAvatarSource),
+      remoteURLs: miniPlayerArtworkURLs,
+      bundledFallback: fallbackSource,
+      fallbackSeed: miniPlayerFallbackSeed,
+      fallbackTitle: miniPlayerTitle,
+      fallbackColorHex: "#D9523A"
     )
   }
 }
@@ -151,7 +173,7 @@ private extension PresentationDetent {
 private struct GlobalMiniPlayer: View {
   let title: String
   let subtitle: String
-  let artworkURLs: [URL?]
+  let artworkResolution: ArtworkResolution
   let fallbackSeed: String
   let isPlaying: Bool
   let isLoading: Bool
@@ -195,7 +217,7 @@ private struct GlobalMiniPlayer: View {
   }
 
   private var artwork: some View {
-    RemoteArtworkView(urls: artworkURLs, showsLoadingIndicator: false) {
+    ArtworkImageView(resolution: artworkResolution, showsLoadingIndicator: false) {
       ZStack {
         LinearGradient(
           colors: [
@@ -330,4 +352,6 @@ private struct AppBackdrop: View {
     .environment(MusicAuthorizationService())
     .environment(AppleMusicLibraryStore())
     .environment(DiagnosticsStore.preview())
+    .environment(ImageAssetStore())
+    .environment(ArtworkAnalysisStore())
 }

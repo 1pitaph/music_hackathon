@@ -79,6 +79,80 @@ final class MigrationModelsTests: XCTestCase {
     XCTAssertEqual(profile.bio, "")
   }
 
+  func testArchiveProfileKeepsFullSongListForLargeAppleMusicPlaylist() {
+    let tracks = (1...30).map { index in
+      makeTrack(
+        appleMusicID: "song-\(index)",
+        title: "Song \(index)",
+        artist: "Artist \(index % 3)",
+        album: "Long Playlist",
+        duration: 180,
+        artworkURL: nil
+      )
+    }
+    let playlist = AppleMusicPlaylistSnapshot(
+      id: "playlist-30",
+      name: "Long Playlist",
+      curatorName: "Apple Music",
+      artworkURL: nil,
+      tracks: tracks
+    )
+
+    let profile = ArchiveProfile.appleMusic(base: .empty, playlists: [playlist], tracks: [])
+
+    XCTAssertEqual(profile.stats.likesCount, 30)
+    XCTAssertEqual(profile.published.first?.tracks.count, 30)
+    XCTAssertEqual(profile.published.first?.displaySubtitle, "Apple Music • 30 songs")
+    XCTAssertEqual(profile.recentlyPlayed.count, 30)
+    XCTAssertEqual(profile.recentlyPlayed.first?.name, "Song 1")
+    XCTAssertEqual(profile.recentlyPlayed.last?.name, "Song 30")
+  }
+
+  func testArchiveProfileMergesPlaylistAndLooseLibrarySongs() {
+    let playlistTrack = makeTrack(
+      appleMusicID: "song-1",
+      title: "Playlist Song",
+      artist: "Artist A",
+      album: "Playlist Album",
+      duration: 210,
+      artworkURL: nil
+    )
+    let looseTrack = makeTrack(
+      appleMusicID: "song-2",
+      title: "Loose Library Song",
+      artist: "Artist B",
+      album: "Singles",
+      duration: 180,
+      artworkURL: nil
+    )
+    let duplicateTrack = makeTrack(
+      appleMusicID: "song-1",
+      title: "Playlist Song",
+      artist: "Artist A",
+      album: "Playlist Album",
+      duration: 210,
+      artworkURL: nil
+    )
+    let playlist = AppleMusicPlaylistSnapshot(
+      id: "playlist-1",
+      name: "Road Trip",
+      curatorName: "Apple Music",
+      artworkURL: nil,
+      tracks: [playlistTrack]
+    )
+
+    let profile = ArchiveProfile.appleMusic(
+      base: .empty,
+      playlists: [playlist],
+      tracks: [duplicateTrack, looseTrack]
+    )
+
+    XCTAssertEqual(profile.stats.likesCount, 2)
+    XCTAssertEqual(profile.recentlyPlayed.map(\.name), ["Playlist Song", "Loose Library Song"])
+    XCTAssertEqual(profile.published.first?.tracks.map(\.title), ["Playlist Song"])
+    XCTAssertEqual(profile.saved.map(\.name), ["Artist A", "Artist B"])
+  }
+
   func testArchiveProfileInfersNicknameFromPersonalPlaylistCurator() {
     let track = makeTrack(
       appleMusicID: "song-1",

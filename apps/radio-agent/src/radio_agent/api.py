@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
@@ -217,6 +219,13 @@ def _station_item(
   source: str | None = None,
   handoff_text: str | None = None,
 ) -> RadioStationItem:
+  source_title = (
+    _trimmed_or_none(track.playlistName)
+    or _trimmed_or_none(track.sourceLane)
+    or _trimmed_or_none(source)
+    or _trimmed_or_none(track.source)
+    or "Backend station"
+  )
   return RadioStationItem(
     id=track.radioIdentity,
     title=track.title,
@@ -225,17 +234,38 @@ def _station_item(
     mood=track.mood or "Radio",
     duration=track.duration,
     artworkURL=track.artworkURL,
-    previewURL=track.previewURL,
-    appleMusicID=track.appleMusicID,
+    previewURL=_playable_preview_url(track.previewURL),
+    appleMusicID=_trimmed_or_none(track.appleMusicID),
     isExplicit=track.isExplicit,
-    sourceTitle=track.playlistName or track.sourceLane or source or track.source or "Backend station",
+    sourceTitle=source_title,
+    source=_trimmed_or_none(track.source) or _trimmed_or_none(source),
+    sourceLane=_trimmed_or_none(track.sourceLane),
     reason=reason,
     handoffText=handoff_text,
   )
 
 
 def _is_playable(track: RadioTrack) -> bool:
-  return bool(track.appleMusicID or track.previewURL)
+  return bool(_trimmed_or_none(track.appleMusicID) or _playable_preview_url(track.previewURL))
+
+
+def _trimmed_or_none(value: str | None) -> str | None:
+  if value is None:
+    return None
+  cleaned = value.strip()
+  return cleaned or None
+
+
+def _playable_preview_url(value: str | None) -> str | None:
+  cleaned = _trimmed_or_none(value)
+  if not cleaned:
+    return None
+
+  parsed = urlparse(cleaned)
+  if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    return None
+
+  return cleaned
 
 
 def _speech_with_audio(

@@ -3,9 +3,9 @@ import json
 
 from fastapi.testclient import TestClient
 
-from radio_agent.api import app
+from radio_agent.api import app, _is_playable, _station_item
 from radio_agent import speech
-from radio_agent.schemas import RadioSpeechAudioConfig, RadioSpeechSegment
+from radio_agent.schemas import RadioSpeechAudioConfig, RadioSpeechSegment, RadioTrack
 
 
 def test_root_health():
@@ -73,6 +73,32 @@ def test_generate_station_returns_ios_playable_payload(monkeypatch):
   assert body["speech"]["betweenTracks"][0]["toItemId"] == "song-2"
   assert body["items"][1]["handoffText"] == body["speech"]["betweenTracks"][0]["displayText"]
   assert body["memoryPatchProposals"]
+
+
+def test_playable_filter_rejects_blank_ids_and_invalid_preview_urls():
+  assert not _is_playable(_track(appleMusicID="   "))
+  assert not _is_playable(_track(previewURL="ftp://example.com/a.m4a"))
+  assert not _is_playable(_track(previewURL="/relative/a.m4a"))
+  assert _is_playable(_track(appleMusicID=" 123456 "))
+  assert _is_playable(_track(previewURL="https://example.com/a.m4a"))
+
+
+def test_station_item_sanitizes_playable_fields_and_preserves_source_metadata():
+  item = _station_item(
+    _track(
+      appleMusicID=" 123456 ",
+      previewURL="ftp://example.com/a.m4a",
+      source="virtual_music_library_json",
+      sourceLane="familiar_anchor",
+    ),
+    "Reason.",
+  )
+
+  assert item.appleMusicID == "123456"
+  assert item.previewURL is None
+  assert item.source == "virtual_music_library_json"
+  assert item.sourceLane == "familiar_anchor"
+  assert item.sourceTitle == "familiar_anchor"
 
 
 def test_generate_station_can_attach_mock_speech_audio(monkeypatch):
@@ -590,6 +616,19 @@ def test_empty_candidates_returns_explainable_fallback(monkeypatch):
   assert body["mode"] == "fallback"
   assert body["items"] == []
   assert "No candidate tracks supplied." in body["diagnostics"]
+
+
+def _track(**overrides):
+  payload = {
+    "radioIdentity": "song-1",
+    "title": "A",
+    "artist": "Artist A",
+    "album": "Album",
+    "mood": "Pop",
+    "duration": 210,
+  }
+  payload.update(overrides)
+  return RadioTrack(**payload)
 
 
 def _request_payload():

@@ -212,7 +212,7 @@ struct RadioSpeechPlaybackSegment: Identifiable, Hashable {
 
 extension Track {
   var radioIdentity: String {
-    if let appleMusicID {
+    if let appleMusicID = normalizedAppleMusicID {
       return "appleMusic:\(appleMusicID)"
     }
 

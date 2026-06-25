@@ -269,7 +269,93 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertTrue(controller.queue.isEmpty)
   }
 
-  func testManualNextSkipsTransitionSpeech() async {
+  func testAutomaticCompletionUsesHandoffTextWhenSpeechIsMissing() async {
+    let station = makeStation(
+      items: [
+        makeQueueItem(title: "One", appleMusicID: "one"),
+        makeQueueItem(title: "Two", appleMusicID: "two", handoffText: "Next up is Two.")
+      ]
+    )
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: MockStationClient(result: .success(station)),
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    playbackController.finish(.track)
+    await waitForSpeech(playbackController, text: "Next up is Two.")
+
+    XCTAssertEqual(playbackController.currentSpeech?.displayText, "Next up is Two.")
+
+    playbackController.finish(.speech)
+    await waitForPlayback(playbackController, title: "Two")
+
+    XCTAssertEqual(controller.currentItem?.track.title, "Two")
+  }
+
+  func testPlaybackFailureAutoSkipsToNextTrackWithoutAddingFailedTrackToHistory() async {
+    let memoryStore = MockMemoryStore()
+    let station = makeStation(items: [
+      makeQueueItem(title: "One", appleMusicID: "one"),
+      makeQueueItem(title: "Two", appleMusicID: "two")
+    ])
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: MockStationClient(result: .success(station)),
+      memoryStore: memoryStore
+    )
+
+    await controller.startStation()
+    await waitForPlayback(playbackController, title: "One")
+
+    playbackController.failCurrent(phase: "apple_music_start")
+    await waitForPlayback(playbackController, title: "Two")
+
+    XCTAssertEqual(controller.currentItem?.track.title, "Two")
+    XCTAssertTrue(controller.queue.isEmpty)
+    XCTAssertEqual(playbackController.currentTrack?.title, "Two")
+
+    controller.playPrevious()
+
+    XCTAssertEqual(controller.currentItem?.track.title, "Two")
+    XCTAssertTrue(controller.queue.isEmpty)
+    XCTAssertEqual(playbackController.currentTrack?.title, "Two")
+
+    let eventTypes = await memoryStore.eventTypes()
+    XCTAssertTrue(eventTypes.contains("playback_failed"))
+    XCTAssertFalse(eventTypes.contains("skip"))
+  }
+
+  func testPlaybackFailureWithEmptyQueueSurfacesErrorWithoutCrash() async {
+    let stationClient = SequencedStationClient(results: [
+      .success(makeResult(titles: ["One"])),
+      .failure(URLError(.cannotConnectToHost)),
+      .failure(URLError(.cannotConnectToHost))
+    ])
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    await waitForPlayback(playbackController, title: "One")
+    await waitForExtensionError(controller)
+
+    playbackController.failCurrent(phase: "resolve_failed")
+    await waitForControllerError(controller)
+
+    XCTAssertNil(controller.currentItem)
+    XCTAssertTrue(controller.queue.isEmpty)
+    XCTAssertNotNil(controller.errorMessage)
+  }
+
+  func testManualNextPlaysTransitionSpeechBeforeNextTrack() async {
+    let memoryStore = MockMemoryStore()
     let station = makeStation(
       items: [
         makeQueueItem(title: "One", appleMusicID: "one"),
@@ -291,15 +377,32 @@ final class RadioStationControllerTests: XCTestCase {
     let controller = RadioStationController(
       playbackController: playbackController,
       stationClient: MockStationClient(result: .success(station)),
-      memoryStore: MockMemoryStore()
+      memoryStore: memoryStore
     )
 
     await controller.startStation()
     await controller.playNext(reason: .manual)
+    await waitForSpeech(playbackController, text: "Next up is Two.")
 
-    XCTAssertEqual(playbackController.currentTrack?.title, "Two")
-    XCTAssertNil(playbackController.currentSpeech)
+    XCTAssertEqual(playbackController.currentSpeech?.displayText, "Next up is Two.")
+    XCTAssertNil(controller.currentItem)
+    XCTAssertEqual(controller.queue.map(\.track.title), ["Two"])
+
+    playbackController.finish(.speech)
+    await waitForPlayback(playbackController, title: "Two")
+
     XCTAssertEqual(controller.currentItem?.track.title, "Two")
+    XCTAssertTrue(controller.queue.isEmpty)
+    let eventTypes = await memoryStore.eventTypes()
+    XCTAssertTrue(eventTypes.contains("skip"))
+  }
+
+  func testDiscoverStationBuildsSpeechForLocalPlayback() {
+    let station = DiscoverStation.mockStations[0].radioStation()
+
+    XCTAssertEqual(station.speech?.stationIntro?.targetItemId, station.items.first?.id)
+    XCTAssertFalse(station.speech?.stationIntro?.displayText.isEmpty ?? true)
+    XCTAssertEqual(station.speech?.betweenTracks.count, max(station.items.count - 1, 0))
   }
 
   func testStartStationPrefetchesWhenQueueFallsToThresholdAndAppends() async {
@@ -598,6 +701,7 @@ final class RadioStationControllerTests: XCTestCase {
 @MainActor
 private final class MockPlaybackController: RadioPlaybackControlling {
   var onPlaybackFinished: ((PlaybackCompletionKind) -> Void)?
+  var onPlaybackFailed: ((PlaybackFailureContext) -> Void)?
   var currentTrack: Track?
   var currentSpeech: RadioSpeechPlaybackSegment?
 
@@ -617,6 +721,17 @@ private final class MockPlaybackController: RadioPlaybackControlling {
 
   func finish(_ kind: PlaybackCompletionKind) {
     onPlaybackFinished?(kind)
+  }
+
+  func failCurrent(phase: String) {
+    guard let currentTrack else { return }
+    onPlaybackFailed?(
+      PlaybackFailureContext(
+        track: currentTrack,
+        phase: phase,
+        message: "Mock playback failed."
+      )
+    )
   }
 }
 
@@ -689,6 +804,10 @@ private actor MockMemoryStore: RadioMemoryStoring {
 
   func record(_ event: RadioMemoryEvent) async throws {
     events.append(event)
+  }
+
+  func eventTypes() -> [String] {
+    events.map(\.type)
   }
 
   func compressionRequest() async throws -> RadioMemoryCompressionRequest? {

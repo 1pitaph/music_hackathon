@@ -8,9 +8,16 @@ enum PlaybackCompletionKind {
   case speech
 }
 
+struct PlaybackFailureContext {
+  let track: Track
+  let phase: String
+  let message: String
+}
+
 @MainActor
 protocol RadioPlaybackControlling: AnyObject {
   var onPlaybackFinished: ((PlaybackCompletionKind) -> Void)? { get set }
+  var onPlaybackFailed: ((PlaybackFailureContext) -> Void)? { get set }
 
   func play(track: Track)
   func playSpeech(_ speech: RadioSpeechPlaybackSegment)
@@ -25,6 +32,22 @@ enum PlaybackState: String {
   case failed
 }
 
+private enum PlaybackMediaKind {
+  case track(Track, String?)
+  case speech(RadioSpeechPlaybackSegment)
+}
+
+private enum PlaybackControllerError: LocalizedError {
+  case playerItemFailed
+
+  var errorDescription: String? {
+    switch self {
+    case .playerItemFailed:
+      "The audio item failed to load."
+    }
+  }
+}
+
 @MainActor
 @Observable
 final class PlaybackController: RadioPlaybackControlling {
@@ -37,6 +60,7 @@ final class PlaybackController: RadioPlaybackControlling {
   var elapsedTimeText: String = "0:00"
   var activeBackend: PlaybackBackend = .none
   var onPlaybackFinished: ((PlaybackCompletionKind) -> Void)?
+  var onPlaybackFailed: ((PlaybackFailureContext) -> Void)?
   var onTrackFinished: (() -> Void)?
 
   @ObservationIgnored private let previewPlayer = AVPlayer()
@@ -48,10 +72,13 @@ final class PlaybackController: RadioPlaybackControlling {
   @ObservationIgnored private let catalogService = AppleMusicCatalogService()
   @ObservationIgnored private var timeObserverToken: Any?
   @ObservationIgnored private var endObserverToken: NSObjectProtocol?
+  @ObservationIgnored private var failedItemObserverToken: NSObjectProtocol?
+  @ObservationIgnored private var itemStatusObserver: NSKeyValueObservation?
   @ObservationIgnored private var musicProgressTask: Task<Void, Never>?
   @ObservationIgnored private var speechProgressTask: Task<Void, Never>?
   @ObservationIgnored private var playbackTask: Task<Void, Never>?
   @ObservationIgnored private var didNotifyTrackFinished = false
+  @ObservationIgnored private var didNotifyPlaybackFailed = false
   @ObservationIgnored private var currentPlaybackAttemptID: String?
   @ObservationIgnored private var currentPlaybackStartedAt: Date?
 
@@ -84,6 +111,10 @@ final class PlaybackController: RadioPlaybackControlling {
     if let endObserverToken {
       NotificationCenter.default.removeObserver(endObserverToken)
     }
+    if let failedItemObserverToken {
+      NotificationCenter.default.removeObserver(failedItemObserverToken)
+    }
+    itemStatusObserver?.invalidate()
 
     musicProgressTask?.cancel()
     speechProgressTask?.cancel()
@@ -177,17 +208,18 @@ final class PlaybackController: RadioPlaybackControlling {
     lastErrorMessage = nil
     state = .loading
     stopCurrentPlayback(clearCurrentTrack: false)
+    didNotifyPlaybackFailed = false
     resetPlaybackProgress()
     diagnostics?.record(
       .notice,
-      chain: track.appleMusicID == nil ? .playbackPreview : .playbackAppleMusic,
+      chain: track.normalizedAppleMusicID == nil ? .playbackPreview : .playbackAppleMusic,
       event: "attempt_start",
       message: "开始播放曲目。",
       correlationID: attemptID,
       payload: DiagnosticsPayload.track(track)
     )
 
-    if track.appleMusicID != nil {
+    if track.normalizedAppleMusicID != nil {
       do {
         try await startAppleMusicPlayback(for: track, attemptID: attemptID)
         return
@@ -218,7 +250,7 @@ final class PlaybackController: RadioPlaybackControlling {
         for: track,
         previewURL: previewURL,
         correlationID: attemptID,
-        reason: track.appleMusicID == nil ? "direct_preview" : "apple_music_fallback"
+        reason: track.normalizedAppleMusicID == nil ? "direct_preview" : "apple_music_fallback"
       )
     } else {
       do {
@@ -268,9 +300,23 @@ final class PlaybackController: RadioPlaybackControlling {
       correlationID: attemptID,
       payload: DiagnosticsPayload.track(track)
     )
-    let song: Song
+    let resolution: AppleMusicCatalogResolution
     do {
-      song = try await catalogService.song(for: track)
+      resolution = try await catalogService.resolveSong(for: track)
+      if let idError = resolution.idError {
+        diagnostics?.record(
+          .warning,
+          chain: .musicCatalog,
+          event: "resolve_id_failed_search_fallback",
+          message: "Apple Music ID 直查失败，已用标题和艺人搜索兜底。",
+          correlationID: attemptID,
+          payload: DiagnosticsPayload.merge(
+            ["resolution_method": resolution.method.rawValue],
+            DiagnosticsPayload.track(track),
+            DiagnosticsPayload.error(idError)
+          )
+        )
+      }
     } catch {
       diagnostics?.record(
         .error,
@@ -286,6 +332,7 @@ final class PlaybackController: RadioPlaybackControlling {
       throw error
     }
 
+    let song = resolution.song
     let resolvedTrack = AppleMusicCatalogService.track(from: song, fallback: track)
     diagnostics?.record(
       .notice,
@@ -293,7 +340,10 @@ final class PlaybackController: RadioPlaybackControlling {
       event: "resolve_success",
       message: "Apple Music 目录歌曲解析完成。",
       correlationID: attemptID,
-      payload: DiagnosticsPayload.track(resolvedTrack)
+      payload: DiagnosticsPayload.merge(
+        ["resolution_method": resolution.method.rawValue],
+        DiagnosticsPayload.track(resolvedTrack)
+      )
     )
     musicPlayer.queue = [song]
     diagnostics?.record(
@@ -433,7 +483,7 @@ final class PlaybackController: RadioPlaybackControlling {
     let item = AVPlayerItem(url: previewURL)
     previewPlayer.replaceCurrentItem(with: item)
     addPeriodicTimeObserver()
-    addPlaybackEndObserver(for: item)
+    addPlaybackItemObservers(for: item, mediaKind: .track(track, correlationID))
     previewPlayer.play()
 
     activeBackend = .localPreview
@@ -472,7 +522,7 @@ final class PlaybackController: RadioPlaybackControlling {
     let item = AVPlayerItem(url: audioURL)
     previewPlayer.replaceCurrentItem(with: item)
     addPeriodicTimeObserver()
-    addPlaybackEndObserver(for: item)
+    addPlaybackItemObservers(for: item, mediaKind: .speech(speech))
     previewPlayer.play()
 
     activeBackend = .speechAudio
@@ -590,7 +640,7 @@ final class PlaybackController: RadioPlaybackControlling {
 
     resetPlaybackProgress()
     removePeriodicTimeObserver()
-    removePlaybackEndObserver()
+    removePlaybackItemObservers()
     stopMusicProgressTimer()
     stopSpeechProgressTimer()
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
@@ -613,8 +663,8 @@ final class PlaybackController: RadioPlaybackControlling {
     self.timeObserverToken = nil
   }
 
-  private func addPlaybackEndObserver(for item: AVPlayerItem) {
-    removePlaybackEndObserver()
+  private func addPlaybackItemObservers(for item: AVPlayerItem, mediaKind: PlaybackMediaKind) {
+    removePlaybackItemObservers()
 
     endObserverToken = NotificationCenter.default.addObserver(
       forName: AVPlayerItem.didPlayToEndTimeNotification,
@@ -625,12 +675,65 @@ final class PlaybackController: RadioPlaybackControlling {
         self?.handleFinishedPlayerItem()
       }
     }
+
+    failedItemObserverToken = NotificationCenter.default.addObserver(
+      forName: AVPlayerItem.failedToPlayToEndTimeNotification,
+      object: item,
+      queue: .main
+    ) { [weak self] notification in
+      Task { @MainActor in
+        let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+          ?? item.error
+          ?? PlaybackControllerError.playerItemFailed
+        self?.handleFailedPlayerItem(mediaKind: mediaKind, error: error)
+      }
+    }
+
+    itemStatusObserver = item.observe(\.status, options: [.new]) { [weak self] observedItem, _ in
+      guard observedItem.status == .failed else { return }
+
+      Task { @MainActor in
+        self?.handleFailedPlayerItem(
+          mediaKind: mediaKind,
+          error: observedItem.error ?? PlaybackControllerError.playerItemFailed
+        )
+      }
+    }
   }
 
-  private func removePlaybackEndObserver() {
-    guard let endObserverToken else { return }
-    NotificationCenter.default.removeObserver(endObserverToken)
-    self.endObserverToken = nil
+  private func removePlaybackItemObservers() {
+    if let endObserverToken {
+      NotificationCenter.default.removeObserver(endObserverToken)
+      self.endObserverToken = nil
+    }
+    if let failedItemObserverToken {
+      NotificationCenter.default.removeObserver(failedItemObserverToken)
+      self.failedItemObserverToken = nil
+    }
+    itemStatusObserver?.invalidate()
+    itemStatusObserver = nil
+  }
+
+  private func handleFailedPlayerItem(mediaKind: PlaybackMediaKind, error: Error) {
+    switch mediaKind {
+    case let .track(track, correlationID):
+      currentTrack = track
+      failPlayback(error, failedPhase: "preview_item_failed", correlationID: correlationID)
+    case let .speech(speech):
+      diagnostics?.record(
+        .warning,
+        chain: .playbackSpeech,
+        event: "speech_audio_failed",
+        message: "主持人语音音频播放失败，切换到系统语音合成。",
+        payload: DiagnosticsPayload.merge(
+          ["speech_id_hash": DiagnosticsRedactor.hash(speech.id)],
+          DiagnosticsPayload.error(error)
+        )
+      )
+      removePlaybackItemObservers()
+      previewPlayer.replaceCurrentItem(with: nil)
+      startSynthesizedSpeechPlayback(for: speech)
+    }
   }
 
   private func handleFinishedPlayerItem() {
@@ -753,14 +856,21 @@ final class PlaybackController: RadioPlaybackControlling {
   }
 
   private func failPlayback(_ error: Error, failedPhase: String, correlationID: String?) {
+    let failureChain: DiagnosticLogChain = activeBackend == .localPreview
+      ? .playbackPreview
+      : .playbackAppleMusic
     lastErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     state = .failed
     activeBackend = .none
+    previewPlayer.pause()
+    previewPlayer.replaceCurrentItem(with: nil)
+    removePlaybackItemObservers()
+    removePeriodicTimeObserver()
     stopMusicProgressTimer()
     updateNowPlayingPlaybackRate(0)
     diagnostics?.record(
       .error,
-      chain: .playbackAppleMusic,
+      chain: failureChain,
       event: "attempt_failed",
       message: "播放失败。",
       correlationID: correlationID,
@@ -768,6 +878,16 @@ final class PlaybackController: RadioPlaybackControlling {
         ["failed_phase": failedPhase],
         currentTrack.map(DiagnosticsPayload.track) ?? [:],
         DiagnosticsPayload.error(error)
+      )
+    )
+
+    guard let currentTrack, !didNotifyPlaybackFailed else { return }
+    didNotifyPlaybackFailed = true
+    onPlaybackFailed?(
+      PlaybackFailureContext(
+        track: currentTrack,
+        phase: failedPhase,
+        message: lastErrorMessage ?? "Playback failed."
       )
     )
   }

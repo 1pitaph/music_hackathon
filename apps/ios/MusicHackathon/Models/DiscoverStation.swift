@@ -51,8 +51,49 @@ struct DiscoverStation: Identifiable, Hashable {
       id: id,
       title: title,
       subtitle: briefIntro,
-      items: items
+      items: items,
+      speech: radioSpeech
     )
+  }
+
+  private var radioSpeech: RadioSpeech? {
+    guard let firstItem = items.first else { return nil }
+
+    let introText = firstItem.handoffText?.trimmedNilIfEmpty
+      ?? "调到 \(title)，先从 \(firstItem.track.title) 开始。"
+    let transitions = adjacentItemPairs().enumerated().map { index, pair in
+      let displayText = pair.next.handoffText?.trimmedNilIfEmpty
+        ?? "接下来是 \(pair.next.track.title) - \(pair.next.track.artist)。"
+      let text = "从 \(pair.current.track.title) 进入 \(pair.next.track.title)。\(displayText)"
+
+      return RadioTransitionCopy(
+        id: "\(id)-transition-\(index + 1)",
+        fromItemId: pair.current.id,
+        toItemId: pair.next.id,
+        text: text,
+        displayText: displayText,
+        agent: "discover_station"
+      )
+    }
+
+    return RadioSpeech(
+      stationIntro: RadioStationIntroCopy(
+        id: "\(id)-intro",
+        text: introText,
+        displayText: introText,
+        targetItemId: firstItem.id,
+        agent: "discover_station"
+      ),
+      betweenTracks: transitions
+    )
+  }
+
+  private func adjacentItemPairs() -> [(current: RadioQueueItem, next: RadioQueueItem)] {
+    guard items.count > 1 else { return [] }
+
+    return items.indices.dropLast().map { index in
+      (current: items[index], next: items[index + 1])
+    }
   }
 }
 
@@ -246,6 +287,13 @@ private extension Array {
     return stride(from: 0, to: count, by: maxSize).map { startIndex in
       Array(self[startIndex..<Swift.min(startIndex + maxSize, count)])
     }
+  }
+}
+
+private extension String {
+  var trimmedNilIfEmpty: String? {
+    let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 }
 

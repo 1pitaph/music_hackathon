@@ -42,6 +42,13 @@
 		M10000000000000000000001 /* RemoteArtworkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = M20000000000000000000001 /* RemoteArtworkView.swift */; };
 		N10000000000000000000001 /* MarbleAvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = N20000000000000000000001 /* MarbleAvatarView.swift */; };
 		N10000000000000000000002 /* MarbleAvatarRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = N20000000000000000000002 /* MarbleAvatarRendererTests.swift */; };
+		P10000000000000000000001 /* ArtworkModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = P20000000000000000000001 /* ArtworkModels.swift */; };
+		P10000000000000000000002 /* BundledCoverCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = P20000000000000000000002 /* BundledCoverCatalog.swift */; };
+		P10000000000000000000003 /* ImageAssetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = P20000000000000000000003 /* ImageAssetStore.swift */; };
+		P10000000000000000000004 /* ArtworkAnalysisStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = P20000000000000000000004 /* ArtworkAnalysisStore.swift */; };
+		P10000000000000000000005 /* ArtworkImageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = P20000000000000000000005 /* ArtworkImageView.swift */; };
+		P10000000000000000000006 /* PlaceholderCovers in Resources */ = {isa = PBXBuildFile; fileRef = P20000000000000000000006 /* PlaceholderCovers */; };
+		P10000000000000000000007 /* ArtworkImageSystemTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = P20000000000000000000007 /* ArtworkImageSystemTests.swift */; };
 		T10000000000000000000003 /* RadioStationClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000004 /* RadioStationClientTests.swift */; };
 		T10000000000000000000004 /* RadioStationControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000005 /* RadioStationControllerTests.swift */; };
 		T10000000000000000000005 /* RadioMemoryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000006 /* RadioMemoryStoreTests.swift */; };
@@ -98,6 +105,13 @@
 		M20000000000000000000001 /* RemoteArtworkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteArtworkView.swift; sourceTree = "<group>"; };
 		N20000000000000000000001 /* MarbleAvatarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarbleAvatarView.swift; sourceTree = "<group>"; };
 		N20000000000000000000002 /* MarbleAvatarRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarbleAvatarRendererTests.swift; sourceTree = "<group>"; };
+		P20000000000000000000001 /* ArtworkModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkModels.swift; sourceTree = "<group>"; };
+		P20000000000000000000002 /* BundledCoverCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledCoverCatalog.swift; sourceTree = "<group>"; };
+		P20000000000000000000003 /* ImageAssetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageAssetStore.swift; sourceTree = "<group>"; };
+		P20000000000000000000004 /* ArtworkAnalysisStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkAnalysisStore.swift; sourceTree = "<group>"; };
+		P20000000000000000000005 /* ArtworkImageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkImageView.swift; sourceTree = "<group>"; };
+		P20000000000000000000006 /* PlaceholderCovers */ = {isa = PBXFileReference; lastKnownFileType = folder; path = PlaceholderCovers; sourceTree = "<group>"; };
+		P20000000000000000000007 /* ArtworkImageSystemTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkImageSystemTests.swift; sourceTree = "<group>"; };
 		T20000000000000000000003 /* MusicHackathonTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MusicHackathonTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		T20000000000000000000004 /* RadioStationClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationClientTests.swift; sourceTree = "<group>"; };
 		T20000000000000000000005 /* RadioStationControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationControllerTests.swift; sourceTree = "<group>"; };
@@ -156,6 +170,7 @@
 				A20000000000000000000003 /* AppTab.swift */,
 				M20000000000000000000001 /* RemoteArtworkView.swift */,
 				N20000000000000000000001 /* MarbleAvatarView.swift */,
+				P20000000000000000000005 /* ArtworkImageView.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -182,6 +197,7 @@
 				I20000000000000000000001 /* VirtualMusicLibrary.swift */,
 				J20000000000000000000001 /* DiscoverStation.swift */,
 				J20000000000000000000002 /* ArchiveModels.swift */,
+				P20000000000000000000001 /* ArtworkModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -199,6 +215,9 @@
 				H20000000000000000000001 /* RadioMemoryStore.swift */,
 				E20000000000000000000002 /* SpectrumAnalysisCache.swift */,
 				A20000000000000000000015 /* AudioSpectrumAnalyzer.swift */,
+				P20000000000000000000002 /* BundledCoverCatalog.swift */,
+				P20000000000000000000003 /* ImageAssetStore.swift */,
+				P20000000000000000000004 /* ArtworkAnalysisStore.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -208,6 +227,7 @@
 			children = (
 				A40000000000000000000015 /* Audio */,
 				I40000000000000000000001 /* VirtualMusicLibrary */,
+				P20000000000000000000006 /* PlaceholderCovers */,
 				C20000000000000000000001 /* AppIcon.icon */,
 				A20000000000000000000012 /* Info.plist */,
 			);
@@ -309,6 +329,7 @@
 				T20000000000000000000009 /* AppleMusicLibraryStoreTests.swift */,
 				T20000000000000000000010 /* DiagnosticsLogWriterTests.swift */,
 				N20000000000000000000002 /* MarbleAvatarRendererTests.swift */,
+				P20000000000000000000007 /* ArtworkImageSystemTests.swift */,
 			);
 			path = MusicHackathonTests;
 			sourceTree = "<group>";
@@ -401,6 +422,7 @@
 				C10000000000000000000001 /* AppIcon.icon in Resources */,
 				A10000000000000000000012 /* featured-preview.m4a in Resources */,
 				I10000000000000000000002 /* virtual-music-library.json in Resources */,
+				P10000000000000000000006 /* PlaceholderCovers in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -423,12 +445,14 @@
 				A10000000000000000000003 /* AppTab.swift in Sources */,
 				M10000000000000000000001 /* RemoteArtworkView.swift in Sources */,
 				N10000000000000000000001 /* MarbleAvatarView.swift in Sources */,
+				P10000000000000000000005 /* ArtworkImageView.swift in Sources */,
 				A10000000000000000000004 /* Track.swift in Sources */,
 				A10000000000000000000005 /* MockCatalog.swift in Sources */,
 				F10000000000000000000001 /* RadioModels.swift in Sources */,
 				I10000000000000000000001 /* VirtualMusicLibrary.swift in Sources */,
 				J10000000000000000000001 /* DiscoverStation.swift in Sources */,
 				J10000000000000000000002 /* ArchiveModels.swift in Sources */,
+				P10000000000000000000001 /* ArtworkModels.swift in Sources */,
 				A10000000000000000000006 /* PlaybackController.swift in Sources */,
 				A10000000000000000000007 /* MusicAuthorizationService.swift in Sources */,
 				A10000000000000000000013 /* AudioSpectrumAnalyzer.swift in Sources */,
@@ -445,6 +469,9 @@
 				H10000000000000000000001 /* RadioMemoryStore.swift in Sources */,
 				L10000000000000000000001 /* AppleMusicLibraryStore.swift in Sources */,
 				E10000000000000000000002 /* SpectrumAnalysisCache.swift in Sources */,
+				P10000000000000000000002 /* BundledCoverCatalog.swift in Sources */,
+				P10000000000000000000003 /* ImageAssetStore.swift in Sources */,
+				P10000000000000000000004 /* ArtworkAnalysisStore.swift in Sources */,
 				A10000000000000000000010 /* PlayerView.swift in Sources */,
 				A10000000000000000000011 /* SettingsView.swift in Sources */,
 				D10000000000000000000004 /* DiagnosticsView.swift in Sources */,
@@ -463,6 +490,7 @@
 				T10000000000000000000008 /* AppleMusicLibraryStoreTests.swift in Sources */,
 				T10000000000000000000009 /* DiagnosticsLogWriterTests.swift in Sources */,
 				N10000000000000000000002 /* MarbleAvatarRendererTests.swift in Sources */,
+				P10000000000000000000007 /* ArtworkImageSystemTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

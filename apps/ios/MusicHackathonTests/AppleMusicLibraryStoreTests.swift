@@ -28,6 +28,16 @@ final class AppleMusicLibraryStoreTests: XCTestCase {
     XCTAssertEqual(store.stations.first?.items.first?.track.artworkURL?.absoluteString, "https://example.com/signal.jpg")
   }
 
+  func testRefreshRequestsFullLibrarySnapshotOptions() async {
+    let provider = FakeLibraryProvider(snapshot: makeSnapshot())
+    let store = AppleMusicLibraryStore(provider: provider)
+
+    await store.refresh(authorizationStatus: .authorized)
+
+    XCTAssertEqual(provider.capturedOptions?.pageSize, 100)
+    XCTAssertEqual(provider.capturedOptions?.includeLibrarySongs, true)
+  }
+
   func testRefreshUsesEmptyStateWhenSnapshotHasNoPlayableTracks() async {
     let store = AppleMusicLibraryStore(provider: FakeLibraryProvider(snapshot: .empty))
 
@@ -166,8 +176,9 @@ final class AppleMusicLibraryStoreTests: XCTestCase {
   }
 }
 
-private struct FakeLibraryProvider: AppleMusicLibraryProviding {
+private final class FakeLibraryProvider: AppleMusicLibraryProviding {
   let result: Result<AppleMusicLibrarySnapshot, Error>
+  var capturedOptions: AppleMusicLibraryLoadOptions?
 
   init(snapshot: AppleMusicLibrarySnapshot) {
     result = .success(snapshot)
@@ -177,12 +188,9 @@ private struct FakeLibraryProvider: AppleMusicLibraryProviding {
     result = .failure(error)
   }
 
-  func librarySnapshot(
-    playlistLimit: Int,
-    tracksPerPlaylistLimit: Int,
-    fallbackSongLimit: Int
-  ) async throws -> AppleMusicLibrarySnapshot {
-    try result.get()
+  func librarySnapshot(options: AppleMusicLibraryLoadOptions) async throws -> AppleMusicLibrarySnapshot {
+    capturedOptions = options
+    return try result.get()
   }
 }
 

@@ -21,12 +21,13 @@ struct AppleMusicPlaylistSnapshot: Identifiable, Hashable {
   }
 }
 
+struct AppleMusicLibraryLoadOptions: Equatable {
+  var pageSize = 100
+  var includeLibrarySongs = true
+}
+
 protocol AppleMusicLibraryProviding {
-  func librarySnapshot(
-    playlistLimit: Int,
-    tracksPerPlaylistLimit: Int,
-    fallbackSongLimit: Int
-  ) async throws -> AppleMusicLibrarySnapshot
+  func librarySnapshot(options: AppleMusicLibraryLoadOptions) async throws -> AppleMusicLibrarySnapshot
 }
 
 enum AppleMusicLibraryState: Equatable {
@@ -94,11 +95,7 @@ final class AppleMusicLibraryStore {
     )
 
     do {
-      let snapshot = try await provider.librarySnapshot(
-        playlistLimit: 12,
-        tracksPerPlaylistLimit: 8,
-        fallbackSongLimit: 36
-      )
+      let snapshot = try await provider.librarySnapshot(options: AppleMusicLibraryLoadOptions())
       let nextState: AppleMusicLibraryState = snapshot.tracks.isEmpty && snapshot.playlists.allSatisfy { $0.tracks.isEmpty }
         ? .empty
         : .loaded

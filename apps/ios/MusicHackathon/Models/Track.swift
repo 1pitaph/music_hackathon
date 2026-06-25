@@ -54,12 +54,16 @@ struct Track: Identifiable, Hashable, Codable {
     self.reasonSignals = reasonSignals
   }
 
+  var normalizedAppleMusicID: String? {
+    appleMusicID?.trimmedNilIfEmpty
+  }
+
   var isAppleMusicTrack: Bool {
-    appleMusicID != nil
+    normalizedAppleMusicID != nil
   }
 
   var isPlayable: Bool {
-    appleMusicID != nil || previewURL != nil
+    normalizedAppleMusicID != nil || previewURL != nil
   }
 
   var durationText: String {
@@ -92,5 +96,12 @@ struct Track: Identifiable, Hashable, Codable {
       sourceScore: sourceScore,
       reasonSignals: reasonSignals
     )
+  }
+}
+
+private extension String {
+  var trimmedNilIfEmpty: String? {
+    let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 }

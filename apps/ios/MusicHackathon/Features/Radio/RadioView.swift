@@ -24,6 +24,7 @@ struct RadioView: View {
 
           NowPlayingSetCard(
             track: displayTrack,
+            station: radioStation.station,
             currentItem: radioStation.currentItem,
             queueItems: radioStation.upNextItems,
             status: panelStatus,
@@ -115,9 +116,11 @@ struct RadioView: View {
         await radioStation.startStation()
       }
     case .onAir:
-      if radioStation.currentItem == nil {
+      if playbackController.currentSpeech != nil {
+        playbackController.togglePlayback()
+      } else if radioStation.currentItem == nil {
         Task {
-          await radioStation.playNext()
+          await radioStation.startStation()
         }
       } else {
         playbackController.togglePlayback()
@@ -217,7 +220,10 @@ private struct RadioHeaderCard: View {
 }
 
 private struct NowPlayingSetCard: View {
+  @Environment(ImageAssetStore.self) private var imageStore
+
   let track: Track
+  let station: RadioStation?
   let currentItem: RadioQueueItem?
   let queueItems: [RadioQueueItem]
   let status: RadioPanelStatus
@@ -246,18 +252,22 @@ private struct NowPlayingSetCard: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(alignment: .top) {
-        VStack(alignment: .leading, spacing: 6) {
-          Text(track.album)
-            .font(.system(size: 28, weight: .heavy, design: .rounded))
-            .foregroundStyle(.black)
-            .lineLimit(1)
-            .minimumScaleFactor(0.72)
+        HStack(alignment: .top, spacing: 12) {
+          artwork
 
-          Text(sourceText)
-            .font(.system(size: 18, weight: .bold, design: .rounded))
-            .foregroundStyle(.black.opacity(0.38))
-            .lineLimit(1)
-            .minimumScaleFactor(0.72)
+          VStack(alignment: .leading, spacing: 6) {
+            Text(track.album)
+              .font(.system(size: 28, weight: .heavy, design: .rounded))
+              .foregroundStyle(.black)
+              .lineLimit(1)
+              .minimumScaleFactor(0.72)
+
+            Text(sourceText)
+              .font(.system(size: 18, weight: .bold, design: .rounded))
+              .foregroundStyle(.black.opacity(0.38))
+              .lineLimit(1)
+              .minimumScaleFactor(0.72)
+          }
         }
 
         Spacer(minLength: 18)
@@ -333,6 +343,43 @@ private struct NowPlayingSetCard: View {
     }
     .shadow(color: .black.opacity(0.18), radius: 26, y: 16)
     .accessibilityElement(children: .contain)
+  }
+
+  private var artwork: some View {
+    ArtworkImageView(resolution: artworkResolution, showsLoadingIndicator: false) {
+      ZStack {
+        Color.black.opacity(0.08)
+
+        Image(systemName: track.artworkSystemName)
+          .font(.system(size: 22, weight: .bold))
+          .foregroundStyle(.black.opacity(0.34))
+      }
+    }
+    .frame(width: 66, height: 66)
+    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 14, style: .continuous)
+        .stroke(.black.opacity(0.08), lineWidth: 1)
+    }
+    .accessibilityHidden(true)
+  }
+
+  private var artworkResolution: ArtworkResolution {
+    let stationID = station?.id ?? sourceText
+    let remoteURLs: [URL?] = [track.artworkURL]
+    let hasRemoteArtwork = remoteURLs.compactMap { $0 }.isEmpty == false
+    return ArtworkResolution(
+      overrideSource: hasRemoteArtwork ? nil : station.flatMap { imageStore.coverSource(for: $0.id) },
+      remoteURLs: remoteURLs,
+      bundledFallback: BundledCoverCatalog.fallbackSource(
+        forID: stationID,
+        title: station?.title ?? track.album,
+        genre: track.mood
+      ),
+      fallbackSeed: track.radioIdentity,
+      fallbackTitle: track.title,
+      fallbackColorHex: "#D9523A"
+    )
   }
 
   private var playButtonSystemImage: String {
@@ -571,4 +618,6 @@ private enum SpectrumBarPresets {
   .environment(RadioStationController(playbackController: playbackController))
   .environment(MusicAuthorizationService())
   .environment(AppleMusicLibraryStore())
+  .environment(ImageAssetStore())
+  .environment(ArtworkAnalysisStore())
 }

@@ -617,6 +617,8 @@ private struct DiscoverCardStack: View {
 }
 
 private struct DiscoverStationCard: View {
+  @Environment(ImageAssetStore.self) private var imageStore
+
   let station: DiscoverStation
   let isActive: Bool
   let isPlaying: Bool
@@ -630,7 +632,7 @@ private struct DiscoverStationCard: View {
     VStack(spacing: 0) {
       Button(action: onPlayToggle) {
         ZStack {
-          stationGradient
+          stationArtwork
 
           Circle()
             .fill(.white.opacity(0.08))
@@ -732,6 +734,38 @@ private struct DiscoverStationCard: View {
     .accessibilityElement(children: .contain)
   }
 
+  private var stationArtwork: some View {
+    ArtworkImageView(resolution: artworkResolution, showsLoadingIndicator: false) {
+      stationGradient
+    }
+    .overlay {
+      LinearGradient(
+        colors: [
+          .black.opacity(0.08),
+          .black.opacity(0.18),
+          .black.opacity(0.42)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+      )
+    }
+  }
+
+  private var artworkResolution: ArtworkResolution {
+    ArtworkResolution(
+      overrideSource: imageStore.coverSource(for: station.id),
+      remoteURLs: station.artworkURLs.map(Optional.some),
+      bundledFallback: BundledCoverCatalog.fallbackSource(
+        forID: station.id,
+        title: station.title,
+        genre: station.genre
+      ),
+      fallbackSeed: station.id,
+      fallbackTitle: station.title,
+      fallbackColorHex: station.colorHex
+    )
+  }
+
   private var stationGradient: some View {
     LinearGradient(
       colors: [
@@ -805,4 +839,7 @@ private struct DiscoverStationDrawer: View {
     .environment(playbackController)
     .environment(RadioStationController(playbackController: playbackController))
     .environment(MusicAuthorizationService())
+    .environment(AppleMusicLibraryStore())
+    .environment(ImageAssetStore())
+    .environment(ArtworkAnalysisStore())
 }

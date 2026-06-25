@@ -239,12 +239,12 @@ enum DiagnosticsPayload {
   static func track(_ track: Track) -> [String: String] {
     var payload: [String: String] = [
       "track_key_hash": DiagnosticsRedactor.hash(track.radioIdentity),
-      "has_apple_music_id": bool(track.appleMusicID != nil),
+      "has_apple_music_id": bool(track.normalizedAppleMusicID != nil),
       "has_preview_url": bool(track.previewURL != nil),
       "duration_seconds": String(Int(track.duration.rounded()))
     ]
 
-    if let appleMusicID = track.appleMusicID {
+    if let appleMusicID = track.normalizedAppleMusicID {
       payload["apple_music_id_hash"] = DiagnosticsRedactor.hash(appleMusicID)
     }
 

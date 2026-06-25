@@ -202,7 +202,7 @@ struct RadioTrackPayload: Codable, Equatable {
     duration = track.duration
     artworkURL = track.artworkURL
     previewURL = track.previewURL
-    appleMusicID = track.appleMusicID
+    appleMusicID = track.normalizedAppleMusicID
     isExplicit = track.isExplicit
     self.playlistName = playlistName ?? track.playlistName
     self.source = source ?? track.source
@@ -562,7 +562,7 @@ private struct RadioStationPayload: Decodable {
   }
 
   func station() throws -> RadioStation {
-    let queueItems = try items.map { try $0.queueItem() }
+    let queueItems = items.compactMap { try? $0.queueItem() }
     guard !queueItems.isEmpty else {
       throw RadioStationClientError.emptyStation
     }
@@ -605,6 +605,7 @@ private struct RadioStationItemPayload: Decodable {
   let isExplicit: Bool?
   let sourceTitle: String?
   let source: String?
+  let sourceLane: String?
   let reason: String?
   let handoffText: String?
 
@@ -627,6 +628,7 @@ private struct RadioStationItemPayload: Decodable {
     case isExplicit
     case sourceTitle
     case source
+    case sourceLane
     case reason
     case handoffText
   }
@@ -644,15 +646,19 @@ private struct RadioStationItemPayload: Decodable {
     artworkSystemName = try container.decodeIfPresent(String.self, forKey: .artworkSystemName)
     artworkURL = try container.decodeIfPresent(URL.self, forKey: .artworkURL)
       ?? container.decodeIfPresent(URL.self, forKey: .artworkUrl)
-    previewURL = try container.decodeIfPresent(URL.self, forKey: .previewURL)
+    let rawPreviewURL = try container.decodeIfPresent(URL.self, forKey: .previewURL)
       ?? container.decodeIfPresent(URL.self, forKey: .previewUrl)
-    appleMusicID = try container.decodeIfPresent(String.self, forKey: .appleMusicID)
-      ?? container.decodeIfPresent(String.self, forKey: .appleMusicId)
+    previewURL = rawPreviewURL?.playableRemoteAudioURL
+    appleMusicID = (
+      try container.decodeIfPresent(String.self, forKey: .appleMusicID)
+        ?? container.decodeIfPresent(String.self, forKey: .appleMusicId)
+    )?.trimmedNilIfEmpty
     isExplicit = try container.decodeIfPresent(Bool.self, forKey: .isExplicit)
-    sourceTitle = try container.decodeIfPresent(String.self, forKey: .sourceTitle)
-    source = try container.decodeIfPresent(String.self, forKey: .source)
-    reason = try container.decodeIfPresent(String.self, forKey: .reason)
-    handoffText = try container.decodeIfPresent(String.self, forKey: .handoffText)
+    sourceTitle = try container.decodeIfPresent(String.self, forKey: .sourceTitle)?.trimmedNilIfEmpty
+    source = try container.decodeIfPresent(String.self, forKey: .source)?.trimmedNilIfEmpty
+    sourceLane = try container.decodeIfPresent(String.self, forKey: .sourceLane)?.trimmedNilIfEmpty
+    reason = try container.decodeIfPresent(String.self, forKey: .reason)?.trimmedNilIfEmpty
+    handoffText = try container.decodeIfPresent(String.self, forKey: .handoffText)?.trimmedNilIfEmpty
   }
 
   func queueItem() throws -> RadioQueueItem {
@@ -666,7 +672,9 @@ private struct RadioStationItemPayload: Decodable {
       artworkURL: artworkURL,
       previewURL: previewURL,
       appleMusicID: appleMusicID,
-      isExplicit: isExplicit ?? false
+      isExplicit: isExplicit ?? false,
+      source: source,
+      sourceLane: sourceLane
     )
 
     guard track.isPlayable else {
@@ -674,12 +682,21 @@ private struct RadioStationItemPayload: Decodable {
     }
 
     return RadioQueueItem(
-      id: id ?? track.radioIdentity,
+      id: id?.trimmedNilIfEmpty ?? track.radioIdentity,
       track: track,
-      sourceTitle: sourceTitle ?? source ?? "Backend station",
+      sourceTitle: sourceTitle ?? sourceLane ?? source ?? "Backend station",
       reason: reason ?? "Queued by the backend station.",
       handoffText: handoffText
     )
+  }
+}
+
+private extension URL {
+  var playableRemoteAudioURL: URL? {
+    guard let scheme = scheme?.lowercased(), ["http", "https"].contains(scheme), host != nil else {
+      return nil
+    }
+    return self
   }
 }
 

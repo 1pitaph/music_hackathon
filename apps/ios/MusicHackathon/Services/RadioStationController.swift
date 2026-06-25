@@ -55,6 +55,11 @@ final class RadioStationController {
         await self?.handlePlaybackFinished(kind)
       }
     }
+    playbackController.onPlaybackFailed = { [weak self] context in
+      Task { @MainActor in
+        await self?.handlePlaybackFailed(context)
+      }
+    }
   }
 
   var hasStationContent: Bool {
@@ -130,33 +135,22 @@ final class RadioStationController {
       return
     }
 
-    if reason == .automaticCompletion,
-       let finishedItem = currentItem {
+    if reason == .automaticCompletion, let finishedItem = currentItem {
       await recordMemoryEvent(type: "complete", track: finishedItem.track)
       history.append(finishedItem)
       currentItem = nil
 
-      if let nextItem = queue.first,
-         let transition = transitionCopy(from: finishedItem, to: nextItem) {
-        prefetchStationExtensionIfNeeded()
-        diagnostics?.record(
-          .notice,
-          chain: .playbackSpeech,
-          event: "transition_selected",
-          message: "开始播放曲目间过渡语音。",
-          payload: [
-            "from_item_hash": DiagnosticsRedactor.hash(finishedItem.id),
-            "to_item_hash": DiagnosticsRedactor.hash(nextItem.id),
-            "speech_id_hash": DiagnosticsRedactor.hash(transition.id)
-          ]
-        )
-        playbackController.playSpeech(transition.playbackSegment)
+      if playTransitionIfAvailable(from: finishedItem, reason: reason) {
         return
       }
-    } else if reason == .manual, let currentItem {
-      await recordMemoryEvent(type: "skip", track: currentItem.track)
-      history.append(currentItem)
-      self.currentItem = nil
+    } else if reason == .manual, let skippedItem = currentItem {
+      await recordMemoryEvent(type: "skip", track: skippedItem.track)
+      history.append(skippedItem)
+      currentItem = nil
+
+      if playTransitionIfAvailable(from: skippedItem, reason: reason) {
+        return
+      }
     }
 
     if queue.isEmpty, let extensionTask {
@@ -697,10 +691,74 @@ final class RadioStationController {
     }
   }
 
-  private func transitionCopy(from finishedItem: RadioQueueItem, to nextItem: RadioQueueItem) -> RadioTransitionCopy? {
-    station?.speech?.betweenTracks.first { copy in
-      idsMatch(copy.fromItemId, finishedItem) && idsMatch(copy.toItemId, nextItem)
+  private func handlePlaybackFailed(_ context: PlaybackFailureContext) async {
+    guard let failedItem = currentItem else { return }
+    guard failedItem.track.id == context.track.id || failedItem.track.radioIdentity == context.track.radioIdentity else {
+      return
     }
+
+    diagnostics?.record(
+      .warning,
+      chain: .radioStation,
+      event: "playback_failed_auto_skip",
+      message: "当前电台曲目播放失败，自动跳到下一首。",
+      payload: DiagnosticsPayload.merge(
+        [
+          "failed_phase": context.phase,
+          "item_id_hash": DiagnosticsRedactor.hash(failedItem.id)
+        ],
+        DiagnosticsPayload.track(failedItem.track)
+      )
+    )
+
+    await recordMemoryEvent(type: "playback_failed", track: failedItem.track)
+    currentItem = nil
+    errorMessage = nil
+    await playNext(reason: .playbackFailure)
+  }
+
+  private func transitionCopy(from finishedItem: RadioQueueItem, to nextItem: RadioQueueItem) -> RadioTransitionCopy? {
+    if let transition = station?.speech?.betweenTracks.first(where: { copy in
+      idsMatch(copy.fromItemId, finishedItem) && idsMatch(copy.toItemId, nextItem)
+    }) {
+      return transition
+    }
+
+    guard let handoffText = nextItem.handoffText?.trimmedNilIfEmpty else { return nil }
+    return RadioTransitionCopy(
+      id: "handoff-\(finishedItem.id)-\(nextItem.id)",
+      fromItemId: finishedItem.id,
+      toItemId: nextItem.id,
+      text: handoffText,
+      displayText: handoffText,
+      agent: "handoff_text"
+    )
+  }
+
+  private func playTransitionIfAvailable(
+    from finishedItem: RadioQueueItem,
+    reason: RadioAdvanceReason
+  ) -> Bool {
+    guard let nextItem = queue.first,
+          let transition = transitionCopy(from: finishedItem, to: nextItem) else {
+      return false
+    }
+
+    prefetchStationExtensionIfNeeded()
+    diagnostics?.record(
+      .notice,
+      chain: .playbackSpeech,
+      event: "transition_selected",
+      message: "开始播放曲目间过渡语音。",
+      payload: [
+        "advance_reason": reason.diagnosticValue,
+        "from_item_hash": DiagnosticsRedactor.hash(finishedItem.id),
+        "to_item_hash": DiagnosticsRedactor.hash(nextItem.id),
+        "speech_id_hash": DiagnosticsRedactor.hash(transition.id)
+      ]
+    )
+    playbackController.playSpeech(transition.playbackSegment)
+    return true
   }
 
   private func idsMatch(_ id: String, _ item: RadioQueueItem) -> Bool {
@@ -751,6 +809,7 @@ enum RadioAdvanceReason {
   case stationStart
   case automaticCompletion
   case speechCompletion
+  case playbackFailure
 }
 
 private extension RadioAdvanceReason {
@@ -764,6 +823,15 @@ private extension RadioAdvanceReason {
       "automatic_completion"
     case .speechCompletion:
       "speech_completion"
+    case .playbackFailure:
+      "playback_failure"
     }
+  }
+}
+
+private extension String {
+  var trimmedNilIfEmpty: String? {
+    let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 }

@@ -173,6 +173,8 @@ class RadioStationItem(BaseModel):
   appleMusicID: str | None = None
   isExplicit: bool = False
   sourceTitle: str = "Backend station"
+  source: str | None = None
+  sourceLane: str | None = None
   reason: str = "Queued by the backend station."
   handoffText: str | None = None
 

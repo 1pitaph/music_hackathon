@@ -150,12 +150,26 @@ private struct PlaylistArtworkThumbnail: View {
   let size: CGFloat
 
   var body: some View {
-    RemoteArtworkView(urls: playlist.artworkCandidateURLs) {
+    ArtworkImageView(resolution: artworkResolution) {
       fallback
     }
     .frame(width: size, height: size)
     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     .accessibilityHidden(true)
+  }
+
+  private var artworkResolution: ArtworkResolution {
+    ArtworkResolution(
+      remoteURLs: playlist.artworkCandidateURLs,
+      bundledFallback: BundledCoverCatalog.fallbackSource(
+        forID: playlist.id,
+        title: playlist.name,
+        genre: nil
+      ),
+      fallbackSeed: playlist.id,
+      fallbackTitle: playlist.name,
+      fallbackColorHex: ArchiveStationItem.colorHex(for: playlist.id)
+    )
   }
 
   private var fallback: some View {
@@ -172,12 +186,26 @@ private struct TrackArtworkThumbnail: View {
   let size: CGFloat
 
   var body: some View {
-    RemoteArtworkView(urls: [track.artworkURL]) {
+    ArtworkImageView(resolution: artworkResolution) {
       fallback
     }
     .frame(width: size, height: size)
     .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
     .accessibilityHidden(true)
+  }
+
+  private var artworkResolution: ArtworkResolution {
+    ArtworkResolution(
+      remoteURLs: [track.artworkURL],
+      bundledFallback: BundledCoverCatalog.fallbackSource(
+        forID: track.radioIdentity,
+        title: track.title,
+        genre: track.mood
+      ),
+      fallbackSeed: track.radioIdentity,
+      fallbackTitle: track.title,
+      fallbackColorHex: ArchiveStationItem.colorHex(for: track.radioIdentity)
+    )
   }
 
   private var fallback: some View {
@@ -196,4 +224,6 @@ private struct TrackArtworkThumbnail: View {
   }
   .environment(MusicAuthorizationService())
   .environment(AppleMusicLibraryStore())
+  .environment(ImageAssetStore())
+  .environment(ArtworkAnalysisStore())
 }

@@ -7,6 +7,7 @@ struct SettingsView: View {
   @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
   @Environment(RadioStationController.self) private var radioStation
   @Environment(DiagnosticsStore.self) private var diagnostics
+  @Environment(ImageAssetStore.self) private var imageAssetStore
   @Environment(\.openURL) private var openURL
 
   @AppStorage(RadioHostVoiceSettings.speakerIDKey) private var selectedHostSpeakerID = ""
@@ -28,6 +29,7 @@ struct SettingsView: View {
       speechVoiceSection
       dataSourceSection
       privacySection
+      artworkSection
       localMemorySection
       aboutSection
     }
@@ -269,6 +271,20 @@ struct SettingsView: View {
       } label: {
         Label("清空本地档案", systemImage: "trash")
       }
+    }
+  }
+
+  private var artworkSection: some View {
+    Section("图片与封面") {
+      Button(role: .destructive) {
+        imageAssetStore.clearAllCustomImages()
+      } label: {
+        Label("清除本地头像与封面", systemImage: "trash")
+      }
+
+      Text("只会删除本机保存的用户头像和自定义封面，不影响 Apple Music 封面或内置封面素材。")
+        .font(.footnote)
+        .foregroundStyle(.secondary)
     }
   }
 
@@ -645,4 +661,6 @@ private enum AppleMusicAlert: Identifiable {
   .environment(MusicAuthorizationService())
   .environment(AppleMusicLibraryStore())
   .environment(DiagnosticsStore.preview())
+  .environment(ImageAssetStore())
+  .environment(ArtworkAnalysisStore())
 }

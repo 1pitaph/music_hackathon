@@ -8,6 +8,18 @@ struct AppleMusicPlaylistSummary: Identifiable, Hashable, Codable {
   let artworkURL: URL?
 }
 
+enum AppleMusicCatalogResolutionMethod: String {
+  case id
+  case searchFallback
+  case search
+}
+
+struct AppleMusicCatalogResolution {
+  let song: Song
+  let method: AppleMusicCatalogResolutionMethod
+  let idError: Error?
+}
+
 struct AppleMusicCatalogService {
   func featuredTracks() async throws -> [Track] {
     try await tracks(matching: "WRABEL up up above", limit: 6)
@@ -63,22 +75,51 @@ struct AppleMusicCatalogService {
     return result
   }
 
-  func song(for track: Track) async throws -> Song {
-    if let appleMusicID = track.appleMusicID {
-      return try await song(id: appleMusicID)
+  func resolveSong(for track: Track) async throws -> AppleMusicCatalogResolution {
+    if let appleMusicID = track.normalizedAppleMusicID {
+      do {
+        return AppleMusicCatalogResolution(
+          song: try await song(id: appleMusicID),
+          method: .id,
+          idError: nil
+        )
+      } catch {
+        if let song = try await song(matching: track) {
+          return AppleMusicCatalogResolution(
+            song: song,
+            method: .searchFallback,
+            idError: error
+          )
+        }
+
+        throw error
+      }
     }
 
     if let song = try await song(matching: track) {
-      return song
+      return AppleMusicCatalogResolution(
+        song: song,
+        method: .search,
+        idError: nil
+      )
     }
 
     throw AppleMusicCatalogError.songUnavailable
   }
 
+  func song(for track: Track) async throws -> Song {
+    try await resolveSong(for: track).song
+  }
+
   func song(id: String) async throws -> Song {
+    let cleanedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !cleanedID.isEmpty else {
+      throw AppleMusicCatalogError.songUnavailable
+    }
+
     let request = MusicCatalogResourceRequest<Song>(
       matching: \.id,
-      equalTo: MusicItemID(id)
+      equalTo: MusicItemID(cleanedID)
     )
     let response = try await request.response()
 
@@ -104,9 +145,16 @@ struct AppleMusicCatalogService {
     }
   }
 
-  func tracks(in playlist: Playlist, playlistName: String? = nil) async throws -> [Track] {
+  func tracks(
+    in playlist: Playlist,
+    playlistName: String? = nil,
+    pageSize: Int = 100
+  ) async throws -> [Track] {
     let detailedPlaylist = try await playlist.with([.entries])
-    return detailedPlaylist.entries?.compactMap { entry in
+    guard let entries = detailedPlaylist.entries else { return [] }
+    let allEntries = try await allItems(from: entries, pageSize: max(pageSize, 1))
+
+    return allEntries.compactMap { entry in
       guard case let .song(song) = entry.item else { return nil }
       return Self.track(
         from: song,
@@ -114,7 +162,7 @@ struct AppleMusicCatalogService {
         source: "apple_music_library",
         sourceLane: "playlist_entry"
       )
-    } ?? []
+    }
   }
 
   private func songs(matching term: String, limit: Int) async throws -> [Song] {
@@ -126,12 +174,16 @@ struct AppleMusicCatalogService {
   }
 
   private func song(matching track: Track) async throws -> Song? {
-    let normalizedTitle = track.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    let normalizedArtist = track.artist.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    let songs = try await songs(matching: "\(track.title) \(track.artist)", limit: 8)
+    let title = track.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    let artist = track.artist.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !title.isEmpty || !artist.isEmpty else { return nil }
+
+    let normalizedTitle = title.catalogMatchKey
+    let normalizedArtist = artist.catalogMatchKey
+    let songs = try await songs(matching: "\(title) \(artist)", limit: 8)
 
     return songs.first { song in
-      song.title.lowercased() == normalizedTitle && song.artistName.lowercased() == normalizedArtist
+      song.title.catalogMatchKey == normalizedTitle && song.artistName.catalogMatchKey == normalizedArtist
     } ?? songs.first
   }
 
@@ -198,37 +250,46 @@ struct AppleMusicCatalogService {
   }
 }
 
+private extension String {
+  var catalogMatchKey: String {
+    folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+      .lowercased()
+  }
+}
+
 extension AppleMusicCatalogService: AppleMusicLibraryProviding {
   func librarySnapshot(
-    playlistLimit: Int = 12,
-    tracksPerPlaylistLimit: Int = 8,
-    fallbackSongLimit: Int = 36
+    options: AppleMusicLibraryLoadOptions = AppleMusicLibraryLoadOptions()
   ) async throws -> AppleMusicLibrarySnapshot {
+    let pageSize = max(options.pageSize, 1)
     var request = MusicLibraryRequest<Playlist>()
-    request.limit = playlistLimit
+    request.limit = pageSize
 
     let response = try await request.response()
+    let playlists = try await allItems(from: response.items, pageSize: pageSize)
     var playlistSnapshots: [AppleMusicPlaylistSnapshot] = []
     var playlistTracks: [Track] = []
 
-    for playlist in response.items {
-      let tracks = (try? await tracks(in: playlist, playlistName: playlist.name)) ?? []
-      let limitedTracks = Array(tracks.prefix(tracksPerPlaylistLimit))
-      playlistTracks.append(contentsOf: limitedTracks)
+    for playlist in playlists {
+      let tracks = (try? await tracks(in: playlist, playlistName: playlist.name, pageSize: pageSize)) ?? []
+      playlistTracks.append(contentsOf: tracks)
       playlistSnapshots.append(
         AppleMusicPlaylistSnapshot(
           id: playlist.id.rawValue,
           name: playlist.name,
           curatorName: playlist.curatorName,
           artworkURL: Self.normalizedArtworkURL(playlist.artwork?.url(width: 512, height: 512)),
-          tracks: limitedTracks
+          tracks: tracks
         )
       )
     }
 
-    let tracks = uniqued(playlistTracks).isEmpty
-      ? try await librarySongs(limit: fallbackSongLimit)
-      : uniqued(playlistTracks)
+    let libraryTracks = options.includeLibrarySongs
+      ? try await librarySongs(pageSize: pageSize)
+      : []
+    let tracks = uniqued(playlistTracks + libraryTracks)
 
     return AppleMusicLibrarySnapshot(
       playlists: playlistSnapshots,
@@ -236,13 +297,14 @@ extension AppleMusicCatalogService: AppleMusicLibraryProviding {
     )
   }
 
-  private func librarySongs(limit: Int) async throws -> [Track] {
+  private func librarySongs(pageSize: Int) async throws -> [Track] {
     var request = MusicLibraryRequest<Song>()
-    request.limit = limit
+    request.limit = pageSize
 
     let response = try await request.response()
+    let songs = try await allItems(from: response.items, pageSize: pageSize)
     return uniqued(
-      response.items.map {
+      songs.map {
         Self.track(
           from: $0,
           playlistName: "Apple Music Library",
@@ -251,6 +313,21 @@ extension AppleMusicCatalogService: AppleMusicLibraryProviding {
         )
       }
     )
+  }
+
+  private func allItems<Item: MusicItem>(
+    from initialItems: MusicItemCollection<Item>,
+    pageSize: Int
+  ) async throws -> [Item] {
+    var collection = initialItems
+    var items = Array(collection)
+
+    while let nextBatch = try await collection.nextBatch(limit: pageSize) {
+      items.append(contentsOf: nextBatch)
+      collection = nextBatch
+    }
+
+    return items
   }
 
   private func uniqued(_ tracks: [Track]) -> [Track] {
