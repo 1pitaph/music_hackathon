@@ -8,8 +8,9 @@ struct AppleMusicPlaylistSummary: Identifiable, Hashable, Codable {
   let artworkURL: URL?
 }
 
-enum AppleMusicCatalogResolutionMethod: String {
+enum AppleMusicCatalogResolutionMethod: String, Codable {
   case id
+  case cachedID = "cached_id"
   case searchFallback
   case search
 }
@@ -31,7 +32,13 @@ extension TrackArtworkEnriching {
   }
 }
 
-struct AppleMusicCatalogService: TrackArtworkEnriching {
+struct AppleMusicCatalogService: TrackArtworkEnriching, Sendable {
+  private let resolutionCache: (any AppleMusicCatalogResolutionCaching)?
+
+  init(resolutionCache: (any AppleMusicCatalogResolutionCaching)? = AppleMusicLibraryCacheStore.shared) {
+    self.resolutionCache = resolutionCache
+  }
+
   func featuredTracks() async throws -> [Track] {
     try await tracks(matching: "WRABEL up up above", limit: 6)
   }
@@ -40,10 +47,15 @@ struct AppleMusicCatalogService: TrackArtworkEnriching {
     await withTaskGroup(of: (Int, Track).self) { group in
       for (index, track) in tracks.enumerated() {
         group.addTask {
+          if let cachedTrack = try? await resolutionCache?.cachedResolvedTrack(for: track, now: Date()) {
+            return (index, cachedTrack)
+          }
+
           guard let song = try? await song(matching: track) else {
             return (index, track)
           }
 
+          await storeResolvedSong(song, for: track, method: .search)
           return (index, Self.track(from: song, fallback: track))
         }
       }
@@ -67,6 +79,11 @@ struct AppleMusicCatalogService: TrackArtworkEnriching {
         group.addTask {
           guard !track.hasRealArtwork else {
             return (index, track)
+          }
+
+          if let cachedTrack = try? await resolutionCache?.cachedResolvedTrack(for: track, now: Date()),
+             cachedTrack.hasRealArtwork {
+            return (index, cachedTrack)
           }
 
           guard let resolution = try? await resolveSong(for: track) else {
@@ -116,15 +133,34 @@ struct AppleMusicCatalogService: TrackArtworkEnriching {
   }
 
   func resolveSong(for track: Track) async throws -> AppleMusicCatalogResolution {
+    let cachedTrack = try? await resolutionCache?.cachedResolvedTrack(for: track, now: Date())
+
     if let appleMusicID = track.normalizedAppleMusicID {
       do {
+        let song = try await song(id: appleMusicID)
+        await storeResolvedSong(song, for: track, method: .id)
         return AppleMusicCatalogResolution(
-          song: try await song(id: appleMusicID),
+          song: song,
           method: .id,
           idError: nil
         )
       } catch {
+        if let cachedID = cachedTrack?.normalizedAppleMusicID, cachedID != appleMusicID {
+          do {
+            let cachedSong = try await song(id: cachedID)
+            await storeResolvedSong(cachedSong, for: track, method: .cachedID)
+            return AppleMusicCatalogResolution(
+              song: cachedSong,
+              method: .cachedID,
+              idError: error
+            )
+          } catch {
+            try? await resolutionCache?.invalidateResolution(for: track)
+          }
+        }
+
         if let song = try await song(matching: track) {
+          await storeResolvedSong(song, for: track, method: .searchFallback)
           return AppleMusicCatalogResolution(
             song: song,
             method: .searchFallback,
@@ -132,11 +168,27 @@ struct AppleMusicCatalogService: TrackArtworkEnriching {
           )
         }
 
+        try? await resolutionCache?.recordResolutionFailure(for: track, now: Date())
         throw error
       }
     }
 
+    if let cachedID = cachedTrack?.normalizedAppleMusicID {
+      do {
+        let cachedSong = try await song(id: cachedID)
+        await storeResolvedSong(cachedSong, for: track, method: .cachedID)
+        return AppleMusicCatalogResolution(
+          song: cachedSong,
+          method: .cachedID,
+          idError: nil
+        )
+      } catch {
+        try? await resolutionCache?.invalidateResolution(for: track)
+      }
+    }
+
     if let song = try await song(matching: track) {
+      await storeResolvedSong(song, for: track, method: .search)
       return AppleMusicCatalogResolution(
         song: song,
         method: .search,
@@ -144,7 +196,12 @@ struct AppleMusicCatalogService: TrackArtworkEnriching {
       )
     }
 
+    try? await resolutionCache?.recordResolutionFailure(for: track, now: Date())
     throw AppleMusicCatalogError.songUnavailable
+  }
+
+  func invalidateCachedResolution(for track: Track) async {
+    try? await resolutionCache?.invalidateResolution(for: track)
   }
 
   func song(for track: Track) async throws -> Song {
@@ -225,6 +282,20 @@ struct AppleMusicCatalogService: TrackArtworkEnriching {
     return songs.first { song in
       song.title.catalogMatchKey == normalizedTitle && song.artistName.catalogMatchKey == normalizedArtist
     } ?? songs.first
+  }
+
+  private func storeResolvedSong(
+    _ song: Song,
+    for track: Track,
+    method: AppleMusicCatalogResolutionMethod
+  ) async {
+    let resolvedTrack = Self.track(from: song, fallback: track)
+    try? await resolutionCache?.storeResolvedTrack(
+      resolvedTrack,
+      for: track,
+      method: method,
+      now: Date()
+    )
   }
 
   static func track(
@@ -311,9 +382,16 @@ extension AppleMusicCatalogService: AppleMusicLibraryProviding {
     let playlists = try await allItems(from: response.items, pageSize: pageSize)
     var playlistSnapshots: [AppleMusicPlaylistSnapshot] = []
     var playlistTracks: [Track] = []
+    var isComplete = true
 
     for playlist in playlists {
-      let rawTracks = (try? await tracks(in: playlist, playlistName: playlist.name, pageSize: pageSize)) ?? []
+      let rawTracks: [Track]
+      do {
+        rawTracks = try await tracks(in: playlist, playlistName: playlist.name, pageSize: pageSize)
+      } catch {
+        isComplete = false
+        continue
+      }
       let tracks = await tracksWithRealArtwork(rawTracks)
       let artworkURL = Self.normalizedArtworkURL(playlist.artwork?.url(width: 512, height: 512))
         ?? tracks.first?.artworkURL
@@ -338,7 +416,8 @@ extension AppleMusicCatalogService: AppleMusicLibraryProviding {
 
     return AppleMusicLibrarySnapshot(
       playlists: playlistSnapshots,
-      tracks: tracks
+      tracks: tracks,
+      isComplete: isComplete
     )
   }
 

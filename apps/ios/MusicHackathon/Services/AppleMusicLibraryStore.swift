@@ -2,14 +2,25 @@ import Foundation
 import MusicKit
 import Observation
 
-struct AppleMusicLibrarySnapshot: Hashable {
+struct AppleMusicLibrarySnapshot: Hashable, Codable {
   var playlists: [AppleMusicPlaylistSnapshot]
   var tracks: [Track]
+  var isComplete: Bool
 
   static let empty = AppleMusicLibrarySnapshot(playlists: [], tracks: [])
+
+  init(
+    playlists: [AppleMusicPlaylistSnapshot],
+    tracks: [Track],
+    isComplete: Bool = true
+  ) {
+    self.playlists = playlists
+    self.tracks = tracks
+    self.isComplete = isComplete
+  }
 }
 
-struct AppleMusicPlaylistSnapshot: Identifiable, Hashable {
+struct AppleMusicPlaylistSnapshot: Identifiable, Hashable, Codable {
   let id: String
   let name: String
   let curatorName: String?
@@ -53,13 +64,18 @@ final class AppleMusicLibraryStore {
   var lastErrorMessage: String?
 
   @ObservationIgnored private let provider: any AppleMusicLibraryProviding
+  @ObservationIgnored private let cache: (any AppleMusicLibraryCaching)?
   @ObservationIgnored private let diagnostics: DiagnosticsStore?
+  @ObservationIgnored private var hasCompletedInitialLoad = false
+  @ObservationIgnored private var hasAttemptedAutomaticRefresh = false
 
   init(
     provider: any AppleMusicLibraryProviding = AppleMusicCatalogService(),
+    cache: (any AppleMusicLibraryCaching)? = AppleMusicLibraryCacheStore.shared,
     diagnostics: DiagnosticsStore? = nil
   ) {
     self.provider = provider
+    self.cache = cache
     self.diagnostics = diagnostics
   }
 
@@ -68,20 +84,50 @@ final class AppleMusicLibraryStore {
       try? await Task.sleep(for: .milliseconds(100))
     }
 
-    guard playlists.isEmpty, tracks.isEmpty else { return }
-    await refresh(authorizationStatus: authorizationStatus)
+    guard authorizationStatus == .authorized else {
+      await handleUnauthorized(authorizationStatus)
+      return
+    }
+
+    var shouldRefresh = playlists.isEmpty || tracks.isEmpty
+    if !hasCompletedInitialLoad {
+      let cachedResult = await loadCachedSnapshot()
+      if let cachedResult {
+        apply(cachedResult.snapshot, state: state(for: cachedResult.snapshot))
+        hasCompletedInitialLoad = true
+        shouldRefresh = cachedResult.isExpired
+
+        guard cachedResult.isExpired else {
+          return
+        }
+      } else {
+        shouldRefresh = true
+      }
+    }
+
+    guard !hasAttemptedAutomaticRefresh else { return }
+    guard shouldRefresh else { return }
+
+    hasAttemptedAutomaticRefresh = true
+    await refresh(
+      authorizationStatus: authorizationStatus,
+      preservesExistingSnapshotOnFailure: true
+    )
   }
 
   func refresh(authorizationStatus: MusicAuthorization.Status) async {
+    await refresh(
+      authorizationStatus: authorizationStatus,
+      preservesExistingSnapshotOnFailure: true
+    )
+  }
+
+  private func refresh(
+    authorizationStatus: MusicAuthorization.Status,
+    preservesExistingSnapshotOnFailure: Bool
+  ) async {
     guard authorizationStatus == .authorized else {
-      diagnostics?.record(
-        .info,
-        chain: .libraryAppleMusic,
-        event: "refresh_skipped",
-        message: L10n.tr("diagnostic.message.libraryRefreshSkippedUnauthorized"),
-        payload: ["authorization_status": authorizationStatus.diagnosticValue]
-      )
-      apply(.empty, state: .needsAuthorization)
+      await handleUnauthorized(authorizationStatus)
       return
     }
 
@@ -96,10 +142,10 @@ final class AppleMusicLibraryStore {
 
     do {
       let snapshot = try await provider.librarySnapshot(options: AppleMusicLibraryLoadOptions())
-      let nextState: AppleMusicLibraryState = snapshot.tracks.isEmpty && snapshot.playlists.allSatisfy { $0.tracks.isEmpty }
-        ? .empty
-        : .loaded
-      apply(snapshot, state: nextState)
+      let cachedSnapshot = await saveCachedSnapshot(snapshot) ?? snapshot
+      let nextState = state(for: cachedSnapshot)
+      apply(cachedSnapshot, state: nextState)
+      hasCompletedInitialLoad = true
       diagnostics?.record(
         nextState == .loaded ? .notice : .warning,
         chain: .libraryAppleMusic,
@@ -107,7 +153,8 @@ final class AppleMusicLibraryStore {
         message: L10n.tr("diagnostic.message.libraryRefreshSucceeded"),
         payload: [
           "playlist_count": String(snapshot.playlists.count),
-          "track_count": String(snapshot.tracks.count),
+          "track_count": String(cachedSnapshot.tracks.count),
+          "is_complete": DiagnosticsPayload.bool(snapshot.isComplete),
           "loaded_state": nextState.diagnosticValue
         ]
       )
@@ -118,7 +165,13 @@ final class AppleMusicLibraryStore {
       let message = rawMessage == "Unknown error"
         ? L10n.tr("appleMusicLibrary.error.unableToRead")
         : rawMessage
-      apply(.empty, state: .failed(message))
+      if preservesExistingSnapshotOnFailure, !playlists.isEmpty || !tracks.isEmpty {
+        state = state(for: AppleMusicLibrarySnapshot(playlists: playlists, tracks: tracks))
+        lastErrorMessage = message
+      } else {
+        apply(.empty, state: .failed(message))
+      }
+      hasCompletedInitialLoad = true
       diagnostics?.record(
         .error,
         chain: .libraryAppleMusic,
@@ -144,6 +197,85 @@ final class AppleMusicLibraryStore {
     } else {
       lastErrorMessage = nil
     }
+  }
+
+  private func state(for snapshot: AppleMusicLibrarySnapshot) -> AppleMusicLibraryState {
+    snapshot.tracks.isEmpty && snapshot.playlists.allSatisfy { $0.tracks.isEmpty }
+      ? .empty
+      : .loaded
+  }
+
+  private func loadCachedSnapshot() async -> AppleMusicLibraryCacheLoadResult? {
+    guard let cache else { return nil }
+
+    do {
+      let result = try await cache.loadSnapshot(now: Date())
+      if let result {
+        diagnostics?.record(
+          result.isExpired ? .info : .notice,
+          chain: .libraryAppleMusic,
+          event: "cache_load_success",
+          message: L10n.tr("diagnostic.message.libraryRefreshSucceeded"),
+          payload: [
+            "playlist_count": String(result.snapshot.playlists.count),
+            "track_count": String(result.snapshot.tracks.count),
+            "cache_expired": DiagnosticsPayload.bool(result.isExpired)
+          ]
+        )
+      }
+      return result
+    } catch {
+      diagnostics?.record(
+        .warning,
+        chain: .libraryAppleMusic,
+        event: "cache_load_failed",
+        message: L10n.tr("appleMusicLibrary.error.unableToRead"),
+        payload: DiagnosticsPayload.error(error)
+      )
+      return nil
+    }
+  }
+
+  private func saveCachedSnapshot(_ snapshot: AppleMusicLibrarySnapshot) async -> AppleMusicLibrarySnapshot? {
+    guard let cache else { return nil }
+
+    do {
+      let result = try await cache.saveSnapshot(snapshot, now: Date())
+      diagnostics?.record(
+        .info,
+        chain: .libraryAppleMusic,
+        event: "cache_save_success",
+        message: L10n.tr("diagnostic.message.libraryRefreshSucceeded"),
+        payload: [
+          "playlist_count": String(result.snapshot.playlists.count),
+          "track_count": String(result.snapshot.tracks.count),
+          "cache_expired": DiagnosticsPayload.bool(result.isExpired)
+        ]
+      )
+      return result.snapshot
+    } catch {
+      diagnostics?.record(
+        .warning,
+        chain: .libraryAppleMusic,
+        event: "cache_save_failed",
+        message: L10n.tr("diagnostic.message.libraryRefreshFailed"),
+        payload: DiagnosticsPayload.error(error)
+      )
+      return nil
+    }
+  }
+
+  private func handleUnauthorized(_ authorizationStatus: MusicAuthorization.Status) async {
+    diagnostics?.record(
+      .info,
+      chain: .libraryAppleMusic,
+      event: "refresh_skipped",
+      message: L10n.tr("diagnostic.message.libraryRefreshSkippedUnauthorized"),
+      payload: ["authorization_status": authorizationStatus.diagnosticValue]
+    )
+    try? await cache?.clear()
+    hasCompletedInitialLoad = true
+    apply(.empty, state: .needsAuthorization)
   }
 }
 

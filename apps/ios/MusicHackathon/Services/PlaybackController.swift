@@ -698,6 +698,10 @@ final class PlaybackController: RadioPlaybackControlling {
     attemptID: String,
     failedPhase: String
   ) -> Bool {
+    Task {
+      await catalogService.invalidateCachedResolution(for: originalTrack)
+    }
+
     guard let previewURL = resolvedTrack.previewURL ?? originalTrack.previewURL else {
       diagnostics?.record(
         .error,
@@ -1559,6 +1563,11 @@ final class PlaybackController: RadioPlaybackControlling {
     )
 
     guard let currentTrack, !didNotifyPlaybackFailed else { return }
+    if failureChain == .playbackAppleMusic {
+      Task {
+        await catalogService.invalidateCachedResolution(for: currentTrack)
+      }
+    }
     didNotifyPlaybackFailed = true
     onPlaybackFailed?(
       PlaybackFailureContext(

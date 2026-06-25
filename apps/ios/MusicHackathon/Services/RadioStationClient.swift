@@ -602,7 +602,7 @@ struct RadioTrackPayload: Codable, Equatable {
 }
 
 struct RadioStationClient: RadioStationFetching, DiscoverStationServing {
-  static let defaultBaseURL = URL(string: "https://musichackathon-production.up.railway.app")
+  static let defaultBaseURL = URL(string: "https://music.1pitaph.com")
 
   private let baseURL: URL?
   private let session: URLSession

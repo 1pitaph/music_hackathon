@@ -50,6 +50,8 @@
 		P10000000000000000000004 /* ArtworkAnalysisStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = P20000000000000000000004 /* ArtworkAnalysisStore.swift */; };
 		P10000000000000000000005 /* ArtworkImageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = P20000000000000000000005 /* ArtworkImageView.swift */; };
 		P10000000000000000000007 /* ArtworkImageSystemTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = P20000000000000000000007 /* ArtworkImageSystemTests.swift */; };
+		Q10000000000000000000001 /* AppleMusicLibraryCacheStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = Q20000000000000000000001 /* AppleMusicLibraryCacheStore.swift */; };
+		Q10000000000000000000002 /* AppleMusicLibraryCacheStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = Q20000000000000000000002 /* AppleMusicLibraryCacheStoreTests.swift */; };
 		R10000000000000000000001 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = R30000000000000000000001 /* Localizable.strings */; };
 		R10000000000000000000002 /* Localizable.stringsdict in Resources */ = {isa = PBXBuildFile; fileRef = R30000000000000000000002 /* Localizable.stringsdict */; };
 		R10000000000000000000003 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = R30000000000000000000003 /* InfoPlist.strings */; };
@@ -119,6 +121,8 @@
 		P20000000000000000000004 /* ArtworkAnalysisStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkAnalysisStore.swift; sourceTree = "<group>"; };
 		P20000000000000000000005 /* ArtworkImageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkImageView.swift; sourceTree = "<group>"; };
 		P20000000000000000000007 /* ArtworkImageSystemTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkImageSystemTests.swift; sourceTree = "<group>"; };
+		Q20000000000000000000001 /* AppleMusicLibraryCacheStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicLibraryCacheStore.swift; sourceTree = "<group>"; };
+		Q20000000000000000000002 /* AppleMusicLibraryCacheStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicLibraryCacheStoreTests.swift; sourceTree = "<group>"; };
 		R20000000000000000000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		R20000000000000000000002 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		R20000000000000000000003 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
@@ -231,6 +235,7 @@
 				A20000000000000000000007 /* MusicAuthorizationService.swift */,
 				E20000000000000000000001 /* AppleMusicCatalogService.swift */,
 				L20000000000000000000001 /* AppleMusicLibraryStore.swift */,
+				Q20000000000000000000001 /* AppleMusicLibraryCacheStore.swift */,
 				F20000000000000000000007 /* RadioStationController.swift */,
 				G20000000000000000000001 /* RadioStationClient.swift */,
 				H20000000000000000000001 /* RadioMemoryStore.swift */,
@@ -349,6 +354,7 @@
 				T20000000000000000000007 /* VirtualMusicLibraryTests.swift */,
 				T20000000000000000000008 /* MigrationModelsTests.swift */,
 				T20000000000000000000009 /* AppleMusicLibraryStoreTests.swift */,
+				Q20000000000000000000002 /* AppleMusicLibraryCacheStoreTests.swift */,
 				T20000000000000000000010 /* DiagnosticsLogWriterTests.swift */,
 				T20000000000000000000011 /* AppLanguageTests.swift */,
 				T20000000000000000000012 /* LocalizationResourceTests.swift */,
@@ -499,6 +505,7 @@
 				G10000000000000000000001 /* RadioStationClient.swift in Sources */,
 				H10000000000000000000001 /* RadioMemoryStore.swift in Sources */,
 				L10000000000000000000001 /* AppleMusicLibraryStore.swift in Sources */,
+				Q10000000000000000000001 /* AppleMusicLibraryCacheStore.swift in Sources */,
 				E10000000000000000000002 /* SpectrumAnalysisCache.swift in Sources */,
 				P10000000000000000000003 /* ImageAssetStore.swift in Sources */,
 				P10000000000000000000004 /* ArtworkAnalysisStore.swift in Sources */,
@@ -518,6 +525,7 @@
 				T10000000000000000000006 /* VirtualMusicLibraryTests.swift in Sources */,
 				T10000000000000000000007 /* MigrationModelsTests.swift in Sources */,
 				T10000000000000000000008 /* AppleMusicLibraryStoreTests.swift in Sources */,
+				Q10000000000000000000002 /* AppleMusicLibraryCacheStoreTests.swift in Sources */,
 				T10000000000000000000009 /* DiagnosticsLogWriterTests.swift in Sources */,
 				T10000000000000000000010 /* AppLanguageTests.swift in Sources */,
 				T10000000000000000000011 /* LocalizationResourceTests.swift in Sources */,

@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 final class AppleMusicLibraryStoreTests: XCTestCase {
   func testRefreshNeedsAuthorizationWhenAccessIsNotAuthorized() async {
-    let store = AppleMusicLibraryStore(provider: FakeLibraryProvider(snapshot: makeSnapshot()))
+    let store = AppleMusicLibraryStore(provider: FakeLibraryProvider(snapshot: makeSnapshot()), cache: nil)
 
     await store.refresh(authorizationStatus: .denied)
 
@@ -17,7 +17,7 @@ final class AppleMusicLibraryStoreTests: XCTestCase {
 
   func testRefreshLoadsSnapshotAndBuildsDiscoverStations() async {
     let snapshot = makeSnapshot()
-    let store = AppleMusicLibraryStore(provider: FakeLibraryProvider(snapshot: snapshot))
+    let store = AppleMusicLibraryStore(provider: FakeLibraryProvider(snapshot: snapshot), cache: nil)
 
     await store.refresh(authorizationStatus: .authorized)
 
@@ -30,7 +30,7 @@ final class AppleMusicLibraryStoreTests: XCTestCase {
 
   func testRefreshRequestsFullLibrarySnapshotOptions() async {
     let provider = FakeLibraryProvider(snapshot: makeSnapshot())
-    let store = AppleMusicLibraryStore(provider: provider)
+    let store = AppleMusicLibraryStore(provider: provider, cache: nil)
 
     await store.refresh(authorizationStatus: .authorized)
 
@@ -39,7 +39,7 @@ final class AppleMusicLibraryStoreTests: XCTestCase {
   }
 
   func testRefreshUsesEmptyStateWhenSnapshotHasNoPlayableTracks() async {
-    let store = AppleMusicLibraryStore(provider: FakeLibraryProvider(snapshot: .empty))
+    let store = AppleMusicLibraryStore(provider: FakeLibraryProvider(snapshot: .empty), cache: nil)
 
     await store.refresh(authorizationStatus: .authorized)
 
@@ -48,13 +48,43 @@ final class AppleMusicLibraryStoreTests: XCTestCase {
   }
 
   func testRefreshStoresFailureMessage() async {
-    let store = AppleMusicLibraryStore(provider: FakeLibraryProvider(error: TestError.unavailable))
+    let store = AppleMusicLibraryStore(provider: FakeLibraryProvider(error: TestError.unavailable), cache: nil)
 
     await store.refresh(authorizationStatus: .authorized)
 
     XCTAssertEqual(store.state, .failed("Library unavailable."))
     XCTAssertEqual(store.lastErrorMessage, "Library unavailable.")
     XCTAssertTrue(store.tracks.isEmpty)
+  }
+
+  func testLoadIfNeededUsesFreshCacheWithoutProviderRefresh() async throws {
+    let cache = try makeCache()
+    let cachedSnapshot = makeSnapshot(title: "Cached Signal")
+    try await cache.saveSnapshot(cachedSnapshot, now: Date())
+    let provider = FakeLibraryProvider(error: TestError.unavailable)
+    let store = AppleMusicLibraryStore(provider: provider, cache: cache)
+
+    await store.loadIfNeeded(authorizationStatus: .authorized)
+
+    XCTAssertEqual(store.state, .loaded)
+    XCTAssertEqual(store.tracks.map(\.title), ["Cached Signal"])
+    XCTAssertNil(provider.capturedOptions)
+    XCTAssertEqual(provider.requestCount, 0)
+  }
+
+  func testLoadIfNeededPreservesExpiredCacheWhenRefreshFails() async throws {
+    let cache = try makeCache(libraryTTL: -1)
+    let cachedSnapshot = makeSnapshot(title: "Cached Signal")
+    try await cache.saveSnapshot(cachedSnapshot, now: Date())
+    let provider = FakeLibraryProvider(error: TestError.unavailable)
+    let store = AppleMusicLibraryStore(provider: provider, cache: cache)
+
+    await store.loadIfNeeded(authorizationStatus: .authorized)
+
+    XCTAssertEqual(store.state, .loaded)
+    XCTAssertEqual(store.tracks.map(\.title), ["Cached Signal"])
+    XCTAssertEqual(store.lastErrorMessage, "Library unavailable.")
+    XCTAssertEqual(provider.requestCount, 1)
   }
 
   func testDiscoverStationFallsBackToLibraryTracksWhenPlaylistsAreEmpty() {
@@ -144,8 +174,8 @@ final class AppleMusicLibraryStoreTests: XCTestCase {
     )
   }
 
-  private func makeSnapshot() -> AppleMusicLibrarySnapshot {
-    let track = makeTrack(title: "Signal")
+  private func makeSnapshot(title: String = "Signal") -> AppleMusicLibrarySnapshot {
+    let track = makeTrack(title: title)
     let playlist = AppleMusicPlaylistSnapshot(
       id: "playlist-1",
       name: "Library Mix",
@@ -155,6 +185,15 @@ final class AppleMusicLibraryStoreTests: XCTestCase {
     )
 
     return AppleMusicLibrarySnapshot(playlists: [playlist], tracks: [track])
+  }
+
+  private func makeCache(libraryTTL: TimeInterval = 3_600) throws -> AppleMusicLibraryCacheStore {
+    let directoryURL = FileManager.default.temporaryDirectory
+      .appending(path: "AppleMusicLibraryStoreTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+    addTeardownBlock {
+      try? FileManager.default.removeItem(at: directoryURL)
+    }
+    return AppleMusicLibraryCacheStore(directoryURL: directoryURL, libraryTTL: libraryTTL)
   }
 
   private func makeTrack(title: String, artworkURL: URL? = nil) -> MusicHackathon.Track {
@@ -179,6 +218,7 @@ final class AppleMusicLibraryStoreTests: XCTestCase {
 private final class FakeLibraryProvider: AppleMusicLibraryProviding {
   let result: Result<AppleMusicLibrarySnapshot, Error>
   var capturedOptions: AppleMusicLibraryLoadOptions?
+  var requestCount = 0
 
   init(snapshot: AppleMusicLibrarySnapshot) {
     result = .success(snapshot)
@@ -189,6 +229,7 @@ private final class FakeLibraryProvider: AppleMusicLibraryProviding {
   }
 
   func librarySnapshot(options: AppleMusicLibraryLoadOptions) async throws -> AppleMusicLibrarySnapshot {
+    requestCount += 1
     capturedOptions = options
     return try result.get()
   }
