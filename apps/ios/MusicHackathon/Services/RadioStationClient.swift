@@ -108,6 +108,11 @@ struct RadioSpeechAudioRequest: Codable, Equatable {
   var resourceId = "seed-tts-1.0"
   var model = "seed-tts-1.0"
   var format = "mp3"
+  var speechRate: Int? = -6
+  var loudnessRate: Int?
+  var pitch: Int?
+  var explicitLanguage: String?
+  var emotion: String?
 }
 
 struct RadioSpeechVoiceCatalog: Codable, Equatable {

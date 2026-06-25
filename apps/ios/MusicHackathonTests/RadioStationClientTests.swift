@@ -109,6 +109,9 @@ final class RadioStationClientTests: XCTestCase {
       XCTAssertEqual(speechAudio?["resourceId"] as? String, "seed-tts-1.0")
       XCTAssertEqual(speechAudio?["model"] as? String, "seed-tts-1.0")
       XCTAssertEqual(speechAudio?["format"] as? String, "mp3")
+      XCTAssertEqual(speechAudio?["speechRate"] as? Int, -6)
+      XCTAssertNil(speechAudio?["loudnessRate"])
+      XCTAssertNil(speechAudio?["explicitLanguage"])
       let catalogCandidates = body?["catalogCandidates"] as? [[String: Any]]
       XCTAssertEqual(catalogCandidates?.first?["playlistName"] as? String, "Virtual Library: Warm Starts")
       XCTAssertEqual(catalogCandidates?.first?["source"] as? String, "virtual_music_library_json")

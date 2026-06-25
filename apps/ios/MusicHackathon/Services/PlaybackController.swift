@@ -2,6 +2,7 @@ import AVFoundation
 import MediaPlayer
 import MusicKit
 import Observation
+import UIKit
 
 enum PlaybackCompletionKind {
   case track
@@ -141,6 +142,8 @@ final class PlaybackController: RadioPlaybackControlling {
   @ObservationIgnored private var currentTrackPlaybackPolicy: RadioTrackPlaybackPolicy = .fullSongPreferred
   @ObservationIgnored private var currentSpeechPlaybackMode: RadioSpeechPlaybackMode = .standalone
   @ObservationIgnored private var currentOverlayTiming: RadioTransitionOverlayTiming = .automatic
+  @ObservationIgnored private var backgroundContinuationTask: UIBackgroundTaskIdentifier = .invalid
+  @ObservationIgnored private var backgroundContinuationReason: String?
 
   init(diagnostics: DiagnosticsStore? = nil) {
     self.musicAuthorization = MusicAuthorizationService(diagnostics: diagnostics)
@@ -544,6 +547,7 @@ final class PlaybackController: RadioPlaybackControlling {
     updateNowPlayingInfo(for: resolvedTrack)
     updateNowPlayingPlaybackRate(1)
     startMusicProgressTimer(duration: resolvedTrack.duration)
+    endBackgroundContinuationTask(reason: "apple_music_started")
   }
 
   private func fallbackToPreviewAfterAppleMusicFailure(
@@ -607,6 +611,7 @@ final class PlaybackController: RadioPlaybackControlling {
     addTrackPeriodicTimeObserver()
     addTrackPlaybackItemObservers(for: item, mediaKind: .track(track, correlationID))
     trackPreviewPlayer.play()
+    endBackgroundContinuationTask(reason: "preview_started")
 
     if currentSpeech == nil {
       activeBackend = .localPreview
@@ -681,6 +686,7 @@ final class PlaybackController: RadioPlaybackControlling {
     addSpeechPeriodicTimeObserver()
     addSpeechPlaybackItemObservers(for: item, mediaKind: .speech(speech))
     speechAudioPlayer.play()
+    endBackgroundContinuationTask(reason: "speech_audio_started")
 
     activeBackend = .speechAudio
     state = .playing
@@ -709,9 +715,12 @@ final class PlaybackController: RadioPlaybackControlling {
     synthesizedSpeechCueRanges = cueRanges(for: speech, spokenText: spokenText)
     currentSpeechCue = synthesizedSpeechCueRanges.first?.cue ?? initialSpeechCue(for: speech, spokenText: spokenText)
     let utterance = AVSpeechUtterance(string: spokenText)
-    utterance.voice = AVSpeechSynthesisVoice(language: Self.speechVoiceLanguage(for: spokenText))
-    utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+    utterance.voice = Self.preferredSpeechVoice(for: spokenText)
+    utterance.rate = Self.speechRate(for: spokenText)
+    utterance.preUtteranceDelay = 0.08
+    utterance.postUtteranceDelay = 0.12
     speechSynthesizer.speak(utterance)
+    endBackgroundContinuationTask(reason: "speech_synthesis_started")
 
     activeBackend = .speechSynthesis
     state = .playing
@@ -804,6 +813,7 @@ final class PlaybackController: RadioPlaybackControlling {
     state = .idle
     resetPlaybackProgress()
     stopMusicProgressTimer()
+    endBackgroundContinuationTask(reason: "playback_stopped")
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
   }
 
@@ -1033,7 +1043,13 @@ final class PlaybackController: RadioPlaybackControlling {
             self.state == .playing
           else { return }
 
-          self.elapsedSeconds = self.currentPlaybackSeconds()
+          let observedSeconds = self.currentPlaybackSeconds()
+          let playbackStatus = self.musicPlayer.state.playbackStatus
+          if playbackStatus == .stopped, self.elapsedSeconds > observedSeconds {
+            // ApplicationMusicPlayer may reset playbackTime before the completion tick runs.
+          } else {
+            self.elapsedSeconds = observedSeconds
+          }
           self.updateMusicPlaybackProgress(duration: duration)
         }
       }
@@ -1135,8 +1151,13 @@ final class PlaybackController: RadioPlaybackControlling {
     }
 
     playbackProgress = min(max(elapsedSeconds / duration, 0), 1)
+    notifyTrackTransitionWindowIfNeeded(elapsedSeconds: elapsedSeconds, duration: duration)
 
-    if playbackProgress >= 0.995, !didNotifyTrackFinished {
+    let wallClockElapsed = currentPlaybackStartedAt.map { Date().timeIntervalSince($0) } ?? elapsedSeconds
+    let musicPlayerStoppedAtEnd = musicPlayer.state.playbackStatus == .stopped
+      && wallClockElapsed >= max(1, duration - 2)
+
+    if (playbackProgress >= 0.995 || musicPlayerStoppedAtEnd), !didNotifyTrackFinished {
       finishPlayback(kind: .track)
     }
   }
@@ -1171,6 +1192,7 @@ final class PlaybackController: RadioPlaybackControlling {
     guard !didNotifyTrackTransitionWindow else { return }
     guard duration > 0, duration - elapsedSeconds <= 3.0 else { return }
     didNotifyTrackTransitionWindow = true
+    beginBackgroundContinuationTask(reason: "track_transition_window")
     onTrackTransitionWindowReached?()
   }
 
@@ -1341,6 +1363,7 @@ final class PlaybackController: RadioPlaybackControlling {
     removeTrackPeriodicTimeObserver()
     stopMusicProgressTimer()
     updateNowPlayingPlaybackRate(0)
+    beginBackgroundContinuationTask(reason: "playback_failed")
     diagnostics?.record(
       .error,
       chain: failureChain,
@@ -1375,8 +1398,10 @@ final class PlaybackController: RadioPlaybackControlling {
     case .track:
       guard !didNotifyTrackFinished else { return }
       didNotifyTrackFinished = true
+      beginBackgroundContinuationTask(reason: "track_finished")
       removeTrackPlaybackItemObservers()
       removeTrackPeriodicTimeObserver()
+      stopMusicProgressTimer()
       if currentSpeech == nil {
         state = .idle
         updateNowPlayingPlaybackRate(0)
@@ -1384,6 +1409,7 @@ final class PlaybackController: RadioPlaybackControlling {
     case .speech:
       guard !didNotifySpeechFinished else { return }
       didNotifySpeechFinished = true
+      beginBackgroundContinuationTask(reason: "speech_finished")
       speechStartTask?.cancel()
       removeSpeechPlaybackItemObservers()
       removeSpeechPeriodicTimeObserver()
@@ -1391,11 +1417,18 @@ final class PlaybackController: RadioPlaybackControlling {
       currentSpeech = nil
       currentSpeechCue = nil
       synthesizedSpeechCueRanges = []
-      if trackPreviewPlayer.currentItem != nil || currentTrack != nil {
+      if trackPreviewPlayer.currentItem != nil {
         activeBackend = .localPreview
         state = .playing
         startTrackPreviewVolumeRamp(to: 1.0, duration: currentOverlayTiming.restoreDuration)
         updateNowPlayingPlaybackRate(1)
+        endBackgroundContinuationTask(reason: "preview_resumed_after_speech")
+      } else if let currentTrack, musicPlayer.state.playbackStatus == .playing {
+        activeBackend = .appleMusic
+        state = .playing
+        startMusicProgressTimer(duration: currentTrack.duration)
+        updateNowPlayingPlaybackRate(1)
+        endBackgroundContinuationTask(reason: "apple_music_resumed_after_speech")
       } else {
         state = .idle
         updateNowPlayingPlaybackRate(0)
@@ -1421,13 +1454,15 @@ final class PlaybackController: RadioPlaybackControlling {
 
   private func configureAudioSession() {
     do {
-      try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowAirPlay])
+      let audioSession = AVAudioSession.sharedInstance()
+      try audioSession.setCategory(.playback, mode: .default, options: [.allowAirPlay])
+      try audioSession.setActive(true)
       diagnostics?.record(
         .info,
         chain: .audioSession,
         event: "configure_success",
         message: "音频会话配置完成。",
-        payload: ["category": "playback"]
+        payload: ["category": "playback", "active": "true"]
       )
     } catch {
       lastErrorMessage = error.localizedDescription
@@ -1440,6 +1475,57 @@ final class PlaybackController: RadioPlaybackControlling {
         payload: DiagnosticsPayload.error(error)
       )
     }
+  }
+
+  private func beginBackgroundContinuationTask(reason: String) {
+    guard backgroundContinuationTask == .invalid else { return }
+
+    backgroundContinuationReason = reason
+    backgroundContinuationTask = UIApplication.shared.beginBackgroundTask(withName: "AirsetPlaybackContinuation") { [weak self] in
+      Task { @MainActor in
+        self?.endBackgroundContinuationTask(reason: "expired")
+      }
+    }
+
+    guard backgroundContinuationTask != .invalid else {
+      backgroundContinuationReason = nil
+      diagnostics?.record(
+        .warning,
+        chain: .audioSession,
+        event: "background_continuation_unavailable",
+        message: "无法申请后台播放交接时间。",
+        payload: ["reason": reason]
+      )
+      return
+    }
+
+    diagnostics?.record(
+      .info,
+      chain: .audioSession,
+      event: "background_continuation_begin",
+      message: "已申请后台播放交接时间。",
+      payload: ["reason": reason]
+    )
+  }
+
+  private func endBackgroundContinuationTask(reason: String) {
+    guard backgroundContinuationTask != .invalid else { return }
+
+    let task = backgroundContinuationTask
+    let startReason = backgroundContinuationReason ?? "unknown"
+    backgroundContinuationTask = .invalid
+    backgroundContinuationReason = nil
+    UIApplication.shared.endBackgroundTask(task)
+    diagnostics?.record(
+      .info,
+      chain: .audioSession,
+      event: "background_continuation_end",
+      message: "后台播放交接时间已结束。",
+      payload: [
+        "reason": reason,
+        "start_reason": startReason
+      ]
+    )
   }
 
   private func configureRemoteCommands() {
@@ -1491,9 +1577,43 @@ final class PlaybackController: RadioPlaybackControlling {
     return "\(totalSeconds / 60):\(String(format: "%02d", totalSeconds % 60))"
   }
 
-  private static func estimatedSpeechDuration(for text: String) -> TimeInterval {
-    let wordCount = max(1, text.split(separator: " ").count)
-    return max(1.2, Double(wordCount) / 2.7)
+  static func estimatedSpeechDuration(for text: String) -> TimeInterval {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return 1.2 }
+
+    let hanCharacterCount = trimmed.reduce(0) { count, character in
+      String(character).range(of: #"\p{Han}"#, options: .regularExpression) == nil ? count : count + 1
+    }
+    let latinWordCount = trimmed
+      .replacingOccurrences(of: #"\p{Han}"#, with: " ", options: .regularExpression)
+      .split { !$0.isLetter && !$0.isNumber }
+      .count
+    let punctuationPauseCount = trimmed.filter { "，,。.!！?？；;：:".contains($0) }.count
+
+    let hanSeconds = Double(hanCharacterCount) / 4.6
+    let latinSeconds = Double(latinWordCount) / 2.7
+    let pauseSeconds = Double(punctuationPauseCount) * 0.12
+    return max(1.2, hanSeconds + latinSeconds + pauseSeconds)
+  }
+
+  private static func preferredSpeechVoice(for text: String) -> AVSpeechSynthesisVoice? {
+    let language = speechVoiceLanguage(for: text)
+    let voices = AVSpeechSynthesisVoice.speechVoices().filter {
+      $0.language.caseInsensitiveCompare(language) == .orderedSame
+    }
+    if let premiumVoice = voices.first(where: { $0.quality == .premium }) {
+      return premiumVoice
+    }
+    if let enhancedVoice = voices.first(where: { $0.quality == .enhanced }) {
+      return enhancedVoice
+    }
+    return voices.first ?? AVSpeechSynthesisVoice(language: language)
+  }
+
+  private static func speechRate(for text: String) -> Float {
+    speechVoiceLanguage(for: text) == "zh-CN"
+      ? AVSpeechUtteranceDefaultSpeechRate * 0.88
+      : AVSpeechUtteranceDefaultSpeechRate * 0.94
   }
 
   private static func speechVoiceLanguage(for text: String) -> String {

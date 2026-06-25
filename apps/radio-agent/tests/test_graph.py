@@ -162,7 +162,8 @@ def test_single_call_repairs_unknown_tracks_and_bad_transitions(monkeypatch):
   assert [item.radioIdentity for item in response.items] == ["song-1", "song-2"]
   assert response.speech.betweenTracks[0].fromItemId == "song-1"
   assert response.speech.betweenTracks[0].toItemId == "song-2"
-  assert response.speech.betweenTracks[0].displayText.startswith("Next:")
+  assert "《B》" in response.speech.betweenTracks[0].displayText
+  assert not response.speech.betweenTracks[0].displayText.startswith("Next:")
   assert "Dropped unknown track from generation: made-up" in response.diagnostics
   assert "Dropped transition copy for non-adjacent pair: song-2 -> song-1" in response.diagnostics
 
@@ -254,7 +255,8 @@ def test_transition_copy_drops_non_adjacent_pairs_and_fills_template():
   assert len(result["transitionCopies"]) == 1
   assert result["transitionCopies"][0].fromItemId == "song-1"
   assert result["transitionCopies"][0].toItemId == "song-2"
-  assert result["transitionCopies"][0].displayText.startswith("Next:")
+  assert "《B》" in result["transitionCopies"][0].displayText
+  assert not result["transitionCopies"][0].displayText.startswith("Next:")
   assert "Dropped transition copy for non-adjacent pair: song-2 -> song-1" in result["diagnostics"]
 
 
@@ -319,6 +321,35 @@ def test_valid_entry_copy_repairs_invalid_target_item():
   assert result["entryCopy"].agent == "test_agent"
 
 
+def test_entry_copy_drops_unverified_claims():
+  request = _request()
+  state = {
+    "request": request,
+    "candidateByID": {track.radioIdentity: track for track in request.seedTracks},
+    "recommendedItems": [
+      RadioGeneratedItem(
+        radioIdentity="song-1",
+        reason="first",
+        role="opener",
+        score=99,
+        source="playlist",
+      )
+    ],
+    "rawEntryCopy": {
+      "text": "这首歌创作于 2001 年，歌手当时写下了自己的故事。",
+      "displayText": "这首歌创作于 2001 年。",
+      "targetItemId": "song-1",
+    },
+    "diagnostics": [],
+  }
+
+  result = validate_entry_copy(state)
+
+  assert "《A》" in result["entryCopy"].displayText
+  assert "创作于" not in result["entryCopy"].text
+  assert "Entry copy included unverified factual claims" in " ".join(result["diagnostics"])
+
+
 def test_transition_copy_keeps_valid_pairs_and_fills_missing_bridge():
   request = _request_with_three_tracks()
   state = {
@@ -369,7 +400,106 @@ def test_transition_copy_keeps_valid_pairs_and_fills_missing_bridge():
   assert result["transitionCopies"][0].displayText == "Custom display bridge."
   assert result["transitionCopies"][1].fromItemId == "song-2"
   assert result["transitionCopies"][1].toItemId == "song-3"
-  assert result["transitionCopies"][1].displayText.startswith("Next:")
+  assert "《C》" in result["transitionCopies"][1].displayText
+  assert not result["transitionCopies"][1].displayText.startswith("Next:")
+
+
+def test_transition_copy_sanitizes_long_text_and_drops_unverified_claims():
+  request = _request_with_three_tracks()
+  state = {
+    "request": request,
+    "candidateByID": {track.radioIdentity: track for track in request.seedTracks},
+    "recommendedItems": [
+      RadioGeneratedItem(
+        radioIdentity="song-1",
+        reason="first",
+        role="opener",
+        score=99,
+        source="playlist",
+      ),
+      RadioGeneratedItem(
+        radioIdentity="song-2",
+        reason="second",
+        role="bridge",
+        score=90,
+        source="playlist",
+      ),
+      RadioGeneratedItem(
+        radioIdentity="song-3",
+        reason="third",
+        role="closer",
+        score=80,
+        source="playlist",
+      ),
+    ],
+    "rawTransitionCopy": {
+      "betweenTracks": [
+        {
+          "id": "long-transition",
+          "fromItemId": "song-1",
+          "toItemId": "song-2",
+          "text": "嗯，" + "这一段我们把刚才的亮度收回来，留一点空气感，再让下一首把边缘慢慢推开。" * 3,
+          "displayText": "嗯，刚才的亮度收回来，再交给《B》。" * 2,
+        },
+        {
+          "id": "unsafe-transition",
+          "fromItemId": "song-2",
+          "toItemId": "song-3",
+          "text": "这首歌创作于 1999 年，背后是歌手当时的故事。Next up is C.",
+          "displayText": "这首歌创作于 1999 年。",
+        },
+      ]
+    },
+    "diagnostics": [],
+  }
+
+  result = validate_transition_copy(state)
+
+  assert len(result["transitionCopies"]) == 2
+  assert result["transitionCopies"][0].id == "long-transition"
+  assert len(result["transitionCopies"][0].text) <= 78
+  assert len(result["transitionCopies"][0].displayText) <= 42
+  assert result["transitionCopies"][0].text.count("嗯") <= 1
+  assert result["transitionCopies"][1].id != "unsafe-transition"
+  assert "unverified factual claims" in " ".join(result["diagnostics"])
+
+
+def test_transition_copy_drops_repetitive_template_openings():
+  request = _request_with_three_tracks()
+  state = {
+    "request": request,
+    "candidateByID": {track.radioIdentity: track for track in request.seedTracks},
+    "recommendedItems": [
+      RadioGeneratedItem(radioIdentity="song-1", reason="first", role="opener", score=99, source="playlist"),
+      RadioGeneratedItem(radioIdentity="song-2", reason="second", role="bridge", score=90, source="playlist"),
+      RadioGeneratedItem(radioIdentity="song-3", reason="third", role="closer", score=80, source="playlist"),
+    ],
+    "rawTransitionCopy": {
+      "betweenTracks": [
+        {
+          "id": "template-1",
+          "fromItemId": "song-1",
+          "toItemId": "song-2",
+          "text": "Next up, let us hear B by Artist B.",
+          "displayText": "Next up: B.",
+        },
+        {
+          "id": "template-2",
+          "fromItemId": "song-2",
+          "toItemId": "song-3",
+          "text": "Next up, let us hear C by Artist C.",
+          "displayText": "Next up: C.",
+        },
+      ]
+    },
+    "diagnostics": [],
+  }
+
+  result = validate_transition_copy(state)
+
+  assert result["transitionCopies"][0].id == "template-1"
+  assert result["transitionCopies"][1].id != "template-2"
+  assert "Dropped repetitive transition opening" in " ".join(result["diagnostics"])
 
 
 def _request():

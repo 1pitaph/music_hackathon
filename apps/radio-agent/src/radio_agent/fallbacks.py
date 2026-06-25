@@ -24,11 +24,12 @@ def mock_entry_payload(state: AgentState) -> dict[str, Any]:
   first_track = track_summary(state, first_item_id)
 
   if first_track:
+    mood = _mood_label(first_track)
     text = (
-      f"Welcome to Airset Radio. We are starting with {first_track['title']} by "
-      f"{first_track['artist']}, then letting your listening memory shape the next turns."
+      f"嗯，欢迎调到 Airset。我们先从《{first_track['title']}》开始，"
+      f"让 {first_track['artist']} 的{mood}把这一段慢慢带起来。"
     )
-    display_text = f"Starting with {first_track['title']} by {first_track['artist']}, tuned from your listening memory."
+    display_text = f"从《{first_track['title']}》开始，进入这段{mood}电台。"
   else:
     text = "No playable candidates are available for this station yet."
     display_text = text
@@ -60,11 +61,7 @@ def mock_transition_copy(state: AgentState, pair: tuple[str, str]) -> RadioTrans
   from_track = track_summary(state, pair[0])
   to_track = track_summary(state, pair[1])
   if from_track and to_track:
-    text = (
-      f"From {from_track['title']} by {from_track['artist']}, Airset is handing off to "
-      f"{to_track['title']} by {to_track['artist']} for a {to_track['mood'] or 'fresh'} turn."
-    )
-    display_text = f"Next: {to_track['title']} by {to_track['artist']}."
+    text, display_text = _transition_copy_for_pair(from_track, to_track, _pair_index(pair, pairs))
   else:
     text = "Airset is keeping the station moving into the next track."
     display_text = text
@@ -77,6 +74,83 @@ def mock_transition_copy(state: AgentState, pair: tuple[str, str]) -> RadioTrans
     displayText=display_text,
     agent="transition_copy_agent",
   )
+
+
+def _transition_copy_for_pair(
+  from_track: dict[str, Any],
+  to_track: dict[str, Any],
+  index: int,
+) -> tuple[str, str]:
+  to_mood = _mood_label(to_track)
+  from_mood = _mood_label(from_track)
+  to_title = str(to_track.get("title") or "下一首")
+  from_title = str(from_track.get("title") or "刚才那首")
+  to_artist = str(to_track.get("artist") or "这位音乐人")
+
+  if _same_clean_value(from_track.get("artist"), to_track.get("artist")):
+    return (
+      f"好，刚才的《{from_title}》还在同一个气口里。我们继续听 {to_artist}，让《{to_title}》把这条线再往前推一点。",
+      f"继续听 {to_artist}，把气氛交给《{to_title}》。",
+    )
+
+  if _same_clean_value(from_track.get("album"), to_track.get("album")):
+    return (
+      f"嗯，这两首其实像同一张照片里的两块光影。《{from_title}》收住以后，换《{to_title}》把边缘放软。",
+      f"同一张专辑的另一面，交给《{to_title}》。",
+    )
+
+  lane = str(to_track.get("sourceLane") or "").replace("_", " ").strip().lower()
+  signals = " ".join(str(value).lower() for value in to_track.get("reasonSignals") or [])
+  if "familiar" in lane or "anchor" in lane or "familiar" in signals:
+    return (
+      f"刚才那首把耳朵热起来了。下一段我们不急着跳开，用《{to_title}》留住一点熟悉的温度。",
+      f"留住一点熟悉感，听《{to_title}》。",
+    )
+
+  if "discover" in lane or "catalog" in str(to_track.get("source") or "").lower():
+    return (
+      f"怎么说呢，这里可以稍微拐个弯。《{from_title}》之后，试试 {to_artist} 的《{to_title}》，会有一点新的颜色。",
+      f"从刚才的气氛拐个弯，试试《{to_title}》。",
+    )
+
+  templates = [
+    (
+      f"嗯，刚才《{from_title}》把{from_mood}铺开了。我们往前走一点，让《{to_title}》接住更{to_mood}的那一面。",
+      f"从《{from_title}》转向《{to_title}》的{to_mood}。",
+    ),
+    (
+      f"这一段先别切太猛。《{to_title}》会把刚才的余温接过去，像把房间里的光调暗一点。",
+      f"让《{to_title}》接住刚才的余温。",
+    ),
+    (
+      f"好，换一个角度听。{to_artist} 的《{to_title}》会把这组歌带到更{to_mood}的位置。",
+      f"换个角度，听《{to_title}》的{to_mood}。",
+    ),
+  ]
+  return templates[index % len(templates)]
+
+
+def _pair_index(pair: tuple[str, str], pairs: list[tuple[str, str]]) -> int:
+  try:
+    return pairs.index(pair)
+  except ValueError:
+    return 0
+
+
+def _mood_label(track: dict[str, Any]) -> str:
+  mood = str(track.get("mood") or "").strip()
+  if mood:
+    return mood
+  lane = str(track.get("sourceLane") or "").replace("_", " ").strip()
+  if lane:
+    return lane
+  return "新的气氛"
+
+
+def _same_clean_value(left: Any, right: Any) -> bool:
+  left_value = str(left or "").strip().casefold()
+  right_value = str(right or "").strip().casefold()
+  return bool(left_value and right_value and left_value == right_value)
 
 
 def mock_payload(state: AgentState) -> dict[str, Any]:

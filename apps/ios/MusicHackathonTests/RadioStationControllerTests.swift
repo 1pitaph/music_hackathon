@@ -82,6 +82,14 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertEqual(stationClient.capturedContext?.speechAudio.resourceId, "seed-tts-1.0")
   }
 
+  func testChineseSpeechDurationEstimateUsesCharactersAndPauses() {
+    let chineseText = "嗯，刚才那首歌把气氛慢慢铺开了。下一首我们稍微往前走一点，听听新的颜色。"
+    let englishText = "Next up is Two."
+
+    XCTAssertGreaterThan(PlaybackController.estimatedSpeechDuration(for: chineseText), 5.0)
+    XCTAssertLessThan(PlaybackController.estimatedSpeechDuration(for: englishText), 3.0)
+  }
+
   func testLoadCurrentStationUsesLibraryTracksForGenerationCandidates() async {
     let station = makeStation(items: [
       makeQueueItem(title: "Generated", appleMusicID: "generated")

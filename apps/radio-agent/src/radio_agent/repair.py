@@ -27,6 +27,27 @@ from radio_agent.state_helpers import (
   valid_transition_pairs,
 )
 
+ENTRY_TEXT_MAX_CHARS = 120
+ENTRY_DISPLAY_MAX_CHARS = 80
+TRANSITION_TEXT_MAX_CHARS = 78
+TRANSITION_DISPLAY_MAX_CHARS = 42
+
+SPOKEN_FILLERS = ("嗯", "呃", "啊", "怎么说呢", "好，", "好,")
+UNVERIFIED_FACT_PATTERNS = [
+  r"创作(?:于|自|灵感)",
+  r"发行(?:于|在)?\s*\d{4}",
+  r"\d{4}\s*年.*(?:发行|创作|写下)",
+  r"(?:歌手|艺人).{0,12}(?:当时|曾经|经历|写下|创作)",
+  r"(?:这首歌|歌曲).{0,12}(?:讲的是|写的是|背后|来源|灵感)",
+  r"歌词.{0,16}(?:写|唱|讲|意思)",
+  r"你(?:曾经|当时|一定|应该|其实|内心)",
+  r"released in",
+  r"written by",
+  r"wrote this",
+  r"the lyrics",
+  r"this song is about",
+]
+
 
 def parse_generation(raw_generation: str | dict[str, Any] | None) -> dict[str, Any] | None:
   if isinstance(raw_generation, dict):
@@ -189,6 +210,18 @@ def validate_entry_copy(state: AgentState) -> dict[str, Any]:
     display_text = str(payload["displayText"])
     target_item_id = payload.get("targetItemId")
 
+  if _contains_unverified_fact(text) or _contains_unverified_fact(display_text):
+    diagnostics.append("Entry copy included unverified factual claims; using deterministic intro.")
+    payload = mock_entry_payload(state)
+    text = str(payload["text"])
+    display_text = str(payload["displayText"])
+    target_item_id = payload.get("targetItemId")
+
+  text = _clean_spoken_text(text, ENTRY_TEXT_MAX_CHARS)
+  display_text = _clean_display_text(display_text, ENTRY_DISPLAY_MAX_CHARS)
+  if not display_text:
+    display_text = _clean_display_text(text, ENTRY_DISPLAY_MAX_CHARS)
+
   entry_copy = RadioEntryCopy(
     id=str(payload.get("id") or "station-intro"),
     text=text,
@@ -209,6 +242,7 @@ def validate_transition_copy(state: AgentState) -> dict[str, Any]:
   valid_pairs = valid_transition_pairs(state)
   raw_copies = payload.get("betweenTracks") if isinstance(payload.get("betweenTracks"), list) else []
   copies_by_pair: dict[tuple[str, str], RadioTransitionCopy] = {}
+  seen_opening_keys: set[str] = set()
 
   for raw_copy in raw_copies:
     if not isinstance(raw_copy, dict):
@@ -221,6 +255,28 @@ def validate_transition_copy(state: AgentState) -> dict[str, Any]:
 
     text = str(raw_copy.get("text") or raw_copy.get("displayText") or "").strip()
     display_text = str(raw_copy.get("displayText") or text).strip()
+    if not text or not display_text:
+      continue
+
+    if _contains_unverified_fact(text) or _contains_unverified_fact(display_text):
+      diagnostics.append(
+        f"Dropped transition copy with unverified factual claims: {pair[0]} -> {pair[1]}"
+      )
+      continue
+
+    opening_key = _opening_key(text)
+    if opening_key and opening_key in seen_opening_keys:
+      diagnostics.append(
+        f"Dropped repetitive transition opening: {pair[0]} -> {pair[1]}"
+      )
+      continue
+    if opening_key:
+      seen_opening_keys.add(opening_key)
+
+    text = _clean_spoken_text(text, TRANSITION_TEXT_MAX_CHARS)
+    display_text = _clean_display_text(display_text, TRANSITION_DISPLAY_MAX_CHARS)
+    if not display_text:
+      display_text = _clean_display_text(text, TRANSITION_DISPLAY_MAX_CHARS)
     if not text or not display_text:
       continue
 
@@ -238,6 +294,81 @@ def validate_transition_copy(state: AgentState) -> dict[str, Any]:
     transition_copies.append(copies_by_pair.get(pair) or mock_transition_copy(state, pair))
 
   return {**state, "transitionCopies": transition_copies, "diagnostics": diagnostics}
+
+
+def _clean_spoken_text(text: str, max_chars: int) -> str:
+  cleaned = _normalize_text(text)
+  cleaned = _limit_fillers(cleaned)
+  return _trim_to_limit(cleaned, max_chars)
+
+
+def _clean_display_text(text: str, max_chars: int) -> str:
+  cleaned = _normalize_text(text)
+  for filler in SPOKEN_FILLERS:
+    cleaned = cleaned.replace(filler, "")
+  cleaned = cleaned.strip(" ，,。")
+  return _trim_to_limit(cleaned, max_chars)
+
+
+def _normalize_text(text: str) -> str:
+  return re.sub(r"\s+", " ", text).strip()
+
+
+def _limit_fillers(text: str) -> str:
+  filler_matches: list[tuple[int, int]] = []
+  for filler in SPOKEN_FILLERS:
+    for match in re.finditer(re.escape(filler), text):
+      filler_matches.append(match.span())
+  if len(filler_matches) <= 1:
+    return text
+
+  filler_matches.sort()
+  keep_start, keep_end = filler_matches[0]
+  pieces: list[str] = []
+  cursor = 0
+  for start, end in filler_matches:
+    pieces.append(text[cursor:start])
+    if start == keep_start and end == keep_end:
+      pieces.append(text[start:end])
+    cursor = end
+  pieces.append(text[cursor:])
+  return _normalize_text("".join(pieces))
+
+
+def _trim_to_limit(text: str, max_chars: int) -> str:
+  if len(text) <= max_chars:
+    return text
+
+  clipped = text[:max_chars].rstrip(" ，,、；;：:")
+  sentence_end = max(
+    clipped.rfind("。"),
+    clipped.rfind("！"),
+    clipped.rfind("？"),
+    clipped.rfind("."),
+    clipped.rfind("!"),
+    clipped.rfind("?"),
+  )
+  if sentence_end >= max(12, int(max_chars * 0.45)):
+    return clipped[: sentence_end + 1].strip()
+  return clipped.rstrip("。.!！?？") + "。"
+
+
+def _contains_unverified_fact(text: str) -> bool:
+  lowered = text.lower()
+  return any(re.search(pattern, lowered) for pattern in UNVERIFIED_FACT_PATTERNS)
+
+
+def _opening_key(text: str) -> str:
+  cleaned = _normalize_text(text).lower()
+  cleaned = re.sub(r"^[嗯呃啊好,\s，。.!！?？]+", "", cleaned)
+  if not cleaned:
+    return ""
+  if re.match(r"^(next up|coming up|from |接下来|下一首|刚才|刚刚|从)", cleaned):
+    return cleaned[:16]
+  words = cleaned.split()
+  if len(words) >= 4:
+    return " ".join(words[:4])
+  return cleaned[:12] if len(cleaned) >= 12 else ""
 
 
 def assemble_response(state: AgentState) -> dict[str, Any]:

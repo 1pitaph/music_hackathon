@@ -839,7 +839,10 @@ final class RadioStationController {
     switch kind {
     case .track:
       if pendingTransition != nil {
-        return
+        await startPendingTransitionNextTrackIfNeeded(preservesSpeech: true)
+        if pendingTransition != nil {
+          return
+        }
       }
       await playNext(reason: .automaticCompletion)
     case .speech:
