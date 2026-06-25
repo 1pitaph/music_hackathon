@@ -94,8 +94,14 @@ class RadioSpeechCue(BaseModel):
 class RadioSpeechAudio(BaseModel):
   audioURL: str | None = None
   streamURL: str | None = None
+  metadataURL: str | None = None
   mimeType: str = "audio/mpeg"
   durationSeconds: float | None = None
+  durationSource: Literal["estimated", "timing", "audio", "unknown"] = "estimated"
+  estimatedDurationSeconds: float | None = None
+  actualDurationSeconds: float | None = None
+  advanceTimeSeconds: float | None = None
+  advanceCueId: str | None = None
   cacheKey: str
   voice: str
   model: str

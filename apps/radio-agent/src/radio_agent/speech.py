@@ -186,16 +186,14 @@ def _prepare_streaming_speech_segments(
         stream_url=stream_url,
         cues=metadata["cues"],
         duration_seconds=metadata["durationSeconds"],
+        duration_source=metadata["durationSource"],
+        estimated_duration_seconds=metadata["estimatedDurationSeconds"],
+        actual_duration_seconds=metadata["actualDurationSeconds"],
+        advance_time_seconds=metadata["advanceTimeSeconds"],
+        advance_cue_id=metadata["advanceCueId"],
       )
     else:
       duration_seconds = _estimated_duration(segment.text)
-      _write_speech_metadata(
-        file_path,
-        duration_seconds,
-        [],
-        segment=segment,
-        context=context,
-      )
       audio = _ready_audio(
         segment,
         context,
@@ -203,6 +201,19 @@ def _prepare_streaming_speech_segments(
         audio_url,
         stream_url=stream_url,
         duration_seconds=duration_seconds,
+        duration_source="estimated",
+      )
+      _write_speech_metadata(
+        file_path,
+        audio.durationSeconds,
+        audio.cues,
+        segment=segment,
+        context=context,
+        duration_source=audio.durationSource,
+        estimated_duration_seconds=audio.estimatedDurationSeconds,
+        actual_duration_seconds=audio.actualDurationSeconds,
+        advance_time_seconds=audio.advanceTimeSeconds,
+        advance_cue_id=audio.advanceCueId,
       )
 
     results.append(RadioSpeechSynthesisResult(
@@ -226,8 +237,14 @@ def _mock_streaming_speech_segments(
     audio = RadioSpeechAudio(
       audioURL=audio_url,
       streamURL=stream_url,
+      metadataURL=_speech_metadata_url(f"{cache_key}.{context.audio_format}"),
       mimeType=MIME_TYPES.get(context.audio_format, "audio/mpeg"),
       durationSeconds=_estimated_duration(segment.text),
+      durationSource="estimated",
+      estimatedDurationSeconds=_estimated_duration(segment.text),
+      actualDurationSeconds=None,
+      advanceTimeSeconds=None,
+      advanceCueId=None,
       cacheKey=cache_key,
       voice=context.voice or DEFAULT_OPENAI_SPEECH_VOICE,
       model=context.model,
@@ -367,6 +384,37 @@ def ensure_speech_audio_file(file_name: str) -> Path | None:
   if audio.status != "ready":
     return None
   return file_path if file_path.is_file() else None
+
+
+def speech_audio_metadata(file_name: str) -> RadioSpeechAudio | None:
+  file_path = speech_audio_file_path(file_name)
+  if not file_path:
+    return None
+
+  prepared = _read_prepared_speech(file_path)
+  if not prepared:
+    return None
+
+  audio_url = _speech_audio_url(file_name)
+  if not audio_url:
+    return None
+
+  segment, context = prepared
+  metadata = _read_speech_metadata(file_path)
+  return _ready_audio(
+    segment,
+    context,
+    Path(file_name).stem,
+    audio_url,
+    stream_url=_speech_stream_url(file_name),
+    cues=metadata["cues"],
+    duration_seconds=metadata["durationSeconds"],
+    duration_source=metadata["durationSource"],
+    estimated_duration_seconds=metadata["estimatedDurationSeconds"],
+    actual_duration_seconds=metadata["actualDurationSeconds"],
+    advance_time_seconds=metadata["advanceTimeSeconds"],
+    advance_cue_id=metadata["advanceCueId"],
+  )
 
 
 def can_stream_speech_audio(file_name: str) -> bool:
@@ -555,6 +603,11 @@ def _synthesize_volcengine_segment(
         audio_url,
         cues=metadata["cues"],
         duration_seconds=metadata["durationSeconds"],
+        duration_source=metadata["durationSource"],
+        estimated_duration_seconds=metadata["estimatedDurationSeconds"],
+        actual_duration_seconds=metadata["actualDurationSeconds"],
+        advance_time_seconds=metadata["advanceTimeSeconds"],
+        advance_cue_id=metadata["advanceCueId"],
       ), diagnostics
     diagnostics.append("Speech audio cache hit, but SPEECH_PUBLIC_BASE_URL is not configured.")
     return _unavailable_audio(segment, context, cache_key), diagnostics
@@ -605,17 +658,32 @@ def _synthesize_volcengine_segment(
     return _unavailable_audio(segment, context, cache_key), diagnostics
 
   cues = _speech_cues_from_timing_words(segment, timing_words)
-  duration_seconds = _duration_seconds_from_cues(cues) or _estimated_duration(segment.text)
+  audio_duration_seconds = _audio_duration_seconds(audio_bytes, context.audio_format)
+  duration_seconds = audio_duration_seconds or _duration_seconds_from_cues(cues) or _estimated_duration(segment.text)
   _write_audio_file(file_path, audio_bytes)
-  _write_speech_metadata(file_path, duration_seconds, cues, segment=segment, context=context)
-  return _ready_audio(
+  audio = _ready_audio(
     segment,
     context,
     cache_key,
     audio_url,
     cues=cues,
     duration_seconds=duration_seconds,
-  ), diagnostics
+    actual_duration_seconds=audio_duration_seconds,
+    duration_source="audio" if audio_duration_seconds else None,
+  )
+  _write_speech_metadata(
+    file_path,
+    audio.durationSeconds,
+    audio.cues,
+    segment=segment,
+    context=context,
+    duration_source=audio.durationSource,
+    estimated_duration_seconds=audio.estimatedDurationSeconds,
+    actual_duration_seconds=audio.actualDurationSeconds,
+    advance_time_seconds=audio.advanceTimeSeconds,
+    advance_cue_id=audio.advanceCueId,
+  )
+  return audio, diagnostics
 
 
 def _volcengine_payload(
@@ -771,10 +839,33 @@ def _stream_volcengine_segment_to_cache(
       )
 
     cues = _speech_cues_from_timing_words(segment, timing_words)
-    duration_seconds = _duration_seconds_from_cues(cues) or _estimated_duration(segment.text)
+    audio_duration_seconds = _audio_duration_seconds_from_file(temporary_path, context.audio_format)
+    duration_seconds = audio_duration_seconds or _duration_seconds_from_cues(cues) or _estimated_duration(segment.text)
     temporary_path.replace(file_path)
     temporary_path = None
-    _write_speech_metadata(file_path, duration_seconds, cues, segment=segment, context=context)
+    audio = _ready_audio(
+      segment,
+      context,
+      _cache_key_for_context(segment.text, context),
+      _speech_audio_url(file_path.name) or "",
+      stream_url=_speech_stream_url(file_path.name),
+      cues=cues,
+      duration_seconds=duration_seconds,
+      actual_duration_seconds=audio_duration_seconds,
+      duration_source="audio" if audio_duration_seconds else None,
+    )
+    _write_speech_metadata(
+      file_path,
+      audio.durationSeconds,
+      audio.cues,
+      segment=segment,
+      context=context,
+      duration_source=audio.durationSource,
+      estimated_duration_seconds=audio.estimatedDurationSeconds,
+      actual_duration_seconds=audio.actualDurationSeconds,
+      advance_time_seconds=audio.advanceTimeSeconds,
+      advance_cue_id=audio.advanceCueId,
+    )
     completed = True
   finally:
     if not completed and temporary_path and temporary_path.exists():
@@ -1022,14 +1113,88 @@ def _duration_seconds_from_cues(cues: list[RadioSpeechCue]) -> float | None:
   return round(max(cue.endTime for cue in cues), 2)
 
 
+def _advance_marker_from_cues(cues: list[RadioSpeechCue]) -> tuple[float, str] | None:
+  if len(cues) < 2:
+    return None
+  cue = cues[-1]
+  return round(max(0, cue.startTime), 2), cue.id
+
+
+def _timing_fields(
+  segment: RadioSpeechSegment,
+  cues: list[RadioSpeechCue],
+  *,
+  duration_seconds: float | None = None,
+  duration_source: str | None = None,
+  estimated_duration_seconds: float | None = None,
+  actual_duration_seconds: float | None = None,
+  advance_time_seconds: float | None = None,
+  advance_cue_id: str | None = None,
+) -> dict[str, float | str | None]:
+  estimated = _round_duration(estimated_duration_seconds) or _estimated_duration(segment.text)
+  cues_duration = _duration_seconds_from_cues(cues)
+  actual = _round_duration(actual_duration_seconds)
+  source = _normalized_duration_source(duration_source)
+
+  if actual is None and source in {"timing", "audio"}:
+    actual = _round_duration(duration_seconds)
+  if actual is None and cues_duration is not None:
+    actual = cues_duration
+    source = "timing"
+  if actual is not None and source not in {"timing", "audio"}:
+    source = "audio"
+  if actual is None:
+    source = "estimated"
+
+  duration = actual if actual is not None else (_round_duration(duration_seconds) or estimated)
+  if source == "estimated":
+    duration = estimated
+
+  marker = _advance_marker_from_cues(cues)
+  if marker:
+    advance_time, marker_cue_id = marker
+  elif advance_time_seconds is not None:
+    advance_time = _round_duration(advance_time_seconds)
+    marker_cue_id = advance_cue_id
+  elif actual is not None:
+    advance_time = round(actual * 2 / 3, 2)
+    marker_cue_id = None
+  else:
+    advance_time = None
+    marker_cue_id = None
+
+  return {
+    "durationSeconds": duration,
+    "durationSource": source,
+    "estimatedDurationSeconds": estimated,
+    "actualDurationSeconds": actual,
+    "advanceTimeSeconds": advance_time,
+    "advanceCueId": marker_cue_id,
+  }
+
+
+def _normalized_duration_source(value: object) -> str:
+  if value in {"estimated", "timing", "audio", "unknown"}:
+    return str(value)
+  return "estimated"
+
+
+def _round_duration(value: float | None) -> float | None:
+  if value is None or not isinstance(value, (int, float)):
+    return None
+  if not float(value) > 0:
+    return None
+  return round(float(value), 2)
+
+
 def _read_speech_metadata(file_path: Path) -> dict:
   metadata_path = _speech_metadata_path(file_path)
   if not metadata_path.exists():
-    return {"durationSeconds": None, "cues": []}
+    return _empty_speech_metadata()
   try:
     raw_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
   except (OSError, json.JSONDecodeError):
-    return {"durationSeconds": None, "cues": []}
+    return _empty_speech_metadata()
 
   cues = []
   raw_cues = raw_metadata.get("cues") if isinstance(raw_metadata, dict) else None
@@ -1040,8 +1205,41 @@ def _read_speech_metadata(file_path: Path) -> dict:
       except ValueError:
         continue
 
-  duration_seconds = _normalize_float(raw_metadata.get("durationSeconds")) if isinstance(raw_metadata, dict) else None
-  return {"durationSeconds": duration_seconds, "cues": cues}
+  if not isinstance(raw_metadata, dict):
+    return _empty_speech_metadata()
+
+  duration_seconds = _normalize_float(raw_metadata.get("durationSeconds"))
+  actual_duration_seconds = _normalize_float(raw_metadata.get("actualDurationSeconds"))
+  estimated_duration_seconds = _normalize_float(raw_metadata.get("estimatedDurationSeconds"))
+  advance_time_seconds = _normalize_float(raw_metadata.get("advanceTimeSeconds"))
+  advance_cue_id = raw_metadata.get("advanceCueId")
+  if not isinstance(advance_cue_id, str):
+    advance_cue_id = None
+  duration_source = _normalized_duration_source(raw_metadata.get("durationSource"))
+  if duration_source == "estimated" and cues and duration_seconds:
+    duration_source = "timing"
+
+  return {
+    "durationSeconds": duration_seconds,
+    "durationSource": duration_source,
+    "estimatedDurationSeconds": estimated_duration_seconds,
+    "actualDurationSeconds": actual_duration_seconds,
+    "advanceTimeSeconds": advance_time_seconds,
+    "advanceCueId": advance_cue_id,
+    "cues": cues,
+  }
+
+
+def _empty_speech_metadata() -> dict:
+  return {
+    "durationSeconds": None,
+    "durationSource": "unknown",
+    "estimatedDurationSeconds": None,
+    "actualDurationSeconds": None,
+    "advanceTimeSeconds": None,
+    "advanceCueId": None,
+    "cues": [],
+  }
 
 
 def _read_prepared_speech(file_path: Path) -> tuple[RadioSpeechSegment, SpeechSynthesisContext] | None:
@@ -1084,11 +1282,37 @@ def _write_speech_metadata(
   *,
   segment: RadioSpeechSegment | None = None,
   context: SpeechSynthesisContext | None = None,
+  duration_source: str | None = None,
+  estimated_duration_seconds: float | None = None,
+  actual_duration_seconds: float | None = None,
+  advance_time_seconds: float | None = None,
+  advance_cue_id: str | None = None,
 ) -> None:
   metadata_path = _speech_metadata_path(file_path)
   metadata_path.parent.mkdir(parents=True, exist_ok=True)
+  timing = (
+    _timing_fields(
+      segment,
+      cues,
+      duration_seconds=duration_seconds,
+      duration_source=duration_source,
+      estimated_duration_seconds=estimated_duration_seconds,
+      actual_duration_seconds=actual_duration_seconds,
+      advance_time_seconds=advance_time_seconds,
+      advance_cue_id=advance_cue_id,
+    )
+    if segment
+    else {
+      "durationSeconds": duration_seconds,
+      "durationSource": _normalized_duration_source(duration_source),
+      "estimatedDurationSeconds": estimated_duration_seconds,
+      "actualDurationSeconds": actual_duration_seconds,
+      "advanceTimeSeconds": advance_time_seconds,
+      "advanceCueId": advance_cue_id,
+    }
+  )
   metadata = {
-    "durationSeconds": duration_seconds,
+    **timing,
     "cues": [cue.model_dump() for cue in cues],
   }
   if segment:
@@ -1151,17 +1375,39 @@ def _ready_audio(
   stream_url: str | None = None,
   cues: list[RadioSpeechCue] | None = None,
   duration_seconds: float | None = None,
+  duration_source: str | None = None,
+  estimated_duration_seconds: float | None = None,
+  actual_duration_seconds: float | None = None,
+  advance_time_seconds: float | None = None,
+  advance_cue_id: str | None = None,
 ) -> RadioSpeechAudio:
+  resolved_cues = cues or []
+  timing = _timing_fields(
+    segment,
+    resolved_cues,
+    duration_seconds=duration_seconds,
+    duration_source=duration_source,
+    estimated_duration_seconds=estimated_duration_seconds,
+    actual_duration_seconds=actual_duration_seconds,
+    advance_time_seconds=advance_time_seconds,
+    advance_cue_id=advance_cue_id,
+  )
   return RadioSpeechAudio(
     audioURL=audio_url,
     streamURL=stream_url,
+    metadataURL=_speech_metadata_url(f"{cache_key}.{context.audio_format}"),
     mimeType=MIME_TYPES.get(context.audio_format, "audio/mpeg"),
-    durationSeconds=duration_seconds or _estimated_duration(segment.text),
+    durationSeconds=timing["durationSeconds"],
+    durationSource=timing["durationSource"],
+    estimatedDurationSeconds=timing["estimatedDurationSeconds"],
+    actualDurationSeconds=timing["actualDurationSeconds"],
+    advanceTimeSeconds=timing["advanceTimeSeconds"],
+    advanceCueId=timing["advanceCueId"],
     cacheKey=cache_key,
     voice=context.voice,
     model=context.model,
     status="ready",
-    cues=cues or [],
+    cues=resolved_cues,
   )
 
 
@@ -1171,10 +1417,17 @@ def _unavailable_audio(
   cache_key: str | None = None,
 ) -> RadioSpeechAudio:
   resolved_cache_key = cache_key or _cache_key_for_context(segment.text, context)
+  timing = _timing_fields(segment, [])
   return RadioSpeechAudio(
     audioURL=None,
+    metadataURL=None,
     mimeType=MIME_TYPES.get(context.audio_format, "audio/mpeg"),
-    durationSeconds=_estimated_duration(segment.text),
+    durationSeconds=timing["durationSeconds"],
+    durationSource=timing["durationSource"],
+    estimatedDurationSeconds=timing["estimatedDurationSeconds"],
+    actualDurationSeconds=timing["actualDurationSeconds"],
+    advanceTimeSeconds=timing["advanceTimeSeconds"],
+    advanceCueId=timing["advanceCueId"],
     cacheKey=resolved_cache_key,
     voice=context.voice or DEFAULT_OPENAI_SPEECH_VOICE,
     model=context.model,
@@ -1231,6 +1484,13 @@ def _speech_stream_url(file_name: str) -> str | None:
   return f"{public_base_url}/{file_name}"
 
 
+def _speech_metadata_url(file_name: str) -> str | None:
+  public_base_url = _speech_metadata_public_base_url()
+  if not public_base_url:
+    return None
+  return f"{public_base_url}/{file_name}"
+
+
 def _speech_public_base_url() -> str:
   return os.getenv("SPEECH_PUBLIC_BASE_URL", "").rstrip("/")
 
@@ -1246,6 +1506,19 @@ def _speech_stream_public_base_url() -> str:
   return f"{audio_base_url}/stream" if audio_base_url else ""
 
 
+def _speech_metadata_public_base_url() -> str:
+  configured = os.getenv("SPEECH_METADATA_PUBLIC_BASE_URL", "").rstrip("/")
+  if configured:
+    return configured
+
+  audio_base_url = _speech_public_base_url()
+  if audio_base_url.endswith("/audio"):
+    return f"{audio_base_url.removesuffix('/audio')}/metadata"
+  if audio_base_url.endswith("/stream"):
+    return f"{audio_base_url.removesuffix('/stream')}/metadata"
+  return f"{audio_base_url}/metadata" if audio_base_url else ""
+
+
 def _speech_cache_dir() -> Path:
   return Path(os.getenv("SPEECH_CACHE_DIR", "/tmp/airset-radio-speech"))
 
@@ -1257,6 +1530,122 @@ def _speech_is_configured() -> bool:
 def _estimated_duration(text: str) -> float:
   words = max(1, len(text.split()))
   return round(max(1.2, words / 2.7), 2)
+
+
+def _audio_duration_seconds(audio_bytes: bytes, audio_format: str) -> float | None:
+  if audio_format.lower() != "mp3":
+    return None
+  return _mp3_duration_seconds(audio_bytes)
+
+
+def _audio_duration_seconds_from_file(path: Path | None, audio_format: str) -> float | None:
+  if not path or not path.exists():
+    return None
+  try:
+    return _audio_duration_seconds(path.read_bytes(), audio_format)
+  except OSError:
+    return None
+
+
+def _mp3_duration_seconds(audio_bytes: bytes) -> float | None:
+  if len(audio_bytes) < 4:
+    return None
+
+  cursor = _skip_id3_header(audio_bytes)
+  total_seconds = 0.0
+  frame_count = 0
+  while cursor + 4 <= len(audio_bytes):
+    frame = _mp3_frame_info(audio_bytes[cursor:cursor + 4])
+    if not frame:
+      cursor += 1
+      continue
+    frame_length, samples_per_frame, sample_rate = frame
+    if frame_length <= 0 or cursor + frame_length > len(audio_bytes):
+      break
+    total_seconds += samples_per_frame / sample_rate
+    frame_count += 1
+    cursor += frame_length
+
+  if frame_count == 0:
+    return None
+  return round(total_seconds, 2)
+
+
+def _skip_id3_header(audio_bytes: bytes) -> int:
+  if len(audio_bytes) < 10 or audio_bytes[:3] != b"ID3":
+    return 0
+  tag_size = (
+    (audio_bytes[6] & 0x7F) << 21
+    | (audio_bytes[7] & 0x7F) << 14
+    | (audio_bytes[8] & 0x7F) << 7
+    | (audio_bytes[9] & 0x7F)
+  )
+  return min(len(audio_bytes), 10 + tag_size)
+
+
+def _mp3_frame_info(header_bytes: bytes) -> tuple[int, int, int] | None:
+  if len(header_bytes) < 4:
+    return None
+  header = int.from_bytes(header_bytes, "big")
+  if (header >> 21) & 0x7FF != 0x7FF:
+    return None
+
+  version_id = (header >> 19) & 0x3
+  layer_id = (header >> 17) & 0x3
+  bitrate_index = (header >> 12) & 0xF
+  sample_rate_index = (header >> 10) & 0x3
+  padding = (header >> 9) & 0x1
+
+  if version_id == 0x1 or layer_id == 0 or bitrate_index in {0, 0xF} or sample_rate_index == 0x3:
+    return None
+
+  version = {0x3: "mpeg1", 0x2: "mpeg2", 0x0: "mpeg25"}[version_id]
+  layer = {0x3: "layer1", 0x2: "layer2", 0x1: "layer3"}[layer_id]
+  bitrate = _mp3_bitrate(version, layer, bitrate_index)
+  sample_rate = _mp3_sample_rate(version, sample_rate_index)
+  if not bitrate or not sample_rate:
+    return None
+
+  if layer == "layer1":
+    frame_length = int((12 * bitrate / sample_rate + padding) * 4)
+    samples_per_frame = 384
+  elif layer == "layer3" and version != "mpeg1":
+    frame_length = int(72 * bitrate / sample_rate + padding)
+    samples_per_frame = 576
+  else:
+    frame_length = int(144 * bitrate / sample_rate + padding)
+    samples_per_frame = 1152
+  return frame_length, samples_per_frame, sample_rate
+
+
+def _mp3_bitrate(version: str, layer: str, index: int) -> int | None:
+  mpeg1 = {
+    "layer1": [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448],
+    "layer2": [0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384],
+    "layer3": [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320],
+  }
+  mpeg2 = {
+    "layer1": [0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256],
+    "layer2": [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
+    "layer3": [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
+  }
+  table = mpeg1 if version == "mpeg1" else mpeg2
+  try:
+    return table[layer][index] * 1000
+  except (IndexError, KeyError):
+    return None
+
+
+def _mp3_sample_rate(version: str, index: int) -> int | None:
+  rates = {
+    "mpeg1": [44100, 48000, 32000],
+    "mpeg2": [22050, 24000, 16000],
+    "mpeg25": [11025, 12000, 8000],
+  }
+  try:
+    return rates[version][index]
+  except (IndexError, KeyError):
+    return None
 
 
 def _write_audio_file(path: Path, audio_bytes: bytes) -> None:

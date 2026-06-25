@@ -162,8 +162,14 @@ struct RadioSpeechCue: Codable, Hashable, Identifiable {
 struct RadioSpeechAudio: Codable, Hashable {
   let audioURL: URL?
   let streamURL: URL?
+  let metadataURL: URL?
   let mimeType: String
   let durationSeconds: TimeInterval?
+  let durationSource: String
+  let estimatedDurationSeconds: TimeInterval?
+  let actualDurationSeconds: TimeInterval?
+  let advanceTimeSeconds: TimeInterval?
+  let advanceCueId: String?
   let cacheKey: String
   let voice: String
   let model: String
@@ -175,8 +181,15 @@ struct RadioSpeechAudio: Codable, Hashable {
     case audioUrl
     case streamURL
     case streamUrl
+    case metadataURL
+    case metadataUrl
     case mimeType
     case durationSeconds
+    case durationSource
+    case estimatedDurationSeconds
+    case actualDurationSeconds
+    case advanceTimeSeconds
+    case advanceCueId
     case cacheKey
     case voice
     case model
@@ -187,8 +200,14 @@ struct RadioSpeechAudio: Codable, Hashable {
   init(
     audioURL: URL? = nil,
     streamURL: URL? = nil,
+    metadataURL: URL? = nil,
     mimeType: String = "audio/mpeg",
     durationSeconds: TimeInterval? = nil,
+    durationSource: String = "estimated",
+    estimatedDurationSeconds: TimeInterval? = nil,
+    actualDurationSeconds: TimeInterval? = nil,
+    advanceTimeSeconds: TimeInterval? = nil,
+    advanceCueId: String? = nil,
     cacheKey: String,
     voice: String,
     model: String,
@@ -197,8 +216,14 @@ struct RadioSpeechAudio: Codable, Hashable {
   ) {
     self.audioURL = audioURL
     self.streamURL = streamURL
+    self.metadataURL = metadataURL
     self.mimeType = mimeType
     self.durationSeconds = durationSeconds
+    self.durationSource = durationSource
+    self.estimatedDurationSeconds = estimatedDurationSeconds
+    self.actualDurationSeconds = actualDurationSeconds
+    self.advanceTimeSeconds = advanceTimeSeconds
+    self.advanceCueId = advanceCueId
     self.cacheKey = cacheKey
     self.voice = voice
     self.model = model
@@ -212,8 +237,15 @@ struct RadioSpeechAudio: Codable, Hashable {
       ?? container.decodeIfPresent(URL.self, forKey: .audioUrl)
     streamURL = try container.decodeIfPresent(URL.self, forKey: .streamURL)
       ?? container.decodeIfPresent(URL.self, forKey: .streamUrl)
+    metadataURL = try container.decodeIfPresent(URL.self, forKey: .metadataURL)
+      ?? container.decodeIfPresent(URL.self, forKey: .metadataUrl)
     mimeType = try container.decodeIfPresent(String.self, forKey: .mimeType) ?? "audio/mpeg"
     durationSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .durationSeconds)
+    durationSource = try container.decodeIfPresent(String.self, forKey: .durationSource) ?? "estimated"
+    estimatedDurationSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .estimatedDurationSeconds)
+    actualDurationSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .actualDurationSeconds)
+    advanceTimeSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .advanceTimeSeconds)
+    advanceCueId = try container.decodeIfPresent(String.self, forKey: .advanceCueId)
     cacheKey = try container.decode(String.self, forKey: .cacheKey)
     voice = try container.decode(String.self, forKey: .voice)
     model = try container.decode(String.self, forKey: .model)
@@ -225,13 +257,57 @@ struct RadioSpeechAudio: Codable, Hashable {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encodeIfPresent(audioURL, forKey: .audioURL)
     try container.encodeIfPresent(streamURL, forKey: .streamURL)
+    try container.encodeIfPresent(metadataURL, forKey: .metadataURL)
     try container.encode(mimeType, forKey: .mimeType)
     try container.encodeIfPresent(durationSeconds, forKey: .durationSeconds)
+    try container.encode(durationSource, forKey: .durationSource)
+    try container.encodeIfPresent(estimatedDurationSeconds, forKey: .estimatedDurationSeconds)
+    try container.encodeIfPresent(actualDurationSeconds, forKey: .actualDurationSeconds)
+    try container.encodeIfPresent(advanceTimeSeconds, forKey: .advanceTimeSeconds)
+    try container.encodeIfPresent(advanceCueId, forKey: .advanceCueId)
     try container.encode(cacheKey, forKey: .cacheKey)
     try container.encode(voice, forKey: .voice)
     try container.encode(model, forKey: .model)
     try container.encode(status, forKey: .status)
     try container.encode(cues, forKey: .cues)
+  }
+
+  var resolvedMetadataURL: URL? {
+    metadataURL ?? Self.derivedMetadataURL(from: streamURL) ?? Self.derivedMetadataURL(from: audioURL)
+  }
+
+  var hasActualTiming: Bool {
+    durationSource == "audio" || durationSource == "timing" || actualDurationSeconds != nil || !cues.isEmpty
+  }
+
+  private static func derivedMetadataURL(from url: URL?) -> URL? {
+    guard let url,
+          var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+      return nil
+    }
+
+    let path = components.path
+    if path.contains("/v1/radio/speech/stream/") {
+      components.path = path.replacingOccurrences(of: "/v1/radio/speech/stream/", with: "/v1/radio/speech/metadata/")
+    } else if path.contains("/v1/radio/speech/audio/") {
+      components.path = path.replacingOccurrences(of: "/v1/radio/speech/audio/", with: "/v1/radio/speech/metadata/")
+    } else if let derivedPath = siblingMetadataPath(from: path) {
+      components.path = derivedPath
+    } else {
+      return nil
+    }
+    return components.url
+  }
+
+  private static func siblingMetadataPath(from path: String) -> String? {
+    var components = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+    guard components.count >= 2 else { return nil }
+    let parentIndex = components.count - 2
+    guard components[parentIndex] == "stream" || components[parentIndex] == "audio" else {
+      return nil
+    }
+    components[parentIndex] = "metadata"
+    return components.joined(separator: "/")
   }
 }
 
@@ -254,6 +330,16 @@ struct RadioSpeechPlaybackSegment: Identifiable, Hashable {
 
   var timedCues: [RadioSpeechCue] {
     audio?.cues ?? []
+  }
+
+  func replacingAudio(_ audio: RadioSpeechAudio) -> RadioSpeechPlaybackSegment {
+    RadioSpeechPlaybackSegment(
+      id: id,
+      kind: kind,
+      text: text,
+      displayText: displayText,
+      audio: audio
+    )
   }
 
   private static func playableRemoteURL(_ url: URL?) -> URL? {

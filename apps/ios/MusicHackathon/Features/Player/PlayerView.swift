@@ -294,15 +294,7 @@ struct PlayerView: View {
   }
 
   private var playbackDurationSeconds: TimeInterval? {
-    if let currentTrack = playbackController.currentTrack {
-      return currentTrack.duration
-    }
-
-    if let duration = playbackController.currentSpeech?.audio?.durationSeconds, duration > 0 {
-      return duration
-    }
-
-    return nil
+    playbackController.displayDurationSeconds
   }
 
   private var trailingTimeText: String {

@@ -24,6 +24,7 @@ from radio_agent.schemas import (
   RadioMemoryCompressionResponse,
   RadioMemoryPatchProposal,
   RadioSpeech,
+  RadioSpeechAudio,
   RadioSpeechAudioConfig,
   RadioSpeechSegment,
   RadioSpeechVoiceCatalog,
@@ -39,6 +40,7 @@ from radio_agent.speech import (
   can_stream_speech_audio,
   ensure_speech_audio_file,
   speech_audio_mime_type,
+  speech_audio_metadata,
   stream_speech_audio_file,
   synthesize_speech_segments,
 )
@@ -239,6 +241,14 @@ def speech_audio_stream(file_name: str) -> StreamingResponse:
     stream_speech_audio_file(file_name),
     media_type=speech_audio_mime_type(file_name),
   )
+
+
+@app.get("/v1/radio/speech/metadata/{file_name}", response_model=RadioSpeechAudio)
+def speech_audio_metadata_file(file_name: str) -> RadioSpeechAudio:
+  metadata = speech_audio_metadata(file_name)
+  if not metadata:
+    raise HTTPException(status_code=404, detail="Speech audio metadata not found.")
+  return metadata
 
 
 @app.post("/v1/radio/memory/compress", response_model=RadioMemoryCompressionResponse)

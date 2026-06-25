@@ -113,6 +113,15 @@ final class PlaybackController: RadioPlaybackControlling {
   var elapsedSeconds: TimeInterval = 0
   var elapsedTimeText: String = "0:00"
   var activeBackend: PlaybackBackend = .none
+  var displayDurationSeconds: TimeInterval? {
+    if let currentSpeech {
+      return speechDuration(for: activeBackend == .speechAudio ? speechAudioPlayer.currentItem : nil, speech: currentSpeech)
+    }
+    if activeBackend == .localPreview, let duration = trackDurationForCurrentPreview() {
+      return duration
+    }
+    return currentTrack?.duration
+  }
   var onPlaybackFinished: ((PlaybackCompletionKind) -> Void)?
   var onPlaybackFailed: ((PlaybackFailureContext) -> Void)?
   var onTrackTransitionWindowReached: (() -> Void)?
@@ -141,6 +150,7 @@ final class PlaybackController: RadioPlaybackControlling {
   @ObservationIgnored private var speechProgressTask: Task<Void, Never>?
   @ObservationIgnored private var playbackTask: Task<Void, Never>?
   @ObservationIgnored private var speechStartTask: Task<Void, Never>?
+  @ObservationIgnored private var speechMetadataRefreshTask: Task<Void, Never>?
   @ObservationIgnored private var trackVolumeRampTask: Task<Void, Never>?
   @ObservationIgnored private var upcomingPreparationTask: Task<Void, Never>?
   @ObservationIgnored private var didNotifyTrackFinished = false
@@ -208,6 +218,7 @@ final class PlaybackController: RadioPlaybackControlling {
     speechProgressTask?.cancel()
     playbackTask?.cancel()
     speechStartTask?.cancel()
+    speechMetadataRefreshTask?.cancel()
     trackVolumeRampTask?.cancel()
     upcomingPreparationTask?.cancel()
     remoteCommandTargets.forEach { item in
@@ -831,6 +842,7 @@ final class PlaybackController: RadioPlaybackControlling {
     addSpeechPeriodicTimeObserver()
     addSpeechPlaybackItemObservers(for: item, mediaKind: .speech(speech))
     speechAudioPlayer.play()
+    startSpeechMetadataRefresh(for: speech)
     endBackgroundContinuationTask(reason: "speech_audio_started")
 
     activeBackend = .speechAudio
@@ -850,6 +862,7 @@ final class PlaybackController: RadioPlaybackControlling {
   }
 
   private func startSynthesizedSpeechPlayback(for speech: RadioSpeechPlaybackSegment) {
+    stopSpeechMetadataRefresh()
     let spokenText = speech.text.isEmpty ? speech.displayText : speech.text
     guard !spokenText.isEmpty else {
       finishPlayback(kind: .speech)
@@ -871,7 +884,7 @@ final class PlaybackController: RadioPlaybackControlling {
     state = .playing
     updateNowPlayingInfo(for: speech)
     updateNowPlayingPlaybackRate(1)
-    startSpeechProgressTimer(duration: speech.audio?.durationSeconds ?? Self.estimatedSpeechDuration(for: spokenText))
+    startSpeechProgressTimer(duration: speechDuration(for: nil, speech: speech))
     diagnostics?.record(
       .notice,
       chain: .playbackSpeech,
@@ -918,7 +931,9 @@ final class PlaybackController: RadioPlaybackControlling {
       if speechSynthesizer.continueSpeaking() {
         state = .playing
         updateNowPlayingPlaybackRate(1)
-        startSpeechProgressTimer(duration: currentSpeech?.audio?.durationSeconds ?? 0)
+        if let currentSpeech {
+          startSpeechProgressTimer(duration: speechDuration(for: nil, speech: currentSpeech))
+        }
       } else if let currentSpeech {
         playSpeech(currentSpeech)
       }
@@ -981,6 +996,7 @@ final class PlaybackController: RadioPlaybackControlling {
 
   private func stopSpeechPlayback(clearCurrentSpeech: Bool) {
     speechStartTask?.cancel()
+    stopSpeechMetadataRefresh()
     speechAudioPlayer.pause()
     speechAudioPlayer.replaceCurrentItem(with: nil)
     speechSynthesizer.stopSpeaking(at: .immediate)
@@ -995,6 +1011,58 @@ final class PlaybackController: RadioPlaybackControlling {
       synthesizedSpeechCueRanges = []
       currentSpeechPlaybackMode = .standalone
     }
+  }
+
+  private func startSpeechMetadataRefresh(for speech: RadioSpeechPlaybackSegment) {
+    stopSpeechMetadataRefresh()
+    guard let metadataURL = speech.audio?.resolvedMetadataURL else { return }
+
+    speechMetadataRefreshTask = Task { [weak self] in
+      let decoder = JSONDecoder()
+      for attempt in 0..<8 {
+        let delay = attempt == 0 ? 0.75 : 1.0
+        try? await Task.sleep(for: .seconds(delay))
+        guard !Task.isCancelled else { return }
+
+        do {
+          let (data, response) = try await URLSession.shared.data(from: metadataURL)
+          guard (response as? HTTPURLResponse)?.statusCode == 200 else { continue }
+          let audio = try decoder.decode(RadioSpeechAudio.self, from: data)
+          guard !Task.isCancelled else { return }
+
+          await MainActor.run {
+            self?.applyRefreshedSpeechAudio(audio, forSpeechID: speech.id)
+          }
+          if audio.hasActualTiming {
+            return
+          }
+        } catch {
+          continue
+        }
+      }
+    }
+  }
+
+  private func stopSpeechMetadataRefresh() {
+    speechMetadataRefreshTask?.cancel()
+    speechMetadataRefreshTask = nil
+  }
+
+  private func applyRefreshedSpeechAudio(_ audio: RadioSpeechAudio, forSpeechID speechID: String) {
+    guard let currentSpeech,
+          currentSpeech.id == speechID,
+          currentSpeech.audio?.cacheKey == audio.cacheKey else {
+      return
+    }
+
+    let updatedSpeech = currentSpeech.replacingAudio(audio)
+    self.currentSpeech = updatedSpeech
+    updateCurrentSpeechCue(for: elapsedSeconds, speech: updatedSpeech)
+    let duration = speechDuration(for: speechAudioPlayer.currentItem, speech: updatedSpeech)
+    if duration > 0 {
+      playbackProgress = min(max(elapsedSeconds / duration, 0), 1)
+    }
+    updateNowPlayingInfo(for: updatedSpeech)
   }
 
   private func addTrackPeriodicTimeObserver() {
@@ -1240,7 +1308,13 @@ final class PlaybackController: RadioPlaybackControlling {
           if let currentSpeech = self.currentSpeech, self.currentSpeechCue == nil {
             self.updateCurrentSpeechCue(for: self.elapsedSeconds, speech: currentSpeech)
           }
-          self.notifySpeechAdvancePointIfNeeded(elapsedSeconds: self.elapsedSeconds, duration: duration)
+          if let currentSpeech = self.currentSpeech {
+            self.notifySpeechAdvancePointIfNeeded(
+              elapsedSeconds: self.elapsedSeconds,
+              duration: duration,
+              speech: currentSpeech
+            )
+          }
         }
       }
     }
@@ -1299,7 +1373,7 @@ final class PlaybackController: RadioPlaybackControlling {
     }
     let duration = speechDuration(for: speechAudioPlayer.currentItem, speech: currentSpeech)
     playbackProgress = min(max(elapsedSeconds / duration, 0), 1)
-    notifySpeechAdvancePointIfNeeded(elapsedSeconds: elapsedSeconds, duration: duration)
+    notifySpeechAdvancePointIfNeeded(elapsedSeconds: elapsedSeconds, duration: duration, speech: currentSpeech)
   }
 
   private func updateMusicPlaybackProgress(duration: TimeInterval) {
@@ -1342,9 +1416,21 @@ final class PlaybackController: RadioPlaybackControlling {
        duration > 0 {
       return duration
     }
-    if let duration = speech.audio?.durationSeconds, duration > 0 {
+
+    if let duration = speech.audio?.actualDurationSeconds, duration > 0 {
       return duration
     }
+
+    if let duration = speech.timedCues.map(\.endTime).max(), duration > 0 {
+      return duration
+    }
+
+    if speech.audio?.hasActualTiming == true,
+       let duration = speech.audio?.durationSeconds,
+       duration > 0 {
+      return duration
+    }
+
     return Self.estimatedSpeechDuration(for: speech.text.isEmpty ? speech.displayText : speech.text)
   }
 
@@ -1378,12 +1464,30 @@ final class PlaybackController: RadioPlaybackControlling {
     onFullSongHandoffWindowReached?()
   }
 
-  private func notifySpeechAdvancePointIfNeeded(elapsedSeconds: TimeInterval, duration: TimeInterval) {
+  private func notifySpeechAdvancePointIfNeeded(
+    elapsedSeconds: TimeInterval,
+    duration: TimeInterval,
+    speech: RadioSpeechPlaybackSegment
+  ) {
     guard currentSpeechPlaybackMode == .transitionOverlay else { return }
     guard !didNotifySpeechAdvancePoint else { return }
-    guard duration > 0, elapsedSeconds / duration >= currentOverlayTiming.advanceRatio else { return }
+    let advanceTime = speechAdvanceTime(for: speech, duration: duration)
+    guard advanceTime > 0, elapsedSeconds >= advanceTime else { return }
     didNotifySpeechAdvancePoint = true
     onSpeechAdvancePointReached?()
+  }
+
+  private func speechAdvanceTime(
+    for speech: RadioSpeechPlaybackSegment,
+    duration: TimeInterval
+  ) -> TimeInterval {
+    if speech.audio?.hasActualTiming == true,
+       let advanceTime = speech.audio?.advanceTimeSeconds,
+       advanceTime > 0 {
+      return min(advanceTime, duration)
+    }
+
+    return duration * currentOverlayTiming.advanceRatio
   }
 
   private func updateCurrentSpeechCue(for elapsedSeconds: TimeInterval, speech: RadioSpeechPlaybackSegment) {
@@ -1429,6 +1533,19 @@ final class PlaybackController: RadioPlaybackControlling {
       return speech.timedCues
     }
     let fallbackText = spokenText.trimmedNilIfEmpty ?? speech.displayText.trimmedNilIfEmpty ?? speech.text
+    if speech.playableAudioURL != nil {
+      let cueText = speech.displayText.trimmedNilIfEmpty ?? fallbackText
+      return [
+        RadioSpeechCue(
+          id: "\(speech.id)-audio-fallback-cue",
+          text: fallbackText,
+          displayText: cueText,
+          startTime: 0,
+          endTime: speechDuration(for: speechAudioPlayer.currentItem, speech: speech),
+          words: []
+        )
+      ]
+    }
     return Self.fallbackSpeechCues(for: fallbackText, speechID: speech.id)
   }
 
@@ -1601,6 +1718,7 @@ final class PlaybackController: RadioPlaybackControlling {
       didNotifySpeechFinished = true
       beginBackgroundContinuationTask(reason: "speech_finished")
       speechStartTask?.cancel()
+      stopSpeechMetadataRefresh()
       removeSpeechPlaybackItemObservers()
       removeSpeechPeriodicTimeObserver()
       stopSpeechProgressTimer()
@@ -1824,7 +1942,7 @@ final class PlaybackController: RadioPlaybackControlling {
       MPMediaItemPropertyTitle: "Airset Host",
       MPMediaItemPropertyArtist: speech.displayText,
       MPMediaItemPropertyAlbumTitle: "Airset Radio",
-      MPMediaItemPropertyPlaybackDuration: speech.audio?.durationSeconds ?? Self.estimatedSpeechDuration(for: spokenText),
+      MPMediaItemPropertyPlaybackDuration: displayDurationSeconds ?? Self.estimatedSpeechDuration(for: spokenText),
       MPNowPlayingInfoPropertyElapsedPlaybackTime: currentPlaybackSeconds(),
       MPNowPlayingInfoPropertyPlaybackRate: state == .playing ? 1.0 : 0.0,
       MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0

@@ -777,6 +777,7 @@ def test_generate_station_stream_delivery_returns_urls_without_synthesizing(monk
   assert intro_audio["status"] == "ready"
   assert intro_audio["audioURL"].startswith("https://speech.test/audio/speech_")
   assert intro_audio["streamURL"].startswith("https://speech.test/stream/speech_")
+  assert intro_audio["metadataURL"].startswith("https://speech.test/metadata/speech_")
   assert transition_audio["status"] == "ready"
   assert not (tmp_path / f"{intro_audio['cacheKey']}.mp3").exists()
   assert (tmp_path / f"{intro_audio['cacheKey']}.metadata.json").exists()
@@ -784,7 +785,7 @@ def test_generate_station_stream_delivery_returns_urls_without_synthesizing(monk
 
 def test_speech_stream_endpoint_generates_cache_and_audio_endpoint_reuses(monkeypatch, tmp_path):
   _configure_volcengine_env(monkeypatch, tmp_path)
-  audio_bytes = b"ID3stream-mp3"
+  audio_bytes = _fake_mp3_bytes(frame_count=100)
   calls = []
   segment = RadioSpeechSegment(
     id="station-intro",
@@ -803,6 +804,11 @@ def test_speech_stream_endpoint_generates_cache_and_audio_endpoint_reuses(monkey
   assert audio.status == "ready"
   assert audio.streamURL == f"https://speech.test/stream/{audio.cacheKey}.mp3"
   assert audio.audioURL == f"https://speech.test/audio/{audio.cacheKey}.mp3"
+  assert audio.metadataURL == f"https://speech.test/metadata/{audio.cacheKey}.mp3"
+  assert audio.durationSource == "estimated"
+  assert audio.estimatedDurationSeconds == audio.durationSeconds
+  assert audio.actualDurationSeconds is None
+  assert audio.advanceTimeSeconds is None
   assert not (tmp_path / f"{audio.cacheKey}.mp3").exists()
 
   def fake_stream(method, url, *, headers, json, timeout):
@@ -826,6 +832,16 @@ def test_speech_stream_endpoint_generates_cache_and_audio_endpoint_reuses(monkey
   assert len(calls) == 1
   assert (tmp_path / f"{audio.cacheKey}.mp3").read_bytes() == audio_bytes
 
+  metadata_response = client.get(f"/v1/radio/speech/metadata/{audio.cacheKey}.mp3")
+  metadata = metadata_response.json()
+  assert metadata_response.status_code == 200
+  assert metadata["durationSource"] == "audio"
+  assert metadata["metadataURL"] == f"https://speech.test/metadata/{audio.cacheKey}.mp3"
+  assert metadata["estimatedDurationSeconds"] == audio.estimatedDurationSeconds
+  assert metadata["actualDurationSeconds"] == 2.4
+  assert metadata["durationSeconds"] == 2.4
+  assert metadata["advanceTimeSeconds"] == 1.6
+
   def fail_if_called(*args, **kwargs):
     raise AssertionError("cache hit should not call Volcengine")
 
@@ -837,6 +853,61 @@ def test_speech_stream_endpoint_generates_cache_and_audio_endpoint_reuses(monkey
   assert cached_stream_response.content == audio_bytes
   assert audio_response.status_code == 200
   assert audio_response.content == audio_bytes
+
+
+def test_speech_stream_metadata_keeps_timing_cues_and_advance_marker(monkeypatch, tmp_path):
+  _configure_volcengine_env(monkeypatch, tmp_path)
+  audio_bytes = _fake_mp3_bytes(frame_count=100)
+  segment = RadioSpeechSegment(
+    id="transition-1",
+    kind="transition",
+    text="Hello there. Next up.",
+    displayText="Next up.",
+    fromItemId="song-1",
+    toItemId="song-2",
+  )
+  results, diagnostics = speech.synthesize_speech_segments(
+    [segment],
+    RadioSpeechAudioConfig(enabled=True, delivery="stream", provider="volcengine"),
+  )
+  audio = results[0].audio
+
+  assert diagnostics == []
+  assert audio.durationSource == "estimated"
+
+  def fake_stream(method, url, *, headers, json, timeout):
+    return _FakeVolcengineStream(
+      200,
+      [
+        {"code": 0, "data": base64.b64encode(audio_bytes).decode("ascii")},
+        {
+          "code": 0,
+          "payload": {
+            "words": [
+              {"word": "Hello", "startTime": 0.1, "endTime": 0.35},
+              {"word": "there", "startTime": 0.36, "endTime": 0.7},
+              {"word": "Next", "startTime": 0.9, "endTime": 1.1},
+              {"word": "up", "startTime": 1.12, "endTime": 1.4},
+            ]
+          },
+        },
+        {"code": 20000000, "message": "finished"},
+      ],
+    )
+
+  monkeypatch.setattr(speech.httpx, "stream", fake_stream)
+  client = TestClient(app)
+  stream_response = client.get(f"/v1/radio/speech/stream/{audio.cacheKey}.mp3")
+  metadata_response = client.get(f"/v1/radio/speech/metadata/{audio.cacheKey}.mp3")
+  metadata = metadata_response.json()
+
+  assert stream_response.status_code == 200
+  assert metadata_response.status_code == 200
+  assert metadata["durationSource"] == "audio"
+  assert metadata["actualDurationSeconds"] == 2.4
+  assert [cue["displayText"] for cue in metadata["cues"]] == ["Hello there.", "Next up."]
+  assert metadata["advanceCueId"] == "transition-1-cue-2"
+  assert metadata["advanceTimeSeconds"] == 0.9
 
 
 def test_speech_stream_failure_does_not_leave_final_cache_or_leak_secret(monkeypatch, tmp_path):
@@ -1044,6 +1115,31 @@ class _FakeVolcengineStream:
   def iter_lines(self):
     for body in self._bodies:
       yield json.dumps(body)
+
+
+def _fake_mp3_bytes(frame_count: int = 1) -> bytes:
+  # MPEG 2, Layer III, 128 kbps, 24 kHz. Each frame is 384 bytes and 24 ms.
+  header = _mp3_frame_header(version_id=0b10, layer_id=0b01, bitrate_index=12, sample_rate_index=1)
+  frame = header + (b"\0" * 380)
+  return b"ID3\x04\x00\x00\x00\x00\x00\x00" + (frame * frame_count)
+
+
+def _mp3_frame_header(
+  *,
+  version_id: int,
+  layer_id: int,
+  bitrate_index: int,
+  sample_rate_index: int,
+) -> bytes:
+  header = (
+    0x7FF << 21
+    | version_id << 19
+    | layer_id << 17
+    | 1 << 16
+    | bitrate_index << 12
+    | sample_rate_index << 10
+  )
+  return header.to_bytes(4, "big")
 
 
 def _configure_volcengine_env(monkeypatch, tmp_path):

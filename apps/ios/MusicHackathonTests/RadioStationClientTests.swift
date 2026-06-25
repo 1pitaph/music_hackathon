@@ -936,6 +936,97 @@ final class RadioStationClientTests: XCTestCase {
     )
   }
 
+  func testSpeechAudioDecodesTimingMetadataAndDerivesMetadataURL() throws {
+    let data = """
+    {
+      "audioURL": "https://speech.test/v1/radio/speech/audio/speech_abc.mp3",
+      "streamURL": "https://speech.test/v1/radio/speech/stream/speech_abc.mp3",
+      "metadataURL": "https://speech.test/v1/radio/speech/metadata/speech_abc.mp3",
+      "mimeType": "audio/mpeg",
+      "durationSeconds": 9.5,
+      "durationSource": "audio",
+      "estimatedDurationSeconds": 1.2,
+      "actualDurationSeconds": 9.5,
+      "advanceTimeSeconds": 6.2,
+      "advanceCueId": "transition-1-cue-2",
+      "cacheKey": "speech_abc",
+      "voice": "zh_female_test",
+      "model": "seed-tts-1.0",
+      "status": "ready",
+      "cues": [
+        {
+          "id": "transition-1-cue-2",
+          "text": "Next up.",
+          "displayText": "Next up.",
+          "startTime": 6.2,
+          "endTime": 9.5,
+          "words": []
+        }
+      ]
+    }
+    """.data(using: .utf8)!
+
+    let audio = try JSONDecoder().decode(RadioSpeechAudio.self, from: data)
+
+    XCTAssertEqual(audio.durationSource, "audio")
+    XCTAssertEqual(audio.estimatedDurationSeconds, 1.2)
+    XCTAssertEqual(audio.actualDurationSeconds, 9.5)
+    XCTAssertEqual(audio.advanceTimeSeconds, 6.2)
+    XCTAssertEqual(audio.advanceCueId, "transition-1-cue-2")
+    XCTAssertEqual(audio.cues.first?.displayText, "Next up.")
+    XCTAssertTrue(audio.hasActualTiming)
+    XCTAssertEqual(
+      audio.metadataURL?.absoluteString,
+      "https://speech.test/v1/radio/speech/metadata/speech_abc.mp3"
+    )
+    XCTAssertEqual(
+      audio.resolvedMetadataURL?.absoluteString,
+      "https://speech.test/v1/radio/speech/metadata/speech_abc.mp3"
+    )
+  }
+
+  func testSpeechAudioLegacyPayloadDefaultsToEstimatedTiming() throws {
+    let data = """
+    {
+      "audioURL": "https://speech.test/v1/radio/speech/audio/speech_legacy.mp3",
+      "mimeType": "audio/mpeg",
+      "durationSeconds": 1.2,
+      "cacheKey": "speech_legacy",
+      "voice": "zh_female_test",
+      "model": "seed-tts-1.0",
+      "status": "ready"
+    }
+    """.data(using: .utf8)!
+
+    let audio = try JSONDecoder().decode(RadioSpeechAudio.self, from: data)
+
+    XCTAssertEqual(audio.durationSource, "estimated")
+    XCTAssertNil(audio.actualDurationSeconds)
+    XCTAssertNil(audio.advanceTimeSeconds)
+    XCTAssertFalse(audio.hasActualTiming)
+    XCTAssertEqual(
+      audio.resolvedMetadataURL?.absoluteString,
+      "https://speech.test/v1/radio/speech/metadata/speech_legacy.mp3"
+    )
+  }
+
+  func testSpeechAudioDerivesMetadataURLFromSiblingStreamPath() throws {
+    let audio = RadioSpeechAudio(
+      audioURL: URL(string: "https://speech.test/audio/speech_short.mp3"),
+      streamURL: URL(string: "https://speech.test/stream/speech_short.mp3"),
+      cacheKey: "speech_short",
+      voice: "zh_female_test",
+      model: "seed-tts-1.0",
+      status: "ready"
+    )
+
+    XCTAssertNil(audio.metadataURL)
+    XCTAssertEqual(
+      audio.resolvedMetadataURL?.absoluteString,
+      "https://speech.test/metadata/speech_short.mp3"
+    )
+  }
+
   private func makePublishTrack(index: Int) -> Track {
     Track(
       title: "Seed \(index)",
