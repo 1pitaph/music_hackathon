@@ -43,6 +43,7 @@ final class PlaybackController: RadioPlaybackControlling {
   @ObservationIgnored private let musicPlayer = ApplicationMusicPlayer.shared
   @ObservationIgnored private let speechSynthesizer = AVSpeechSynthesizer()
   @ObservationIgnored private let speechCompletionDelegate = SpeechCompletionDelegate()
+  @ObservationIgnored private let musicAuthorization: MusicAuthorizationService
   @ObservationIgnored private let catalogService = AppleMusicCatalogService()
   @ObservationIgnored private var timeObserverToken: Any?
   @ObservationIgnored private var endObserverToken: NSObjectProtocol?
@@ -52,6 +53,16 @@ final class PlaybackController: RadioPlaybackControlling {
   @ObservationIgnored private var didNotifyTrackFinished = false
 
   init() {
+    self.musicAuthorization = MusicAuthorizationService()
+    configureController()
+  }
+
+  init(musicAuthorization: MusicAuthorizationService) {
+    self.musicAuthorization = musicAuthorization
+    configureController()
+  }
+
+  private func configureController() {
     speechCompletionDelegate.onFinish = { [weak self] in
       Task { @MainActor in
         self?.finishSynthesizedSpeech()
@@ -178,22 +189,25 @@ final class PlaybackController: RadioPlaybackControlling {
 
   private func startAppleMusicPlayback(for track: Track) async throws {
     didNotifyTrackFinished = false
-    let authorizedStatus = MusicAuthorization.currentStatus == .authorized
-      ? MusicAuthorization.currentStatus
-      : await MusicAuthorization.request()
-    guard authorizedStatus == .authorized else {
-      throw PlaybackError.appleMusicAccessDenied
-    }
-
-    let subscription = try await MusicSubscription.current
-    guard subscription.canPlayCatalogContent else {
-      throw PlaybackError.appleMusicSubscriptionRequired
-    }
+    try await musicAuthorization.ensureCatalogPlaybackReady()
 
     let song = try await catalogService.song(for: track)
     let resolvedTrack = AppleMusicCatalogService.track(from: song, fallback: track)
     musicPlayer.queue = [song]
-    try await musicPlayer.play()
+
+    do {
+      try await musicPlayer.prepareToPlay()
+      try await musicPlayer.play()
+    } catch {
+      if let previewURL = resolvedTrack.previewURL ?? track.previewURL {
+        currentTrack = resolvedTrack
+        lastErrorMessage = "完整歌曲暂时不可用，已切换到试听片段。"
+        startPreviewPlayback(for: resolvedTrack, previewURL: previewURL)
+        return
+      }
+
+      throw error
+    }
 
     currentTrack = resolvedTrack
     activeBackend = .appleMusic

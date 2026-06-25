@@ -4,12 +4,14 @@ import SwiftUI
 struct MusicHackathonApp: App {
   @State private var playbackController: PlaybackController
   @State private var radioStationController: RadioStationController
-  @State private var musicAuthorization = MusicAuthorizationService()
+  @State private var musicAuthorization: MusicAuthorizationService
   @State private var appleMusicLibraryStore: AppleMusicLibraryStore
 
   init() {
-    let playbackController = PlaybackController()
+    let musicAuthorization = MusicAuthorizationService()
+    let playbackController = PlaybackController(musicAuthorization: musicAuthorization)
     let appleMusicLibraryStore = AppleMusicLibraryStore()
+    _musicAuthorization = State(initialValue: musicAuthorization)
     _playbackController = State(initialValue: playbackController)
     _appleMusicLibraryStore = State(initialValue: appleMusicLibraryStore)
     _radioStationController = State(

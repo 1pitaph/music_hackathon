@@ -1,9 +1,12 @@
 import MusicKit
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
   @Environment(MusicAuthorizationService.self) private var musicAuthorization
+  @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
   @Environment(RadioStationController.self) private var radioStation
+  @Environment(\.openURL) private var openURL
 
   @AppStorage(RadioHostVoiceSettings.speakerIDKey) private var selectedHostSpeakerID = ""
 
@@ -11,6 +14,9 @@ struct SettingsView: View {
   @State private var backgroundPlay = false
   @State private var publicStation = false
   @State private var dataCollection = true
+  @State private var activeAppleMusicAlert: AppleMusicAlert?
+  @State private var isShowingMusicSubscriptionOffer = false
+  @State private var didPresentInitialAppleMusicIssue = false
 
   var body: some View {
     List {
@@ -24,8 +30,23 @@ struct SettingsView: View {
       aboutSection
     }
     .listStyle(.insetGrouped)
+    .alert(item: $activeAppleMusicAlert, content: appleMusicAlert)
+    .musicSubscriptionOffer(
+      isPresented: $isShowingMusicSubscriptionOffer,
+      options: musicSubscriptionOfferOptions
+    ) { error in
+      if let error {
+        activeAppleMusicAlert = .subscriptionOfferFailed(error.localizedDescription)
+      }
+    }
+    .onChange(of: isShowingMusicSubscriptionOffer) { _, isPresented in
+      guard !isPresented else { return }
+      Task {
+        await refreshAppleMusicAccess(presentsFollowUp: false)
+      }
+    }
     .task {
-      await musicAuthorization.refreshAccessState()
+      await refreshAppleMusicAccess(presentsFollowUp: true)
       await radioStation.refreshMemoryStatus()
       await loadSpeechVoicesIfNeeded()
     }
@@ -35,27 +56,36 @@ struct SettingsView: View {
     Section("Apple Music 授权") {
       LabeledContent("授权状态", value: musicAuthorization.statusText)
       LabeledContent("订阅状态", value: musicAuthorization.subscriptionText)
-
-      Button {
-        Task {
-          await musicAuthorization.requestAccess()
-        }
-      } label: {
-        Label(
-          musicAuthorization.isRequestingAccess ? "请求中" : "连接 Apple Music",
-          systemImage: "person.badge.key"
-        )
+      if let subscription = musicAuthorization.subscription {
+        LabeledContent("同步资料库", value: subscription.hasCloudLibraryEnabled ? "已开启" : "未开启")
       }
-      .disabled(musicAuthorization.isRequestingAccess || musicAuthorization.status == .authorized)
+
+      VStack(alignment: .leading, spacing: 8) {
+        Label(appleMusicReadinessTitle, systemImage: appleMusicReadinessIcon)
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(appleMusicReadinessTint)
+
+        Text(appleMusicReadinessMessage)
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+      }
+      .padding(.vertical, 4)
+
+      Button {
+        handleAppleMusicPrimaryAction()
+      } label: {
+        Label(appleMusicPrimaryActionTitle, systemImage: appleMusicPrimaryActionIcon)
+      }
+      .disabled(isAppleMusicActionBusy)
 
       Button {
         Task {
-          await musicAuthorization.refreshAccessState()
+          await refreshAppleMusicAccess(presentsFollowUp: true)
         }
       } label: {
         Label("刷新播放权限", systemImage: "arrow.triangle.2.circlepath")
       }
-      .disabled(musicAuthorization.isRequestingAccess)
+      .disabled(isAppleMusicActionBusy)
 
       if let message = musicAuthorization.lastErrorMessage {
         Text(message)
@@ -209,6 +239,290 @@ struct SettingsView: View {
     return "后端默认"
   }
 
+  private var isAppleMusicActionBusy: Bool {
+    musicAuthorization.isRequestingAccess || musicAuthorization.isRefreshingSubscription
+  }
+
+  private var musicSubscriptionOfferOptions: MusicSubscriptionOffer.Options {
+    MusicSubscriptionOffer.Options(messageIdentifier: .playMusic)
+  }
+
+  private var appleMusicReadinessTitle: String {
+    return switch musicAuthorization.readiness {
+    case .notDetermined:
+      "需要连接 Apple Music"
+    case .requestingAuthorization:
+      "正在请求授权"
+    case .denied:
+      "Apple Music 权限已关闭"
+    case .restricted:
+      "Apple Music 访问受限制"
+    case .checkingSubscription:
+      "正在检查播放资格"
+    case .subscriptionStatusUnknown:
+      "需要刷新播放资格"
+    case .ready:
+      "Apple Music 已就绪"
+    case .needsSubscription:
+      "需要 Apple Music 订阅"
+    case .catalogPlaybackUnavailable:
+      "目录播放暂不可用"
+    case .privacyAcknowledgementRequired:
+      "需要确认 Apple Music 隐私政策"
+    case .subscriptionCheckFailed:
+      "订阅状态检查失败"
+    }
+  }
+
+  private var appleMusicReadinessMessage: String {
+    switch musicAuthorization.readiness {
+    case .notDetermined:
+      "连接后，Airset 可以播放完整歌曲，并读取你授权的歌单和歌曲。"
+    case .requestingAuthorization:
+      "请在系统弹窗中允许 Airset 访问媒体与 Apple Music。"
+    case .denied:
+      "请到系统设置中允许 Airset 访问媒体与 Apple Music。"
+    case .restricted:
+      "此设备可能被屏幕使用时间、家长控制或管理配置限制，Airset 无法直接解除。"
+    case .checkingSubscription:
+      "Airset 正在确认当前 Apple Music 账号是否可以播放完整目录歌曲。"
+    case .subscriptionStatusUnknown:
+      "授权已完成，但还需要刷新一次 Apple Music 播放资格。"
+    case .ready:
+      "可以播放 Apple Music 目录中的完整歌曲；若某首歌受地区或内容限制，仍会切换到试听。"
+    case .needsSubscription:
+      "完整歌曲需要有效 Apple Music 订阅；没有订阅时仍可播放可用的试听片段。"
+    case .catalogPlaybackUnavailable:
+      "当前账号、地区、内容限制或 Music app 状态暂不允许目录播放；请先在 Apple Music 中确认账号状态。"
+    case .privacyAcknowledgementRequired:
+      "请打开 Apple Music app，登录媒体账号并接受最新隐私政策、服务条款或 What's New，再回到 Airset 重试。"
+    case .subscriptionCheckFailed(let message):
+      message
+    }
+  }
+
+  private var appleMusicReadinessIcon: String {
+    switch musicAuthorization.readiness {
+    case .ready:
+      "checkmark.seal.fill"
+    case .checkingSubscription, .requestingAuthorization:
+      "hourglass"
+    case .denied, .restricted, .catalogPlaybackUnavailable, .privacyAcknowledgementRequired, .subscriptionCheckFailed:
+      "exclamationmark.triangle.fill"
+    case .needsSubscription:
+      "music.note"
+    case .notDetermined, .subscriptionStatusUnknown:
+      "person.badge.key"
+    }
+  }
+
+  private var appleMusicReadinessTint: Color {
+    switch musicAuthorization.readiness {
+    case .ready:
+      .green
+    case .needsSubscription, .notDetermined, .subscriptionStatusUnknown:
+      .cyan
+    case .checkingSubscription, .requestingAuthorization:
+      .secondary
+    case .denied, .restricted, .catalogPlaybackUnavailable, .privacyAcknowledgementRequired, .subscriptionCheckFailed:
+      .orange
+    }
+  }
+
+  private var appleMusicPrimaryActionTitle: String {
+    if isAppleMusicActionBusy {
+      return "处理中"
+    }
+
+    return switch musicAuthorization.readiness {
+    case .notDetermined:
+      "连接 Apple Music"
+    case .requestingAuthorization, .checkingSubscription:
+      "处理中"
+    case .denied:
+      "打开系统设置"
+    case .restricted:
+      "查看限制说明"
+    case .subscriptionStatusUnknown, .ready, .subscriptionCheckFailed:
+      "刷新播放权限"
+    case .needsSubscription:
+      "查看 Apple Music 订阅"
+    case .catalogPlaybackUnavailable, .privacyAcknowledgementRequired:
+      "打开 Apple Music"
+    }
+  }
+
+  private var appleMusicPrimaryActionIcon: String {
+    switch musicAuthorization.readiness {
+    case .denied:
+      "gearshape"
+    case .needsSubscription:
+      "music.note"
+    case .catalogPlaybackUnavailable, .privacyAcknowledgementRequired:
+      "music.quarternote.3"
+    case .restricted, .subscriptionCheckFailed:
+      "exclamationmark.circle"
+    case .subscriptionStatusUnknown, .ready, .checkingSubscription:
+      "arrow.triangle.2.circlepath"
+    case .notDetermined, .requestingAuthorization:
+      "person.badge.key"
+    }
+  }
+
+  private func handleAppleMusicPrimaryAction() {
+    switch musicAuthorization.readiness {
+    case .notDetermined:
+      activeAppleMusicAlert = .connectIntro
+    case .denied:
+      activeAppleMusicAlert = .denied
+    case .restricted:
+      activeAppleMusicAlert = .restricted
+    case .needsSubscription:
+      activeAppleMusicAlert = .subscriptionRequired
+    case .catalogPlaybackUnavailable:
+      activeAppleMusicAlert = .catalogPlaybackUnavailable
+    case .privacyAcknowledgementRequired:
+      activeAppleMusicAlert = .privacyAcknowledgementRequired
+    case .requestingAuthorization, .checkingSubscription:
+      break
+    case .subscriptionStatusUnknown, .ready, .subscriptionCheckFailed:
+      Task {
+        await refreshAppleMusicAccess(presentsFollowUp: true)
+      }
+    }
+  }
+
+  private func refreshAppleMusicAccess(presentsFollowUp: Bool) async {
+    await musicAuthorization.refreshAccessState()
+    await appleMusicLibrary.refresh(authorizationStatus: musicAuthorization.status)
+
+    if presentsFollowUp {
+      presentAppleMusicFollowUp(force: false)
+    }
+  }
+
+  private func requestAppleMusicAccess() async {
+    await musicAuthorization.requestAccess()
+    await appleMusicLibrary.refresh(authorizationStatus: musicAuthorization.status)
+    presentAppleMusicFollowUp(force: true)
+  }
+
+  private func presentAppleMusicFollowUp(force: Bool) {
+    guard force || !didPresentInitialAppleMusicIssue else { return }
+
+    let nextAlert: AppleMusicAlert?
+    switch musicAuthorization.readiness {
+    case .denied:
+      nextAlert = .denied
+    case .restricted:
+      nextAlert = .restricted
+    case .needsSubscription:
+      nextAlert = .subscriptionRequired
+    case .catalogPlaybackUnavailable:
+      nextAlert = .catalogPlaybackUnavailable
+    case .privacyAcknowledgementRequired:
+      nextAlert = .privacyAcknowledgementRequired
+    case .subscriptionCheckFailed(let message):
+      nextAlert = .subscriptionCheckFailed(message)
+    case .notDetermined, .requestingAuthorization, .checkingSubscription, .subscriptionStatusUnknown, .ready:
+      nextAlert = nil
+    }
+
+    if let nextAlert {
+      activeAppleMusicAlert = nextAlert
+      didPresentInitialAppleMusicIssue = true
+    }
+  }
+
+  private func openAppSettings() {
+    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+    openURL(url)
+  }
+
+  private func openAppleMusicApp() {
+    guard let url = URL(string: "music://") else { return }
+    openURL(url)
+  }
+
+  private func appleMusicAlert(_ alert: AppleMusicAlert) -> Alert {
+    switch alert {
+    case .connectIntro:
+      return Alert(
+        title: Text("连接 Apple Music"),
+        message: Text("Airset 会请求媒体与 Apple Music 权限，用于播放完整歌曲、读取你授权的歌单和歌曲。"),
+        primaryButton: .default(Text("继续")) {
+          Task {
+            await requestAppleMusicAccess()
+          }
+        },
+        secondaryButton: .cancel(Text("稍后"))
+      )
+    case .denied:
+      return Alert(
+        title: Text("需要 Apple Music 权限"),
+        message: Text("请在系统设置中允许 Airset 访问媒体与 Apple Music，然后回到这里刷新播放权限。"),
+        primaryButton: .default(Text("打开设置")) {
+          openAppSettings()
+        },
+        secondaryButton: .cancel(Text("取消"))
+      )
+    case .restricted:
+      return Alert(
+        title: Text("Apple Music 访问受限制"),
+        message: Text("此设备的媒体访问可能被屏幕使用时间、家长控制或管理配置限制。请检查系统限制后再重试。"),
+        dismissButton: .default(Text("知道了"))
+      )
+    case .privacyAcknowledgementRequired:
+      return Alert(
+        title: Text("需要确认 Apple Music 隐私政策"),
+        message: Text("请打开 Apple Music app，登录媒体账号并接受最新隐私政策、服务条款或 What's New。完成后回到 Airset 点“刷新播放权限”。"),
+        primaryButton: .default(Text("打开 Apple Music")) {
+          openAppleMusicApp()
+        },
+        secondaryButton: .cancel(Text("稍后"))
+      )
+    case .subscriptionRequired:
+      return Alert(
+        title: Text("需要 Apple Music 订阅"),
+        message: Text("播放完整目录歌曲需要有效 Apple Music 订阅；没有订阅时，Airset 会尽量播放可用试听片段。"),
+        primaryButton: .default(Text("查看订阅方案")) {
+          isShowingMusicSubscriptionOffer = true
+        },
+        secondaryButton: .cancel(Text("稍后"))
+      )
+    case .catalogPlaybackUnavailable:
+      return Alert(
+        title: Text("目录播放暂不可用"),
+        message: Text("请确认 Apple Music app 已安装、媒体账号已登录、订阅和地区可用，并且没有屏幕使用时间内容限制。"),
+        primaryButton: .default(Text("打开 Apple Music")) {
+          openAppleMusicApp()
+        },
+        secondaryButton: .default(Text("重试")) {
+          Task {
+            await refreshAppleMusicAccess(presentsFollowUp: false)
+          }
+        }
+      )
+    case .subscriptionCheckFailed(let message):
+      return Alert(
+        title: Text("检查播放权限失败"),
+        message: Text(message),
+        primaryButton: .default(Text("重试")) {
+          Task {
+            await refreshAppleMusicAccess(presentsFollowUp: true)
+          }
+        },
+        secondaryButton: .cancel(Text("取消"))
+      )
+    case .subscriptionOfferFailed(let message):
+      return Alert(
+        title: Text("无法显示订阅方案"),
+        message: Text(message),
+        dismissButton: .default(Text("知道了"))
+      )
+    }
+  }
+
   private func loadSpeechVoicesIfNeeded() async {
     guard radioStation.speechVoiceCatalog == nil else { return }
     await loadSpeechVoices()
@@ -229,6 +543,38 @@ struct SettingsView: View {
   }
 }
 
+private enum AppleMusicAlert: Identifiable {
+  case connectIntro
+  case denied
+  case restricted
+  case privacyAcknowledgementRequired
+  case subscriptionRequired
+  case catalogPlaybackUnavailable
+  case subscriptionCheckFailed(String)
+  case subscriptionOfferFailed(String)
+
+  var id: String {
+    switch self {
+    case .connectIntro:
+      "connectIntro"
+    case .denied:
+      "denied"
+    case .restricted:
+      "restricted"
+    case .privacyAcknowledgementRequired:
+      "privacyAcknowledgementRequired"
+    case .subscriptionRequired:
+      "subscriptionRequired"
+    case .catalogPlaybackUnavailable:
+      "catalogPlaybackUnavailable"
+    case .subscriptionCheckFailed(let message):
+      "subscriptionCheckFailed-\(message)"
+    case .subscriptionOfferFailed(let message):
+      "subscriptionOfferFailed-\(message)"
+    }
+  }
+}
+
 #Preview {
   let playbackController = PlaybackController()
   NavigationStack {
@@ -238,4 +584,5 @@ struct SettingsView: View {
   .environment(playbackController)
   .environment(RadioStationController(playbackController: playbackController))
   .environment(MusicAuthorizationService())
+  .environment(AppleMusicLibraryStore())
 }

@@ -6,6 +6,7 @@ struct AppView: View {
   @Environment(RadioStationController.self) private var radioStation
   @Environment(MusicAuthorizationService.self) private var musicAuthorization
   @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
+  @Environment(\.scenePhase) private var scenePhase
 
   @State private var selectedTab: AppTab = .radio
   @State private var isPlayerPresented = false
@@ -23,6 +24,13 @@ struct AppView: View {
       .task {
         await musicAuthorization.refreshAccessState()
         await appleMusicLibrary.loadIfNeeded(authorizationStatus: musicAuthorization.status)
+      }
+      .onChange(of: scenePhase) { _, phase in
+        guard phase == .active else { return }
+        Task {
+          await musicAuthorization.refreshAccessState()
+          await appleMusicLibrary.loadIfNeeded(authorizationStatus: musicAuthorization.status)
+        }
       }
   }
 

@@ -23,14 +23,14 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppleMusicUsageDescription</key>
-	<string>Airset uses Apple Music access to help you discover and manage music.</string>
+	<string>Airset uses Apple Music access to play full songs and read playlists and songs you authorize.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
 	<key>NSMediaLibraryUsageDescription</key>
-	<string>Airset uses your media library access for playlist and library features.</string>
+	<string>Airset uses your media library access to load playlists and songs you choose for radio playback.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Airset may use microphone access for future recording and music creation features.</string>
 	<key>UIApplicationSceneManifest</key>
