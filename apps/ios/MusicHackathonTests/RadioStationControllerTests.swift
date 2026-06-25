@@ -32,14 +32,14 @@ final class RadioStationControllerTests: XCTestCase {
       playbackController: MockPlaybackController(),
       stationClient: stationClient,
       memoryStore: MockMemoryStore(),
-      hostSpeakerIDProvider: { "zh_female_xiaohe_uranus_bigtts" }
+      hostSpeakerIDProvider: { "zh_female_shuangkuaisisi_moon_bigtts" }
     )
 
     await controller.loadCurrentStation()
 
     XCTAssertEqual(stationClient.capturedContext?.speechAudio.provider, "volcengine")
-    XCTAssertEqual(stationClient.capturedContext?.speechAudio.speaker, "zh_female_xiaohe_uranus_bigtts")
-    XCTAssertEqual(stationClient.capturedContext?.speechAudio.resourceId, "seed-tts-2.0")
+    XCTAssertEqual(stationClient.capturedContext?.speechAudio.speaker, "zh_female_shuangkuaisisi_moon_bigtts")
+    XCTAssertEqual(stationClient.capturedContext?.speechAudio.resourceId, "seed-tts-1.0")
   }
 
   func testLoadCurrentStationUsesLibraryTracksForGenerationCandidates() async {
@@ -66,8 +66,8 @@ final class RadioStationControllerTests: XCTestCase {
       station: makeStation(items: [makeQueueItem(title: "One", appleMusicID: "one")]),
       voices: RadioSpeechVoiceCatalog(
         defaultSpeaker: "voice-a",
-        resourceId: "seed-tts-2.0",
-        model: "seed-tts-2.0-standard",
+        resourceId: "seed-tts-1.0",
+        model: "seed-tts-1.0",
         voices: [
           RadioSpeechVoice(
             id: "voice-a",
@@ -75,8 +75,8 @@ final class RadioStationControllerTests: XCTestCase {
             language: "zh-cn",
             gender: "female",
             style: "Host",
-            resourceId: "seed-tts-2.0",
-            model: "seed-tts-2.0-standard"
+            resourceId: "seed-tts-1.0",
+            model: "seed-tts-1.0"
           )
         ]
       )
@@ -302,6 +302,206 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertEqual(controller.currentItem?.track.title, "Two")
   }
 
+  func testStartStationPrefetchesWhenQueueFallsToThresholdAndAppends() async {
+    let stationClient = SequencedStationClient(results: [
+      .success(
+        RadioStationResult(
+          station: makeStation(items: [
+            makeQueueItem(title: "One", appleMusicID: "one"),
+            makeQueueItem(title: "Two", appleMusicID: "two"),
+            makeQueueItem(title: "Three", appleMusicID: "three")
+          ]),
+          stationSessionID: "session-1",
+          continuationCursor: "cursor-1"
+        )
+      ),
+      .success(
+        RadioStationResult(
+          station: makeStation(items: [
+            makeQueueItem(title: "Four", appleMusicID: "four"),
+            makeQueueItem(title: "Five", appleMusicID: "five")
+          ]),
+          stationSessionID: "session-2",
+          continuationCursor: "cursor-2"
+        )
+      )
+    ])
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    await waitForQueue(controller, titles: ["Two", "Three", "Four", "Five"])
+
+    XCTAssertEqual(controller.currentItem?.track.title, "One")
+    XCTAssertEqual(playbackController.currentTrack?.title, "One")
+    XCTAssertEqual(stationClient.contexts.map(\.action), ["start", "continue"])
+    XCTAssertEqual(stationClient.contexts.last?.stationID, "station-1")
+    XCTAssertEqual(stationClient.contexts.last?.stationSessionID, "session-1")
+    XCTAssertEqual(stationClient.contexts.last?.continuationCursor, "cursor-1")
+    XCTAssertEqual(stationClient.contexts.last?.currentTrackKey, "appleMusic:one")
+    XCTAssertEqual(stationClient.contexts.last?.queuedTrackKeys, ["appleMusic:two", "appleMusic:three"])
+    XCTAssertNil(controller.extensionErrorMessage)
+  }
+
+  func testAutomaticCompletionContinuesIntoAppendedBatch() async {
+    let stationClient = SequencedStationClient(results: [
+      .success(makeResult(titles: ["One", "Two"])),
+      .success(makeResult(titles: ["Three"]))
+    ])
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    await waitForQueue(controller, titles: ["Two", "Three"])
+
+    playbackController.finish(.track)
+    await waitForPlayback(playbackController, title: "Two")
+    playbackController.finish(.track)
+    await waitForPlayback(playbackController, title: "Three")
+
+    XCTAssertEqual(controller.currentItem?.track.title, "Three")
+    XCTAssertTrue(controller.queue.isEmpty)
+  }
+
+  func testStationExtensionPreservesPlayedIntroState() async {
+    let intro = RadioSpeech(
+      stationIntro: RadioStationIntroCopy(
+        text: "Welcome to Airset.",
+        displayText: "Welcome to Airset.",
+        targetItemId: "one"
+      )
+    )
+    let stationClient = SequencedStationClient(results: [
+      .success(
+        RadioStationResult(
+          station: makeStation(
+            items: [
+              makeQueueItem(title: "One", appleMusicID: "one"),
+              makeQueueItem(title: "Two", appleMusicID: "two"),
+              makeQueueItem(title: "Three", appleMusicID: "three")
+            ],
+            speech: intro
+          )
+        )
+      ),
+      .success(makeResult(titles: ["Four"]))
+    ])
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    XCTAssertEqual(playbackController.currentSpeech?.displayText, "Welcome to Airset.")
+
+    playbackController.finish(.speech)
+    await waitForPlayback(playbackController, title: "One")
+    await waitForQueue(controller, titles: ["Two", "Three", "Four"])
+    playbackController.finish(.track)
+    await waitForPlayback(playbackController, title: "Two")
+
+    XCTAssertNil(playbackController.currentSpeech)
+    XCTAssertEqual(controller.currentItem?.track.title, "Two")
+  }
+
+  func testStationExtensionFiltersDuplicateTracks() async {
+    let stationClient = SequencedStationClient(results: [
+      .success(makeResult(titles: ["One", "Two", "Three"])),
+      .success(
+        RadioStationResult(
+          station: makeStation(items: [
+            makeQueueItem(title: "Two", appleMusicID: "two"),
+            makeQueueItem(title: "Four", appleMusicID: "four"),
+            makeQueueItem(title: "Four Again", appleMusicID: "four")
+          ])
+        )
+      )
+    ])
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    await waitForQueue(controller, titles: ["Two", "Three", "Four"])
+
+    XCTAssertEqual(controller.queue.map(\.track.title), ["Two", "Three", "Four"])
+  }
+
+  func testStationExtensionFailureKeepsExistingQueue() async {
+    let stationClient = SequencedStationClient(results: [
+      .success(makeResult(titles: ["One", "Two", "Three"])),
+      .failure(URLError(.cannotConnectToHost))
+    ])
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    await waitForExtensionError(controller)
+
+    XCTAssertEqual(controller.currentItem?.track.title, "One")
+    XCTAssertEqual(controller.queue.map(\.track.title), ["Two", "Three"])
+    XCTAssertNil(controller.errorMessage)
+    XCTAssertNotNil(controller.extensionErrorMessage)
+  }
+
+  func testEmptyQueueExtensionFailureShowsErrorOnlyWhenNoTrackIsReady() async {
+    let stationClient = SequencedStationClient(results: [
+      .success(makeResult(titles: ["One"])),
+      .failure(URLError(.cannotConnectToHost)),
+      .failure(URLError(.cannotConnectToHost))
+    ])
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    await waitForExtensionError(controller)
+    playbackController.finish(.track)
+    await waitForControllerError(controller)
+
+    XCTAssertNil(controller.currentItem)
+    XCTAssertTrue(controller.queue.isEmpty)
+    XCTAssertNotNil(controller.errorMessage)
+  }
+
+  func testRefreshStationStartsNewStationInsteadOfContinuing() async {
+    let stationClient = SequencedStationClient(results: [
+      .success(makeResult(titles: ["One", "Two"])),
+      .success(makeResult(titles: ["Fresh"]))
+    ])
+    let controller = RadioStationController(
+      playbackController: MockPlaybackController(),
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.loadCurrentStation()
+    await controller.refreshStation()
+
+    XCTAssertEqual(controller.queue.map(\.track.title), ["Fresh"])
+    XCTAssertEqual(stationClient.contexts.map(\.action), ["start", "start"])
+  }
+
   private func makeStation(items: [RadioQueueItem], speech: RadioSpeech? = nil) -> RadioStation {
     RadioStation(
       id: "station-1",
@@ -309,6 +509,16 @@ final class RadioStationControllerTests: XCTestCase {
       subtitle: "Complete backend station.",
       items: items,
       speech: speech
+    )
+  }
+
+  private func makeResult(titles: [String]) -> RadioStationResult {
+    RadioStationResult(
+      station: makeStation(
+        items: titles.map { title in
+          makeQueueItem(title: title, appleMusicID: title.lowercased())
+        }
+      )
     )
   }
 
@@ -353,6 +563,36 @@ final class RadioStationControllerTests: XCTestCase {
       try? await Task.sleep(for: .milliseconds(25))
     }
   }
+
+  private func waitForQueue(_ controller: RadioStationController, titles: [String]) async {
+    for _ in 0..<40 {
+      if controller.queue.map(\.track.title) == titles {
+        return
+      }
+
+      try? await Task.sleep(for: .milliseconds(25))
+    }
+  }
+
+  private func waitForExtensionError(_ controller: RadioStationController) async {
+    for _ in 0..<40 {
+      if controller.extensionErrorMessage != nil {
+        return
+      }
+
+      try? await Task.sleep(for: .milliseconds(25))
+    }
+  }
+
+  private func waitForControllerError(_ controller: RadioStationController) async {
+    for _ in 0..<40 {
+      if controller.errorMessage != nil {
+        return
+      }
+
+      try? await Task.sleep(for: .milliseconds(25))
+    }
+  }
 }
 
 @MainActor
@@ -388,10 +628,37 @@ private struct MockStationClient: RadioStationFetching {
   }
 }
 
+private final class SequencedStationClient: RadioStationFetching {
+  var results: [Result<RadioStationResult, Error>]
+  var contexts: [RadioStationGenerationContext] = []
+
+  init(results: [Result<RadioStationResult, Error>]) {
+    self.results = results
+  }
+
+  func fetchCurrentStation() async throws -> RadioStation {
+    try nextResult().station
+  }
+
+  func generateStation(context: RadioStationGenerationContext) async throws -> RadioStationResult {
+    contexts.append(context)
+    return try nextResult()
+  }
+
+  private func nextResult() throws -> RadioStationResult {
+    guard !results.isEmpty else {
+      throw URLError(.badServerResponse)
+    }
+
+    return try results.removeFirst().get()
+  }
+}
+
 private final class CapturingStationClient: RadioStationFetching {
   let station: RadioStation
   let voices: RadioSpeechVoiceCatalog
   var capturedContext: RadioStationGenerationContext?
+  var capturedContexts: [RadioStationGenerationContext] = []
 
   init(station: RadioStation, voices: RadioSpeechVoiceCatalog = .fallback) {
     self.station = station
@@ -404,6 +671,7 @@ private final class CapturingStationClient: RadioStationFetching {
 
   func generateStation(context: RadioStationGenerationContext) async throws -> RadioStationResult {
     capturedContext = context
+    capturedContexts.append(context)
     return RadioStationResult(station: station)
   }
 

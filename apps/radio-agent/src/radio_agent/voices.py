@@ -7,18 +7,12 @@ from pydantic import ValidationError
 
 from radio_agent.schemas import RadioSpeechVoice, RadioSpeechVoiceCatalog
 
-DEFAULT_RESOURCE_ID = "seed-tts-2.0"
-DEFAULT_MODEL = "seed-tts-2.0-standard"
-DEFAULT_SPEAKER = "zh_female_xiaohe_uranus_bigtts"
+DEFAULT_RESOURCE_ID = "seed-tts-1.0"
+DEFAULT_MODEL = "seed-tts-1.0"
+DEFAULT_SPEAKER = "zh_female_shuangkuaisisi_moon_bigtts"
 LEGACY_MODEL_NAMES = {"gpt-4o-mini-tts", "volcengine-tts"}
 
 BUILTIN_VOICES = [
-  RadioSpeechVoice(
-    id="zh_female_xiaohe_uranus_bigtts",
-    name="小何2.0",
-    gender="female",
-    style="通用主持",
-  ),
   RadioSpeechVoice(
     id="zh_female_shuangkuaisisi_moon_bigtts",
     name="爽快思思",
@@ -30,12 +24,6 @@ BUILTIN_VOICES = [
     name="撒娇女友",
     gender="female",
     style="轻快亲和",
-  ),
-  RadioSpeechVoice(
-    id="zh_male_aojiao_mars_bigtts",
-    name="傲娇男友",
-    gender="male",
-    style="年轻活力",
   ),
 ]
 

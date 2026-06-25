@@ -58,14 +58,16 @@ final class RadioStationClientTests: XCTestCase {
 
       let body = try JSONSerialization.jsonObject(with: self.bodyData(from: request)) as? [String: Any]
       XCTAssertEqual(body?["stationID"] as? String, "airset-personal")
+      XCTAssertEqual(body?["action"] as? String, "start")
+      XCTAssertEqual(body?["limit"] as? Int, 6)
       let memoryContext = body?["memoryContext"] as? [String: Any]
       XCTAssertEqual(memoryContext?["tasteSummary"] as? String, "Likes intimate pop.")
       let speechAudio = body?["speechAudio"] as? [String: Any]
       XCTAssertEqual(speechAudio?["enabled"] as? Bool, true)
       XCTAssertEqual(speechAudio?["provider"] as? String, "volcengine")
-      XCTAssertEqual(speechAudio?["speaker"] as? String, "zh_female_xiaohe_uranus_bigtts")
-      XCTAssertEqual(speechAudio?["resourceId"] as? String, "seed-tts-2.0")
-      XCTAssertEqual(speechAudio?["model"] as? String, "seed-tts-2.0-standard")
+      XCTAssertEqual(speechAudio?["speaker"] as? String, "zh_female_shuangkuaisisi_moon_bigtts")
+      XCTAssertEqual(speechAudio?["resourceId"] as? String, "seed-tts-1.0")
+      XCTAssertEqual(speechAudio?["model"] as? String, "seed-tts-1.0")
       XCTAssertEqual(speechAudio?["format"] as? String, "mp3")
       let catalogCandidates = body?["catalogCandidates"] as? [[String: Any]]
       XCTAssertEqual(catalogCandidates?.first?["playlistName"] as? String, "Virtual Library: Warm Starts")
@@ -76,6 +78,8 @@ final class RadioStationClientTests: XCTestCase {
       let data = """
       {
         "stationID": "airset-personal",
+        "stationSessionID": "session-1",
+        "continuationCursor": "cursor-1",
         "title": "Airset Radio",
         "subtitle": "Generated from local memory.",
         "mode": "mock",
@@ -152,7 +156,7 @@ final class RadioStationClientTests: XCTestCase {
         )
       ],
       memoryContext: RadioMemoryContext(tasteSummary: "Likes intimate pop."),
-      hostSpeakerID: "zh_female_xiaohe_uranus_bigtts"
+      hostSpeakerID: "zh_female_shuangkuaisisi_moon_bigtts"
     )
 
     let result = try await client.generateStation(context: context)
@@ -167,6 +171,63 @@ final class RadioStationClientTests: XCTestCase {
     XCTAssertEqual(result.station.items.first?.handoffText, "Next: Signal by Artist A.")
     XCTAssertEqual(result.diagnostics, ["ok"])
     XCTAssertEqual(result.memoryPatchProposals.first?.type, "taste")
+    XCTAssertEqual(result.stationSessionID, "session-1")
+    XCTAssertEqual(result.continuationCursor, "cursor-1")
+  }
+
+  func testContinueStationPostsRollingQueueContextAndDecodesAliases() async throws {
+    let session = makeSession { request in
+      XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/stations/generate")
+      XCTAssertEqual(request.httpMethod, "POST")
+
+      let body = try JSONSerialization.jsonObject(with: self.bodyData(from: request)) as? [String: Any]
+      XCTAssertEqual(body?["action"] as? String, "continue")
+      XCTAssertEqual(body?["limit"] as? Int, 6)
+      XCTAssertEqual(body?["stationID"] as? String, "station-1")
+      XCTAssertEqual(body?["stationSessionID"] as? String, "session-1")
+      XCTAssertEqual(body?["continuationCursor"] as? String, "cursor-1")
+      XCTAssertEqual(body?["currentTrackKey"] as? String, "appleMusic:current")
+      XCTAssertEqual(body?["queuedTrackKeys"] as? [String], ["appleMusic:queued"])
+      XCTAssertEqual(body?["recentlyPlayedTrackKeys"] as? [String], ["appleMusic:played"])
+
+      let data = """
+      {
+        "stationID": "station-1",
+        "sessionId": "session-2",
+        "cursor": "cursor-2",
+        "title": "Airset Radio",
+        "items": [
+          {
+            "id": "item-next",
+            "title": "Next Signal",
+            "artist": "Artist A",
+            "previewURL": "https://example.com/next.m4a"
+          }
+        ]
+      }
+      """.data(using: .utf8)!
+      return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+    }
+    let client = RadioStationClient(baseURL: URL(string: "http://station.test")!, session: session)
+    let context = RadioStationGenerationContext(
+      action: "continue",
+      seedTracks: [makeTrack(title: "Seed")],
+      catalogCandidates: [],
+      memoryContext: RadioMemoryContext(),
+      limit: 6,
+      stationID: "station-1",
+      stationSessionID: "session-1",
+      continuationCursor: "cursor-1",
+      currentTrackKey: "appleMusic:current",
+      queuedTrackKeys: ["appleMusic:queued"],
+      recentlyPlayedTrackKeys: ["appleMusic:played"]
+    )
+
+    let result = try await client.generateStation(context: context)
+
+    XCTAssertEqual(result.station.items.first?.track.title, "Next Signal")
+    XCTAssertEqual(result.stationSessionID, "session-2")
+    XCTAssertEqual(result.continuationCursor, "cursor-2")
   }
 
   func testGenerateStationFallsBackToCurrentStationWhenEndpointIsMissing() async throws {
@@ -218,18 +279,18 @@ final class RadioStationClientTests: XCTestCase {
 
       let data = """
       {
-        "defaultSpeaker": "zh_female_xiaohe_uranus_bigtts",
-        "resourceId": "seed-tts-2.0",
-        "model": "seed-tts-2.0-standard",
+        "defaultSpeaker": "zh_female_shuangkuaisisi_moon_bigtts",
+        "resourceId": "seed-tts-1.0",
+        "model": "seed-tts-1.0",
         "voices": [
           {
-            "id": "zh_female_xiaohe_uranus_bigtts",
-            "name": "小何2.0",
+            "id": "zh_female_shuangkuaisisi_moon_bigtts",
+            "name": "爽快思思",
             "language": "zh-cn",
             "gender": "female",
             "style": "通用主持",
-            "resourceId": "seed-tts-2.0",
-            "model": "seed-tts-2.0-standard"
+            "resourceId": "seed-tts-1.0",
+            "model": "seed-tts-1.0"
           }
         ]
       }
@@ -240,9 +301,9 @@ final class RadioStationClientTests: XCTestCase {
 
     let catalog = try await client.fetchSpeechVoices()
 
-    XCTAssertEqual(catalog.defaultSpeaker, "zh_female_xiaohe_uranus_bigtts")
-    XCTAssertEqual(catalog.resourceId, "seed-tts-2.0")
-    XCTAssertEqual(catalog.voices.first?.name, "小何2.0")
+    XCTAssertEqual(catalog.defaultSpeaker, "zh_female_shuangkuaisisi_moon_bigtts")
+    XCTAssertEqual(catalog.resourceId, "seed-tts-1.0")
+    XCTAssertEqual(catalog.voices.first?.name, "爽快思思")
     XCTAssertEqual(catalog.voices.first?.style, "通用主持")
   }
 

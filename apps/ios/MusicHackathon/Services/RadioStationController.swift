@@ -10,31 +10,43 @@ final class RadioStationController {
   var stationTitle = "Airset Radio"
   var stationIntro = "Ready to stream the backend radio queue."
   var isLoadingStation = false
+  var isExtendingStation = false
   var errorMessage: String?
+  var extensionErrorMessage: String?
   var memorySummaryText = "Local memory is ready."
   var memoryEventCount = 0
   var speechVoiceCatalog: RadioSpeechVoiceCatalog?
   var isLoadingSpeechVoices = false
   var speechVoicesErrorMessage: String?
+  let prefetchThreshold = 2
+  let batchSize = 6
 
   @ObservationIgnored private let playbackController: any RadioPlaybackControlling
   @ObservationIgnored private let stationClient: any RadioStationFetching
   @ObservationIgnored private let memoryStore: any RadioMemoryStoring
+  @ObservationIgnored private let diagnostics: DiagnosticsStore?
   @ObservationIgnored private let hostSpeakerIDProvider: () -> String?
   @ObservationIgnored private let libraryTrackProvider: @MainActor () -> [Track]
   @ObservationIgnored private var history: [RadioQueueItem] = []
   @ObservationIgnored private var hasPlayedStationIntro = false
+  @ObservationIgnored private var stationSessionID: String?
+  @ObservationIgnored private var continuationCursor: String?
+  @ObservationIgnored private var stationGenerationID = UUID()
+  @ObservationIgnored private var extensionTask: Task<Bool, Never>?
+  @ObservationIgnored private var extensionTaskID: UUID?
 
   init(
     playbackController: any RadioPlaybackControlling,
     stationClient: any RadioStationFetching = RadioStationClient(),
     memoryStore: any RadioMemoryStoring = RadioMemoryStore(),
+    diagnostics: DiagnosticsStore? = nil,
     hostSpeakerIDProvider: @escaping () -> String? = { RadioHostVoiceSettings.selectedSpeakerID() },
     libraryTrackProvider: @escaping @MainActor () -> [Track] = { [] }
   ) {
     self.playbackController = playbackController
     self.stationClient = stationClient
     self.memoryStore = memoryStore
+    self.diagnostics = diagnostics
     self.hostSpeakerIDProvider = hostSpeakerIDProvider
     self.libraryTrackProvider = libraryTrackProvider
 
@@ -46,7 +58,7 @@ final class RadioStationController {
   }
 
   var hasStationContent: Bool {
-    currentItem != nil || !queue.isEmpty
+    station != nil || currentItem != nil || !queue.isEmpty
   }
 
   var upNextItems: [RadioQueueItem] {
@@ -84,7 +96,15 @@ final class RadioStationController {
   }
 
   func startStation() async {
-    if queue.isEmpty {
+    diagnostics?.record(
+      .notice,
+      chain: .radioStation,
+      event: "start_station",
+      message: "开始播放电台。",
+      payload: ["has_station_content": DiagnosticsPayload.bool(hasStationContent)]
+    )
+
+    if queue.isEmpty, station == nil {
       await loadCurrentStation(playImmediately: true)
     } else {
       await playNext(reason: .stationStart)
@@ -96,6 +116,16 @@ final class RadioStationController {
        !hasPlayedStationIntro,
        let intro = station?.speech?.stationIntro {
       hasPlayedStationIntro = true
+      diagnostics?.record(
+        .notice,
+        chain: .playbackSpeech,
+        event: "station_intro_selected",
+        message: "开始播放电台开场语音。",
+        payload: [
+          "station_id_hash": (station?.id).map(DiagnosticsRedactor.hash) ?? "unknown",
+          "speech_id_hash": DiagnosticsRedactor.hash(intro.id)
+        ]
+      )
       playbackController.playSpeech(intro.playbackSegment)
       return
     }
@@ -108,6 +138,18 @@ final class RadioStationController {
 
       if let nextItem = queue.first,
          let transition = transitionCopy(from: finishedItem, to: nextItem) {
+        prefetchStationExtensionIfNeeded()
+        diagnostics?.record(
+          .notice,
+          chain: .playbackSpeech,
+          event: "transition_selected",
+          message: "开始播放曲目间过渡语音。",
+          payload: [
+            "from_item_hash": DiagnosticsRedactor.hash(finishedItem.id),
+            "to_item_hash": DiagnosticsRedactor.hash(nextItem.id),
+            "speech_id_hash": DiagnosticsRedactor.hash(transition.id)
+          ]
+        )
         playbackController.playSpeech(transition.playbackSegment)
         return
       }
@@ -117,14 +159,32 @@ final class RadioStationController {
       self.currentItem = nil
     }
 
+    if queue.isEmpty, let extensionTask {
+      _ = await extensionTask.value
+    }
+
     if queue.isEmpty {
-      await loadCurrentStation()
+      if station == nil {
+        await loadCurrentStation()
+      } else {
+        _ = await extendCurrentStation()
+      }
     }
 
     guard !queue.isEmpty else {
       if errorMessage == nil {
-        errorMessage = "No tracks are ready from the backend station."
+        errorMessage = extensionErrorMessage ?? "No tracks are ready from the backend station."
       }
+      diagnostics?.record(
+        .warning,
+        chain: .radioStation,
+        event: "queue_empty",
+        message: "电台队列为空，无法继续播放。",
+        payload: [
+          "station_loaded": DiagnosticsPayload.bool(station != nil),
+          "extension_error_hash": extensionErrorMessage.map(DiagnosticsRedactor.hash) ?? "none"
+        ]
+      )
       return
     }
 
@@ -132,7 +192,22 @@ final class RadioStationController {
     currentItem = nextItem
     errorMessage = nil
     await recordMemoryEvent(type: "play", track: nextItem.track)
+    diagnostics?.record(
+      .notice,
+      chain: .radioStation,
+      event: "track_selected",
+      message: "电台选择下一首曲目。",
+      payload: DiagnosticsPayload.merge(
+        [
+          "advance_reason": reason.diagnosticValue,
+          "queue_count_after_pop": String(queue.count),
+          "item_id_hash": DiagnosticsRedactor.hash(nextItem.id)
+        ],
+        DiagnosticsPayload.track(nextItem.track)
+      )
+    )
     playbackController.play(track: nextItem.track)
+    prefetchStationExtensionIfNeeded()
   }
 
   func playPrevious() {
@@ -144,6 +219,13 @@ final class RadioStationController {
 
     currentItem = previousItem
     errorMessage = nil
+    diagnostics?.record(
+      .notice,
+      chain: .radioStation,
+      event: "play_previous",
+      message: "回放上一首电台曲目。",
+      payload: DiagnosticsPayload.track(previousItem.track)
+    )
     Task {
       try? await memoryStore.record(RadioMemoryEvent(type: "replay", track: previousItem.track))
       await refreshMemoryStatus()
@@ -152,12 +234,15 @@ final class RadioStationController {
   }
 
   func refreshStation() async {
+    guard !isExtendingStation else { return }
     await loadCurrentStation()
   }
 
   func loadLocalStation(_ station: RadioStation, playImmediately: Bool = false) async {
+    beginNewStationSession()
     isLoadingStation = false
     errorMessage = nil
+    extensionErrorMessage = nil
     self.station = station
     stationTitle = station.title
     stationIntro = station.subtitle
@@ -165,6 +250,17 @@ final class RadioStationController {
     history = []
     queue = station.items
     hasPlayedStationIntro = false
+    diagnostics?.record(
+      .notice,
+      chain: .radioStation,
+      event: "local_station_loaded",
+      message: "本地电台队列已加载。",
+      payload: [
+        "station_id_hash": DiagnosticsRedactor.hash(station.id),
+        "item_count": String(station.items.count),
+        "play_immediately": DiagnosticsPayload.bool(playImmediately)
+      ]
+    )
     await recordMemoryEvent(type: "station_generate", track: station.items.first?.track)
 
     if playImmediately {
@@ -177,20 +273,34 @@ final class RadioStationController {
   func loadCurrentStation(playImmediately: Bool = false) async {
     guard !isLoadingStation else { return }
 
+    beginNewStationSession()
     isLoadingStation = true
     errorMessage = nil
+    extensionErrorMessage = nil
+    diagnostics?.record(
+      .notice,
+      chain: .radioBackend,
+      event: "generate_start",
+      message: "开始生成后端电台队列。",
+      payload: ["play_immediately": DiagnosticsPayload.bool(playImmediately)]
+    )
 
     do {
       await refreshMemoryStatus()
       let memoryContext = (try? await memoryStore.buildContext()) ?? RadioMemoryContext()
       let generationContext = RadioStationGenerationContext(
+        action: "start",
         seedTracks: stationSeeds(),
         catalogCandidates: stationCandidates(),
         memoryContext: memoryContext,
+        limit: batchSize,
+        stationID: "airset-personal",
         hostSpeakerID: hostSpeakerIDProvider()
       )
       let result = try await stationClient.generateStation(context: generationContext)
       let station = result.station
+      stationSessionID = result.stationSessionID
+      continuationCursor = result.continuationCursor
       self.station = station
       stationTitle = station.title
       stationIntro = station.subtitle
@@ -198,6 +308,19 @@ final class RadioStationController {
       history = []
       queue = station.items
       hasPlayedStationIntro = false
+      diagnostics?.record(
+        .notice,
+        chain: .radioBackend,
+        event: "generate_success",
+        message: "后端电台队列生成完成。",
+        payload: [
+          "station_id_hash": DiagnosticsRedactor.hash(station.id),
+          "station_session_id_hash": stationSessionID.map(DiagnosticsRedactor.hash) ?? "none",
+          "item_count": String(station.items.count),
+          "diagnostic_count": String(result.diagnostics.count),
+          "memory_patch_count": String(result.memoryPatchProposals.count)
+        ]
+      )
       await recordMemoryEvent(type: "station_generate", track: station.items.first?.track)
 
       if playImmediately {
@@ -211,12 +334,36 @@ final class RadioStationController {
       history = []
       queue = []
       hasPlayedStationIntro = false
+      stationSessionID = nil
+      continuationCursor = nil
       stationTitle = "Airset Radio"
       stationIntro = "The backend station is not available right now."
       errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+      diagnostics?.record(
+        .error,
+        chain: .radioBackend,
+        event: "generate_failed",
+        message: "后端电台队列生成失败。",
+        payload: DiagnosticsPayload.error(error)
+      )
     }
 
     isLoadingStation = false
+  }
+
+  @discardableResult
+  func extendCurrentStationIfNeeded() async -> Bool {
+    guard queue.count <= prefetchThreshold else { return true }
+    return await extendCurrentStation()
+  }
+
+  @discardableResult
+  func extendCurrentStation() async -> Bool {
+    if let extensionTask {
+      return await extensionTask.value
+    }
+
+    return await performStationExtension()
   }
 
   func refreshSpeechVoices() async {
@@ -224,11 +371,34 @@ final class RadioStationController {
 
     isLoadingSpeechVoices = true
     speechVoicesErrorMessage = nil
+    diagnostics?.record(
+      .info,
+      chain: .radioBackend,
+      event: "speech_voices_refresh_start",
+      message: "开始刷新主持人声音列表。"
+    )
 
     do {
       speechVoiceCatalog = try await stationClient.fetchSpeechVoices()
+      diagnostics?.record(
+        .notice,
+        chain: .radioBackend,
+        event: "speech_voices_refresh_success",
+        message: "主持人声音列表刷新完成。",
+        payload: [
+          "voice_count": String(speechVoiceCatalog?.voices.count ?? 0),
+          "default_speaker_hash": (speechVoiceCatalog?.defaultSpeaker).map(DiagnosticsRedactor.hash) ?? "none"
+        ]
+      )
     } catch {
       speechVoicesErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+      diagnostics?.record(
+        .error,
+        chain: .radioBackend,
+        event: "speech_voices_refresh_failed",
+        message: "主持人声音列表刷新失败。",
+        payload: DiagnosticsPayload.error(error)
+      )
     }
 
     isLoadingSpeechVoices = false
@@ -249,14 +419,226 @@ final class RadioStationController {
   }
 
   func clearMemory() async {
-    try? await memoryStore.clear()
+    do {
+      try await memoryStore.clear()
+      diagnostics?.record(
+        .notice,
+        chain: .radioMemory,
+        event: "cleared",
+        message: "本地声音档案已清空。"
+      )
+    } catch {
+      diagnostics?.record(
+        .error,
+        chain: .radioMemory,
+        event: "clear_failed",
+        message: "本地声音档案清空失败。",
+        payload: DiagnosticsPayload.error(error)
+      )
+    }
     await refreshMemoryStatus()
+  }
+
+  private func prefetchStationExtensionIfNeeded() {
+    guard queue.count <= prefetchThreshold else { return }
+    guard extensionTask == nil else { return }
+
+    let taskID = UUID()
+    extensionTaskID = taskID
+    extensionTask = Task { @MainActor [weak self] in
+      guard let self else { return false }
+      guard !Task.isCancelled else { return false }
+      let didExtend = await self.performStationExtension()
+      if self.extensionTaskID == taskID {
+        self.extensionTask = nil
+        self.extensionTaskID = nil
+      }
+      return didExtend
+    }
+  }
+
+  private func performStationExtension() async -> Bool {
+    guard !Task.isCancelled else { return false }
+    guard station != nil else { return false }
+    guard !isLoadingStation, !isExtendingStation else { return !queue.isEmpty }
+
+    let generationID = stationGenerationID
+    isExtendingStation = true
+    extensionErrorMessage = nil
+    diagnostics?.record(
+      .info,
+      chain: .radioBackend,
+      event: "extend_start",
+      message: "开始续播后端电台队列。",
+      payload: [
+        "station_id_hash": (station?.id).map(DiagnosticsRedactor.hash) ?? "none",
+        "queue_count": String(queue.count)
+      ]
+    )
+
+    do {
+      await refreshMemoryStatus()
+      let memoryContext = (try? await memoryStore.buildContext()) ?? RadioMemoryContext()
+      let generationContext = RadioStationGenerationContext(
+        action: "continue",
+        seedTracks: stationSeeds(),
+        catalogCandidates: stationCandidates(),
+        memoryContext: memoryContext,
+        limit: batchSize,
+        stationID: station?.id ?? "airset-personal",
+        stationSessionID: stationSessionID,
+        continuationCursor: continuationCursor,
+        currentTrackKey: currentItem?.track.radioIdentity,
+        queuedTrackKeys: queue.map(\.track.radioIdentity),
+        recentlyPlayedTrackKeys: recentPlaybackTrackKeys(),
+        hostSpeakerID: hostSpeakerIDProvider()
+      )
+      let result = try await stationClient.generateStation(context: generationContext)
+
+      guard generationID == stationGenerationID, !Task.isCancelled else {
+        return false
+      }
+
+      stationSessionID = result.stationSessionID ?? stationSessionID
+      continuationCursor = result.continuationCursor ?? continuationCursor
+      let newItems = appendStationExtension(result.station)
+      isExtendingStation = false
+
+      guard let firstNewItem = newItems.first else {
+        extensionErrorMessage = "The backend station did not return any new tracks."
+        diagnostics?.record(
+          .warning,
+          chain: .radioBackend,
+          event: "extend_empty",
+          message: "后端续播没有返回新曲目。",
+          payload: ["known_queue_count": String(queue.count)]
+        )
+        return false
+      }
+
+      errorMessage = nil
+      extensionErrorMessage = nil
+      await recordMemoryEvent(type: "station_extend", track: firstNewItem.track)
+      diagnostics?.record(
+        .notice,
+        chain: .radioBackend,
+        event: "extend_success",
+        message: "后端电台队列续播完成。",
+        payload: [
+          "new_item_count": String(newItems.count),
+          "queue_count": String(queue.count),
+          "station_session_id_hash": stationSessionID.map(DiagnosticsRedactor.hash) ?? "none"
+        ]
+      )
+      return true
+    } catch {
+      guard generationID == stationGenerationID else {
+        return false
+      }
+
+      isExtendingStation = false
+      extensionErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+      diagnostics?.record(
+        .error,
+        chain: .radioBackend,
+        event: "extend_failed",
+        message: "后端电台队列续播失败。",
+        payload: DiagnosticsPayload.error(error)
+      )
+      return false
+    }
+  }
+
+  private func appendStationExtension(_ nextStation: RadioStation) -> [RadioQueueItem] {
+    let newItems = uniqueExtensionItems(from: nextStation.items)
+    guard !newItems.isEmpty else { return [] }
+
+    queue.append(contentsOf: newItems)
+
+    let currentStation = station
+    let baseItems = currentStation?.items ?? []
+    station = RadioStation(
+      id: currentStation?.id ?? nextStation.id,
+      title: currentStation?.title ?? nextStation.title,
+      subtitle: currentStation?.subtitle ?? nextStation.subtitle,
+      items: baseItems + newItems,
+      speech: mergedSpeech(existing: currentStation?.speech, incoming: nextStation.speech)
+    )
+    return newItems
+  }
+
+  private func uniqueExtensionItems(from items: [RadioQueueItem]) -> [RadioQueueItem] {
+    var seenTrackKeys = knownStationTrackKeys()
+    var uniqueItems: [RadioQueueItem] = []
+
+    for item in items {
+      let key = item.track.radioIdentity
+      guard !seenTrackKeys.contains(key) else { continue }
+      seenTrackKeys.insert(key)
+      uniqueItems.append(item)
+    }
+
+    return uniqueItems
+  }
+
+  private func knownStationTrackKeys() -> Set<String> {
+    var keys = Set(station?.items.map(\.track.radioIdentity) ?? [])
+    if let currentItem {
+      keys.insert(currentItem.track.radioIdentity)
+    }
+    keys.formUnion(queue.map(\.track.radioIdentity))
+    keys.formUnion(history.map(\.track.radioIdentity))
+    return keys
+  }
+
+  private func mergedSpeech(existing: RadioSpeech?, incoming: RadioSpeech?) -> RadioSpeech? {
+    guard existing != nil || incoming != nil else { return nil }
+
+    let intro = existing?.stationIntro ?? incoming?.stationIntro
+    var transitions = existing?.betweenTracks ?? []
+    var seenTransitionKeys = Set(transitions.map(transitionKey))
+
+    for transition in incoming?.betweenTracks ?? [] {
+      let key = transitionKey(transition)
+      guard !seenTransitionKeys.contains(key) else { continue }
+      seenTransitionKeys.insert(key)
+      transitions.append(transition)
+    }
+
+    return RadioSpeech(stationIntro: intro, betweenTracks: transitions)
+  }
+
+  private func transitionKey(_ transition: RadioTransitionCopy) -> String {
+    "\(transition.id)|\(transition.fromItemId)|\(transition.toItemId)"
+  }
+
+  private func recentPlaybackTrackKeys() -> [String] {
+    var recentKeys = history.suffix(12).reversed().map(\.track.radioIdentity)
+    if let currentItem {
+      recentKeys.insert(currentItem.track.radioIdentity, at: 0)
+    }
+    return recentKeys
+  }
+
+  private func beginNewStationSession() {
+    extensionTask?.cancel()
+    extensionTask = nil
+    extensionTaskID = nil
+    stationGenerationID = UUID()
+    stationSessionID = nil
+    continuationCursor = nil
+    isExtendingStation = false
+    extensionErrorMessage = nil
   }
 
   private func stationSeeds() -> [Track] {
     let currentTracks = stationTracks
     if !currentTracks.isEmpty {
       return Array(currentTracks.prefix(6))
+    }
+    let recentTracks = history.suffix(6).map(\.track)
+    if !recentTracks.isEmpty {
+      return Array(recentTracks)
     }
     let libraryTracks = libraryTrackProvider().filter(\.isPlayable)
     if !libraryTracks.isEmpty {
@@ -278,7 +660,30 @@ final class RadioStationController {
   }
 
   private func recordMemoryEvent(type: String, track: Track?) async {
-    try? await memoryStore.record(RadioMemoryEvent(type: type, track: track))
+    do {
+      try await memoryStore.record(RadioMemoryEvent(type: type, track: track))
+      diagnostics?.record(
+        .info,
+        chain: .radioMemory,
+        event: "event_recorded",
+        message: "本地声音档案事件已记录。",
+        payload: DiagnosticsPayload.merge(
+          ["memory_event_type": type],
+          track.map(DiagnosticsPayload.track) ?? [:]
+        )
+      )
+    } catch {
+      diagnostics?.record(
+        .error,
+        chain: .radioMemory,
+        event: "event_record_failed",
+        message: "本地声音档案事件记录失败。",
+        payload: DiagnosticsPayload.merge(
+          ["memory_event_type": type],
+          DiagnosticsPayload.error(error)
+        )
+      )
+    }
     await compressMemoryIfNeeded()
     await refreshMemoryStatus()
   }
@@ -304,8 +709,40 @@ final class RadioStationController {
 
   private func compressMemoryIfNeeded() async {
     guard let request = try? await memoryStore.compressionRequest() else { return }
-    guard let proposal = try? await stationClient.compressMemory(request) else { return }
-    try? await memoryStore.applyCompression(proposal)
+    diagnostics?.record(
+      .info,
+      chain: .radioMemory,
+      event: "compression_requested",
+      message: "本地声音档案达到压缩阈值。",
+      payload: ["new_event_count": String(request.newEvents.count)]
+    )
+
+    do {
+      guard let proposal = try await stationClient.compressMemory(request) else {
+        diagnostics?.record(
+          .info,
+          chain: .radioMemory,
+          event: "compression_skipped",
+          message: "后端未返回声音档案压缩建议。"
+        )
+        return
+      }
+      try await memoryStore.applyCompression(proposal)
+      diagnostics?.record(
+        .notice,
+        chain: .radioMemory,
+        event: "compression_applied",
+        message: "本地声音档案压缩建议已应用。"
+      )
+    } catch {
+      diagnostics?.record(
+        .error,
+        chain: .radioMemory,
+        event: "compression_failed",
+        message: "本地声音档案压缩失败。",
+        payload: DiagnosticsPayload.error(error)
+      )
+    }
   }
 }
 
@@ -314,4 +751,19 @@ enum RadioAdvanceReason {
   case stationStart
   case automaticCompletion
   case speechCompletion
+}
+
+private extension RadioAdvanceReason {
+  var diagnosticValue: String {
+    switch self {
+    case .manual:
+      "manual"
+    case .stationStart:
+      "station_start"
+    case .automaticCompletion:
+      "automatic_completion"
+    case .speechCompletion:
+      "speech_completion"
+    }
+  }
 }

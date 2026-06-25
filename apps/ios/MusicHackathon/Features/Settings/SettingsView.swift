@@ -6,6 +6,7 @@ struct SettingsView: View {
   @Environment(MusicAuthorizationService.self) private var musicAuthorization
   @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
   @Environment(RadioStationController.self) private var radioStation
+  @Environment(DiagnosticsStore.self) private var diagnostics
   @Environment(\.openURL) private var openURL
 
   @AppStorage(RadioHostVoiceSettings.speakerIDKey) private var selectedHostSpeakerID = ""
@@ -23,6 +24,7 @@ struct SettingsView: View {
       appleMusicSection
       playbackSection
       backendStationSection
+      diagnosticsSection
       speechVoiceSection
       dataSourceSection
       privacySection
@@ -107,6 +109,7 @@ struct SettingsView: View {
     Section("后端电台") {
       LabeledContent("当前电台", value: radioStation.stationTitle)
       LabeledContent("队列歌曲", value: "\(radioStation.stationTracks.count)")
+      LabeledContent("电台状态", value: backendStationStatusText)
 
       Button {
         Task {
@@ -114,18 +117,74 @@ struct SettingsView: View {
         }
       } label: {
         Label(
-          radioStation.isLoadingStation ? "加载中" : "刷新后端电台",
+          backendStationRefreshTitle,
           systemImage: "dot.radiowaves.left.and.right"
         )
       }
-      .disabled(radioStation.isLoadingStation)
+      .disabled(radioStation.isLoadingStation || radioStation.isExtendingStation)
 
       if let message = radioStation.errorMessage {
         Text(message)
           .font(.footnote)
           .foregroundStyle(.secondary)
       }
+
+      if let message = radioStation.extensionErrorMessage {
+        Text(message)
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+      }
     }
+  }
+
+  private var diagnosticsSection: some View {
+    Section("诊断") {
+      NavigationLink {
+        DiagnosticsView()
+      } label: {
+        HStack(spacing: 12) {
+          Label("日志与诊断", systemImage: "stethoscope")
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+          VStack(alignment: .trailing, spacing: 2) {
+            Text("\(diagnostics.errorCount) 个问题")
+              .font(.caption)
+              .foregroundStyle(diagnostics.errorCount > 0 ? .orange : .secondary)
+            Text(diagnostics.lastEventText)
+              .font(.caption2)
+              .foregroundStyle(.tertiary)
+          }
+        }
+      }
+
+      Text("保存播放、Apple Music、后端电台和本地档案链路的短期诊断日志，可筛选、清空或导出。")
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+    }
+  }
+
+  private var backendStationStatusText: String {
+    if radioStation.isLoadingStation {
+      return "正在加载"
+    }
+
+    if radioStation.isExtendingStation {
+      return "正在丰富下一段"
+    }
+
+    return "待命"
+  }
+
+  private var backendStationRefreshTitle: String {
+    if radioStation.isLoadingStation {
+      return "加载中"
+    }
+
+    if radioStation.isExtendingStation {
+      return "正在丰富下一段"
+    }
+
+    return "刷新后端电台"
   }
 
   private var speechVoiceSection: some View {
@@ -585,4 +644,5 @@ private enum AppleMusicAlert: Identifiable {
   .environment(RadioStationController(playbackController: playbackController))
   .environment(MusicAuthorizationService())
   .environment(AppleMusicLibraryStore())
+  .environment(DiagnosticsStore.preview())
 }

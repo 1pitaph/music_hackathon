@@ -329,4 +329,5 @@ private struct AppBackdrop: View {
     .environment(RadioStationController(playbackController: playbackController))
     .environment(MusicAuthorizationService())
     .environment(AppleMusicLibraryStore())
+    .environment(DiagnosticsStore.preview())
 }

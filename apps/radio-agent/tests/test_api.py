@@ -138,8 +138,8 @@ def test_synthesize_speech_endpoint_returns_matching_segment_audio(monkeypatch):
 
 
 def test_speech_voices_returns_configured_catalog(monkeypatch):
-  monkeypatch.setenv("VOLCENGINE_TTS_RESOURCE_ID", "seed-tts-2.0")
-  monkeypatch.setenv("VOLCENGINE_TTS_MODEL", "seed-tts-2.0-standard")
+  monkeypatch.setenv("VOLCENGINE_TTS_RESOURCE_ID", "seed-tts-1.0")
+  monkeypatch.setenv("VOLCENGINE_TTS_MODEL", "seed-tts-1.0")
   monkeypatch.setenv("VOLCENGINE_TTS_SPEAKER", "voice-b")
   monkeypatch.setenv("VOLCENGINE_TTS_ALLOWED_SPEAKERS", "voice-b,voice-c")
   monkeypatch.setenv("VOLCENGINE_TTS_VOICES_JSON", json.dumps([
@@ -149,8 +149,8 @@ def test_speech_voices_returns_configured_catalog(monkeypatch):
       "language": "zh-cn",
       "gender": "female",
       "style": "Not allowed",
-      "resourceId": "seed-tts-2.0",
-      "model": "seed-tts-2.0-standard",
+      "resourceId": "seed-tts-1.0",
+      "model": "seed-tts-1.0",
     },
     {
       "id": "voice-b",
@@ -158,8 +158,8 @@ def test_speech_voices_returns_configured_catalog(monkeypatch):
       "language": "zh-cn",
       "gender": "male",
       "style": "Host",
-      "resourceId": "seed-tts-2.0",
-      "model": "seed-tts-2.0-standard",
+      "resourceId": "seed-tts-1.0",
+      "model": "seed-tts-1.0",
     },
   ]))
   client = TestClient(app)
@@ -169,7 +169,7 @@ def test_speech_voices_returns_configured_catalog(monkeypatch):
   assert response.status_code == 200
   body = response.json()
   assert body["defaultSpeaker"] == "voice-b"
-  assert body["resourceId"] == "seed-tts-2.0"
+  assert body["resourceId"] == "seed-tts-1.0"
   assert [voice["id"] for voice in body["voices"]] == ["voice-b", "voice-c"]
   assert body["voices"][0]["name"] == "Voice B"
   assert body["voices"][1]["style"] == "自定义音色"
@@ -178,7 +178,7 @@ def test_speech_voices_returns_configured_catalog(monkeypatch):
 def test_speech_voices_ignores_legacy_openai_model(monkeypatch):
   monkeypatch.delenv("VOLCENGINE_TTS_MODEL", raising=False)
   monkeypatch.setenv("SPEECH_MODEL", "gpt-4o-mini-tts")
-  monkeypatch.setenv("VOLCENGINE_TTS_CLUSTER", "seed-tts-2.0")
+  monkeypatch.setenv("VOLCENGINE_TTS_CLUSTER", "seed-tts-1.0")
   monkeypatch.setenv("VOLCENGINE_TTS_VOICE_TYPE", "voice-legacy")
   client = TestClient(app)
 
@@ -187,8 +187,8 @@ def test_speech_voices_ignores_legacy_openai_model(monkeypatch):
   assert response.status_code == 200
   body = response.json()
   assert body["defaultSpeaker"] == "voice-legacy"
-  assert body["resourceId"] == "seed-tts-2.0"
-  assert body["model"] == "seed-tts-2.0-standard"
+  assert body["resourceId"] == "seed-tts-1.0"
+  assert body["model"] == "seed-tts-1.0"
   assert body["voices"][0]["id"] == "voice-legacy"
 
 
@@ -231,12 +231,12 @@ def test_volcengine_speech_synthesis_writes_audio_and_reuses_cache(monkeypatch, 
   assert calls[0]["method"] == "POST"
   assert calls[0]["url"] == "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
   assert calls[0]["headers"]["X-Api-Key"] == "test-api-key"
-  assert calls[0]["headers"]["X-Api-Resource-Id"] == "seed-tts-2.0"
+  assert calls[0]["headers"]["X-Api-Resource-Id"] == "seed-tts-1.0"
   assert calls[0]["headers"]["X-Api-Request-Id"].startswith("speech_")
   req_params = calls[0]["json"]["req_params"]
   assert req_params["text"] == "Welcome in."
   assert req_params["speaker"] == "zh_female_test"
-  assert req_params["model"] == "seed-tts-2.0-standard"
+  assert "model" not in req_params
   assert req_params["audio_params"] == {
     "format": "mp3",
     "sample_rate": 24000,
@@ -249,7 +249,7 @@ def test_volcengine_speech_synthesis_writes_audio_and_reuses_cache(monkeypatch, 
   audio = results[0].audio
   assert audio.status == "ready"
   assert audio.voice == "zh_female_test"
-  assert audio.model == "seed-tts-2.0-standard"
+  assert audio.model == "seed-tts-1.0"
   assert audio.mimeType == "audio/mpeg"
   assert audio.audioURL == f"https://speech.test/audio/{audio.cacheKey}.mp3"
   assert (tmp_path / f"{audio.cacheKey}.mp3").read_bytes() == audio_bytes
@@ -651,16 +651,16 @@ class _FakeVolcengineStream:
 def _configure_volcengine_env(monkeypatch, tmp_path):
   monkeypatch.setenv("SPEECH_ENABLED", "true")
   monkeypatch.setenv("SPEECH_PROVIDER", "volcengine")
-  monkeypatch.setenv("SPEECH_MODEL", "seed-tts-2.0-standard")
+  monkeypatch.setenv("SPEECH_MODEL", "seed-tts-1.0")
   monkeypatch.setenv("SPEECH_DEFAULT_VOICE", "")
   monkeypatch.setenv("SPEECH_FORMAT", "mp3")
   monkeypatch.setenv("SPEECH_CACHE_DIR", str(tmp_path))
   monkeypatch.setenv("SPEECH_PUBLIC_BASE_URL", "https://speech.test/audio")
   monkeypatch.setenv("VOLCENGINE_TTS_ENDPOINT", "https://openspeech.bytedance.com/api/v3/tts/unidirectional")
   monkeypatch.setenv("VOLCENGINE_TTS_API_KEY", "test-api-key")
-  monkeypatch.setenv("VOLCENGINE_TTS_RESOURCE_ID", "seed-tts-2.0")
+  monkeypatch.setenv("VOLCENGINE_TTS_RESOURCE_ID", "seed-tts-1.0")
   monkeypatch.setenv("VOLCENGINE_TTS_SPEAKER", "zh_female_test")
-  monkeypatch.setenv("VOLCENGINE_TTS_MODEL", "seed-tts-2.0-standard")
+  monkeypatch.setenv("VOLCENGINE_TTS_MODEL", "seed-tts-1.0")
   monkeypatch.setenv("VOLCENGINE_TTS_SAMPLE_RATE", "24000")
   monkeypatch.setenv("VOLCENGINE_TTS_BIT_RATE", "128000")
   monkeypatch.setenv("VOLCENGINE_TTS_SPEECH_RATE", "0")

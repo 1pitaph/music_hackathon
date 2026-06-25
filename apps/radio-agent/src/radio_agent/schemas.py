@@ -117,8 +117,8 @@ class RadioSpeechVoice(BaseModel):
 
 class RadioSpeechVoiceCatalog(BaseModel):
   defaultSpeaker: str
-  resourceId: str = "seed-tts-2.0"
-  model: str = "seed-tts-2.0-standard"
+  resourceId: str = "seed-tts-1.0"
+  model: str = "seed-tts-1.0"
   voices: list[RadioSpeechVoice] = Field(default_factory=list)
 
 

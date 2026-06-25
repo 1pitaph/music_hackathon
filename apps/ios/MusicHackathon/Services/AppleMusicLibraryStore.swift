@@ -52,9 +52,14 @@ final class AppleMusicLibraryStore {
   var lastErrorMessage: String?
 
   @ObservationIgnored private let provider: any AppleMusicLibraryProviding
+  @ObservationIgnored private let diagnostics: DiagnosticsStore?
 
-  init(provider: any AppleMusicLibraryProviding = AppleMusicCatalogService()) {
+  init(
+    provider: any AppleMusicLibraryProviding = AppleMusicCatalogService(),
+    diagnostics: DiagnosticsStore? = nil
+  ) {
     self.provider = provider
+    self.diagnostics = diagnostics
   }
 
   func loadIfNeeded(authorizationStatus: MusicAuthorization.Status) async {
@@ -68,12 +73,25 @@ final class AppleMusicLibraryStore {
 
   func refresh(authorizationStatus: MusicAuthorization.Status) async {
     guard authorizationStatus == .authorized else {
+      diagnostics?.record(
+        .info,
+        chain: .libraryAppleMusic,
+        event: "refresh_skipped",
+        message: "未授权时跳过 Apple Music 资料库刷新。",
+        payload: ["authorization_status": authorizationStatus.diagnosticValue]
+      )
       apply(.empty, state: .needsAuthorization)
       return
     }
 
     state = .loading
     lastErrorMessage = nil
+    diagnostics?.record(
+      .info,
+      chain: .libraryAppleMusic,
+      event: "refresh_start",
+      message: "开始刷新 Apple Music 资料库。"
+    )
 
     do {
       let snapshot = try await provider.librarySnapshot(
@@ -85,6 +103,17 @@ final class AppleMusicLibraryStore {
         ? .empty
         : .loaded
       apply(snapshot, state: nextState)
+      diagnostics?.record(
+        nextState == .loaded ? .notice : .warning,
+        chain: .libraryAppleMusic,
+        event: "refresh_success",
+        message: "Apple Music 资料库刷新完成。",
+        payload: [
+          "playlist_count": String(snapshot.playlists.count),
+          "track_count": String(snapshot.tracks.count),
+          "loaded_state": nextState.diagnosticValue
+        ]
+      )
     } catch is CancellationError {
       return
     } catch {
@@ -93,6 +122,13 @@ final class AppleMusicLibraryStore {
         ? "无法读取 Apple Music 资料库，请确认已登录并授权后重试。"
         : rawMessage
       apply(.empty, state: .failed(message))
+      diagnostics?.record(
+        .error,
+        chain: .libraryAppleMusic,
+        event: "refresh_failed",
+        message: "Apple Music 资料库刷新失败。",
+        payload: DiagnosticsPayload.error(error)
+      )
     }
   }
 
@@ -110,6 +146,42 @@ final class AppleMusicLibraryStore {
       lastErrorMessage = message
     } else {
       lastErrorMessage = nil
+    }
+  }
+}
+
+private extension MusicAuthorization.Status {
+  var diagnosticValue: String {
+    switch self {
+    case .authorized:
+      "authorized"
+    case .denied:
+      "denied"
+    case .notDetermined:
+      "not_determined"
+    case .restricted:
+      "restricted"
+    @unknown default:
+      "unknown"
+    }
+  }
+}
+
+private extension AppleMusicLibraryState {
+  var diagnosticValue: String {
+    switch self {
+    case .idle:
+      "idle"
+    case .loading:
+      "loading"
+    case .needsAuthorization:
+      "needs_authorization"
+    case .loaded:
+      "loaded"
+    case .empty:
+      "empty"
+    case .failed:
+      "failed"
     }
   }
 }

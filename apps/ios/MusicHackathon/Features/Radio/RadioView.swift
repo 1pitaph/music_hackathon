@@ -29,6 +29,7 @@ struct RadioView: View {
             status: panelStatus,
             isPlaying: playbackController.state == .playing,
             isLoading: playbackController.state == .loading || radioStation.isLoadingStation,
+            isExtending: radioStation.isExtendingStation,
             elapsedTimeText: playbackController.elapsedTimeText,
             primaryAction: primaryRadioAction
           )
@@ -222,6 +223,7 @@ private struct NowPlayingSetCard: View {
   let status: RadioPanelStatus
   let isPlaying: Bool
   let isLoading: Bool
+  let isExtending: Bool
   let elapsedTimeText: String
   let primaryAction: () -> Void
 
@@ -303,6 +305,14 @@ private struct NowPlayingSetCard: View {
         .accessibilityLabel(playButtonAccessibilityLabel)
       }
 
+      if isExtending {
+        Label("正在丰富下一段", systemImage: "sparkles")
+          .font(.system(size: 14, weight: .heavy, design: .rounded))
+          .foregroundStyle(.black.opacity(0.5))
+          .lineLimit(1)
+          .minimumScaleFactor(0.78)
+          .padding(.top, 2)
+      }
     }
     .padding(.horizontal, 20)
     .padding(.top, 36)

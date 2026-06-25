@@ -96,9 +96,11 @@ final class MusicAuthorizationService {
   var isRefreshingSubscription = false
   var lastErrorMessage: String?
 
+  @ObservationIgnored private let diagnostics: DiagnosticsStore?
   @ObservationIgnored private var subscriptionUpdatesTask: Task<Void, Never>?
 
-  init() {
+  init(diagnostics: DiagnosticsStore? = nil) {
+    self.diagnostics = diagnostics
     startObservingSubscriptionUpdates()
   }
 
@@ -108,6 +110,13 @@ final class MusicAuthorizationService {
 
   func refresh() {
     status = MusicAuthorization.currentStatus
+    diagnostics?.record(
+      .info,
+      chain: .musicAuthorization,
+      event: "status_refresh",
+      message: "Apple Music 授权状态已刷新。",
+      payload: ["authorization_status": statusDiagnosticValue]
+    )
   }
 
   func refreshAccessState() async {
@@ -119,8 +128,21 @@ final class MusicAuthorizationService {
     guard !isRequestingAccess else { return }
 
     isRequestingAccess = true
+    diagnostics?.record(
+      .notice,
+      chain: .musicAuthorization,
+      event: "request_start",
+      message: "开始请求 Apple Music 访问权限。"
+    )
     status = await MusicAuthorization.request()
     isRequestingAccess = false
+    diagnostics?.record(
+      status == .authorized ? .notice : .warning,
+      chain: .musicAuthorization,
+      event: "request_result",
+      message: "Apple Music 访问权限请求已结束。",
+      payload: ["authorization_status": statusDiagnosticValue]
+    )
     await refreshSubscription()
   }
 
@@ -128,20 +150,50 @@ final class MusicAuthorizationService {
     guard status == .authorized else {
       subscription = nil
       subscriptionIssue = nil
+      diagnostics?.record(
+        .info,
+        chain: .musicSubscription,
+        event: "subscription_refresh_skipped",
+        message: "未授权时跳过 Apple Music 订阅检查。",
+        payload: ["authorization_status": statusDiagnosticValue]
+      )
       return
     }
 
     isRefreshingSubscription = true
     lastErrorMessage = nil
     subscriptionIssue = nil
+    diagnostics?.record(
+      .info,
+      chain: .musicSubscription,
+      event: "subscription_refresh_start",
+      message: "开始检查 Apple Music 订阅状态。"
+    )
 
     do {
       subscription = try await MusicSubscription.current
+      diagnostics?.record(
+        subscription?.canPlayCatalogContent == true ? .notice : .warning,
+        chain: .musicSubscription,
+        event: "subscription_refresh_success",
+        message: "Apple Music 订阅状态检查完成。",
+        payload: subscriptionDiagnosticPayload
+      )
     } catch {
       subscription = nil
       let issue = AppleMusicSubscriptionIssue(error: error)
       subscriptionIssue = issue
       lastErrorMessage = issue.message
+      diagnostics?.record(
+        .error,
+        chain: .musicSubscription,
+        event: "subscription_refresh_failed",
+        message: "Apple Music 订阅状态检查失败。",
+        payload: DiagnosticsPayload.merge(
+          ["subscription_issue": issue.diagnosticValue],
+          DiagnosticsPayload.error(error)
+        )
+      )
     }
 
     isRefreshingSubscription = false
@@ -161,37 +213,54 @@ final class MusicAuthorizationService {
     case .authorized:
       break
     case .denied:
+      recordAccessFailure("authorization_denied")
       throw AppleMusicAccessError.authorizationDenied
     case .restricted:
+      recordAccessFailure("authorization_restricted")
       throw AppleMusicAccessError.authorizationRestricted
     case .notDetermined:
+      recordAccessFailure("authorization_required")
       throw AppleMusicAccessError.authorizationRequired
     @unknown default:
+      recordAccessFailure("authorization_unknown")
       throw AppleMusicAccessError.authorizationRequired
     }
 
     if let subscriptionIssue {
       switch subscriptionIssue {
       case .privacyAcknowledgementRequired:
+        recordAccessFailure("privacy_acknowledgement_required")
         throw AppleMusicAccessError.privacyAcknowledgementRequired
       case .permissionDenied:
+        recordAccessFailure("subscription_permission_denied")
         throw AppleMusicAccessError.authorizationDenied
       case .unknown(let message):
+        recordAccessFailure("subscription_check_failed", extra: ["message_hash": DiagnosticsRedactor.hash(message)])
         throw AppleMusicAccessError.subscriptionCheckFailed(message)
       }
     }
 
     guard let subscription else {
+      recordAccessFailure("subscription_missing")
       throw AppleMusicAccessError.catalogPlaybackUnavailable
     }
 
     guard subscription.canPlayCatalogContent else {
       if subscription.canBecomeSubscriber {
+        recordAccessFailure("subscription_required")
         throw AppleMusicAccessError.subscriptionRequired
       }
+      recordAccessFailure("catalog_playback_unavailable")
       throw AppleMusicAccessError.catalogPlaybackUnavailable
     }
 
+    diagnostics?.record(
+      .notice,
+      chain: .musicSubscription,
+      event: "catalog_playback_ready",
+      message: "Apple Music 目录完整播放资格已确认。",
+      payload: subscriptionDiagnosticPayload
+    )
     return subscription
   }
 
@@ -300,8 +369,111 @@ final class MusicAuthorizationService {
           self?.subscription = subscription
           self?.subscriptionIssue = nil
           self?.lastErrorMessage = nil
+          self?.diagnostics?.record(
+            subscription.canPlayCatalogContent ? .notice : .warning,
+            chain: .musicSubscription,
+            event: "subscription_update",
+            message: "收到 Apple Music 订阅状态更新。",
+            payload: [
+              "can_play_catalog_content": DiagnosticsPayload.bool(subscription.canPlayCatalogContent),
+              "can_become_subscriber": DiagnosticsPayload.bool(subscription.canBecomeSubscriber),
+              "has_cloud_library_enabled": DiagnosticsPayload.bool(subscription.hasCloudLibraryEnabled)
+            ]
+          )
         }
       }
+    }
+  }
+
+  private var statusDiagnosticValue: String {
+    switch status {
+    case .authorized:
+      "authorized"
+    case .denied:
+      "denied"
+    case .notDetermined:
+      "not_determined"
+    case .restricted:
+      "restricted"
+    @unknown default:
+      "unknown"
+    }
+  }
+
+  private var subscriptionDiagnosticPayload: [String: String] {
+    guard let subscription else {
+      return [
+        "has_subscription_snapshot": "false",
+        "readiness": readiness.diagnosticValue
+      ]
+    }
+
+    return [
+      "has_subscription_snapshot": "true",
+      "readiness": readiness.diagnosticValue,
+      "can_play_catalog_content": DiagnosticsPayload.bool(subscription.canPlayCatalogContent),
+      "can_become_subscriber": DiagnosticsPayload.bool(subscription.canBecomeSubscriber),
+      "has_cloud_library_enabled": DiagnosticsPayload.bool(subscription.hasCloudLibraryEnabled)
+    ]
+  }
+
+  private func recordAccessFailure(_ reason: String, extra: [String: String] = [:]) {
+    diagnostics?.record(
+      .warning,
+      chain: .musicSubscription,
+      event: "catalog_playback_not_ready",
+      message: "Apple Music 目录完整播放资格未就绪。",
+      payload: DiagnosticsPayload.merge(
+        [
+          "reason": reason,
+          "authorization_status": statusDiagnosticValue,
+          "readiness": readiness.diagnosticValue
+        ],
+        subscriptionDiagnosticPayload,
+        extra
+      )
+    )
+  }
+}
+
+private extension AppleMusicSubscriptionIssue {
+  var diagnosticValue: String {
+    switch self {
+    case .privacyAcknowledgementRequired:
+      "privacy_acknowledgement_required"
+    case .permissionDenied:
+      "permission_denied"
+    case .unknown:
+      "unknown"
+    }
+  }
+}
+
+private extension AppleMusicAccessReadiness {
+  var diagnosticValue: String {
+    switch self {
+    case .notDetermined:
+      "not_determined"
+    case .requestingAuthorization:
+      "requesting_authorization"
+    case .denied:
+      "denied"
+    case .restricted:
+      "restricted"
+    case .checkingSubscription:
+      "checking_subscription"
+    case .subscriptionStatusUnknown:
+      "subscription_status_unknown"
+    case .ready:
+      "ready"
+    case .needsSubscription:
+      "needs_subscription"
+    case .catalogPlaybackUnavailable:
+      "catalog_playback_unavailable"
+    case .privacyAcknowledgementRequired:
+      "privacy_acknowledgement_required"
+    case .subscriptionCheckFailed:
+      "subscription_check_failed"
     }
   }
 }

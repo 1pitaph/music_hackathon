@@ -23,8 +23,8 @@ from radio_agent.voices import resolve_speech_speaker
 
 DEFAULT_OPENAI_SPEECH_MODEL = "gpt-4o-mini-tts"
 DEFAULT_OPENAI_SPEECH_VOICE = "coral"
-DEFAULT_VOLCENGINE_SPEECH_MODEL = "seed-tts-2.0-standard"
-DEFAULT_VOLCENGINE_RESOURCE_ID = "seed-tts-2.0"
+DEFAULT_VOLCENGINE_SPEECH_MODEL = "seed-tts-1.0"
+DEFAULT_VOLCENGINE_RESOURCE_ID = "seed-tts-1.0"
 DEFAULT_VOLCENGINE_ENDPOINT = "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
 DEFAULT_SPEECH_FORMAT = "mp3"
 DEFAULT_VOLCENGINE_SAMPLE_RATE = 24000
@@ -445,10 +445,12 @@ def _volcengine_payload(
   }
   req_params: dict[str, object] = {
     "text": segment.text,
-    "model": context.model,
     "speaker": context.voice,
     "audio_params": audio_params,
   }
+  wire_model = _volcengine_wire_model(context.model)
+  if wire_model:
+    req_params["model"] = wire_model
   if context.explicit_language:
     req_params["explicit_language"] = context.explicit_language
   if context.emotion:
@@ -460,6 +462,13 @@ def _volcengine_payload(
     "user": {"uid": "airset-radio-agent"},
     "req_params": req_params,
   }
+
+
+def _volcengine_wire_model(model: str) -> str | None:
+  stripped = model.strip()
+  if stripped in {"", "seed-tts-1.0", "seed-tts-1.0-concurr"}:
+    return None
+  return stripped
 
 
 def _volcengine_audio_bytes(response, segment_id: str) -> tuple[bytes, list[str]]:

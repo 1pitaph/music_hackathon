@@ -25,6 +25,8 @@ struct RadioStationResult: Equatable {
   let station: RadioStation
   var diagnostics: [String] = []
   var memoryPatchProposals: [RadioMemoryPatchProposal] = []
+  var stationSessionID: String?
+  var continuationCursor: String?
 }
 
 struct RadioMemoryPatchProposal: Codable, Equatable {
@@ -43,18 +45,31 @@ struct RadioStationGenerationContext: Encodable, Equatable {
   var memory: RadioMemoryRequest
   var memoryContext: RadioMemoryContext
   var memoryMarkdown = ""
-  var limit = 12
+  var limit = 6
   var stationID = "airset-personal"
+  var stationSessionID: String?
+  var continuationCursor: String?
+  var currentTrackKey: String?
+  var queuedTrackKeys: [String] = []
+  var recentlyPlayedTrackKeys: [String] = []
   var title = "Airset Radio"
   var speechAudio = RadioSpeechAudioRequest(enabled: true)
 
   init(
+    action: String = "start",
     seedTracks: [Track],
     catalogCandidates: [Track],
     memoryContext: RadioMemoryContext,
-    limit: Int = 12,
+    limit: Int = 6,
+    stationID: String = "airset-personal",
+    stationSessionID: String? = nil,
+    continuationCursor: String? = nil,
+    currentTrackKey: String? = nil,
+    queuedTrackKeys: [String] = [],
+    recentlyPlayedTrackKeys: [String] = [],
     hostSpeakerID: String? = nil
   ) {
+    self.action = action
     self.seedTracks = seedTracks.map {
       RadioTrackPayload(track: $0, playlistName: "Local memory seeds", sourceLane: "familiar_anchor")
     }
@@ -67,6 +82,12 @@ struct RadioStationGenerationContext: Encodable, Equatable {
     }
     self.memoryContext = memoryContext
     self.limit = limit
+    self.stationID = stationID
+    self.stationSessionID = stationSessionID
+    self.continuationCursor = continuationCursor
+    self.currentTrackKey = currentTrackKey
+    self.queuedTrackKeys = queuedTrackKeys
+    self.recentlyPlayedTrackKeys = recentlyPlayedTrackKeys
     if let hostSpeakerID = hostSpeakerID?.trimmedNilIfEmpty {
       speechAudio.speaker = hostSpeakerID
     }
@@ -84,8 +105,8 @@ struct RadioSpeechAudioRequest: Codable, Equatable {
   var provider = "volcengine"
   var voice: String?
   var speaker: String?
-  var resourceId = "seed-tts-2.0"
-  var model = "seed-tts-2.0-standard"
+  var resourceId = "seed-tts-1.0"
+  var model = "seed-tts-1.0"
   var format = "mp3"
 }
 
@@ -96,18 +117,18 @@ struct RadioSpeechVoiceCatalog: Codable, Equatable {
   var voices: [RadioSpeechVoice]
 
   static let fallback = RadioSpeechVoiceCatalog(
-    defaultSpeaker: "zh_female_xiaohe_uranus_bigtts",
-    resourceId: "seed-tts-2.0",
-    model: "seed-tts-2.0-standard",
+    defaultSpeaker: "zh_female_shuangkuaisisi_moon_bigtts",
+    resourceId: "seed-tts-1.0",
+    model: "seed-tts-1.0",
     voices: [
       RadioSpeechVoice(
-        id: "zh_female_xiaohe_uranus_bigtts",
-        name: "小何2.0",
+        id: "zh_female_shuangkuaisisi_moon_bigtts",
+        name: "爽快思思",
         language: "zh-cn",
         gender: "female",
         style: "通用主持",
-        resourceId: "seed-tts-2.0",
-        model: "seed-tts-2.0-standard"
+        resourceId: "seed-tts-1.0",
+        model: "seed-tts-1.0"
       )
     ]
   )
@@ -200,17 +221,20 @@ struct RadioStationClient: RadioStationFetching {
   private let generationTimeout: TimeInterval
   private let decoder: JSONDecoder
   private let encoder: JSONEncoder
+  private let diagnostics: DiagnosticsStore?
 
   init(
     baseURL: URL? = Self.defaultBaseURL,
     session: URLSession = .shared,
     timeout: TimeInterval = 15.0,
-    generationTimeout: TimeInterval = 45.0
+    generationTimeout: TimeInterval = 45.0,
+    diagnostics: DiagnosticsStore? = nil
   ) {
     self.baseURL = baseURL
     self.session = session
     self.timeout = timeout
     self.generationTimeout = generationTimeout
+    self.diagnostics = diagnostics
     decoder = JSONDecoder()
     encoder = JSONEncoder()
   }
@@ -224,16 +248,77 @@ struct RadioStationClient: RadioStationFetching {
     var request = URLRequest(url: endpoint, timeoutInterval: timeout)
     request.httpMethod = "GET"
 
-    let (data, response) = try await session.data(for: request)
+    let startedAt = Date()
+    recordNetwork(
+      .info,
+      event: "request_start",
+      message: "后端电台请求开始。",
+      request: request
+    )
+
+    let data: Data
+    let response: URLResponse
+    do {
+      (data, response) = try await session.data(for: request)
+    } catch {
+      recordNetwork(
+        .error,
+        event: "request_failed",
+        message: "后端电台请求失败。",
+        request: request,
+        payload: DiagnosticsPayload.error(error)
+      )
+      throw error
+    }
+
     guard let httpResponse = response as? HTTPURLResponse else {
+      recordNetwork(
+        .error,
+        event: "invalid_response",
+        message: "后端电台返回了无效响应。",
+        request: request,
+        payload: ["duration_ms": DiagnosticsPayload.durationMilliseconds(Date().timeIntervalSince(startedAt))]
+      )
       throw RadioStationClientError.invalidResponse
     }
 
     guard (200..<300).contains(httpResponse.statusCode) else {
+      recordNetwork(
+        .error,
+        event: "server_status",
+        message: "后端电台返回非 2xx 状态。",
+        request: request,
+        payload: [
+          "status_code": String(httpResponse.statusCode),
+          "duration_ms": DiagnosticsPayload.durationMilliseconds(Date().timeIntervalSince(startedAt))
+        ]
+      )
       throw RadioStationClientError.serverStatus(httpResponse.statusCode)
     }
 
-    let payload = try decoder.decode(RadioStationPayload.self, from: data)
+    let payload: RadioStationPayload
+    do {
+      payload = try decoder.decode(RadioStationPayload.self, from: data)
+    } catch {
+      recordNetwork(
+        .error,
+        event: "decode_failed",
+        message: "后端电台响应解码失败。",
+        request: request,
+        payload: DiagnosticsPayload.error(error)
+      )
+      throw error
+    }
+    recordNetwork(
+      .notice,
+      event: "request_success",
+      message: "后端电台请求完成。",
+      request: request,
+      payload: [
+        "status_code": String(httpResponse.statusCode),
+        "duration_ms": DiagnosticsPayload.durationMilliseconds(Date().timeIntervalSince(startedAt))
+      ]
+    )
     return try payload.station()
   }
 
@@ -252,6 +337,13 @@ struct RadioStationClient: RadioStationFetching {
       let payload: RadioStationPayload = try await decodedPayload(for: request)
       return try payload.result()
     } catch RadioStationClientError.serverStatus(404) {
+      recordNetwork(
+        .warning,
+        event: "generate_fallback_current",
+        message: "电台生成接口未部署，回退到当前电台接口。",
+        request: request,
+        payload: ["status_code": "404"]
+      )
       return RadioStationResult(
         station: try await fetchCurrentStation(),
         diagnostics: ["Station generation endpoint is not deployed yet; used current station fallback."]
@@ -291,16 +383,106 @@ struct RadioStationClient: RadioStationFetching {
   }
 
   private func decodedPayload<T: Decodable>(for request: URLRequest) async throws -> T {
-    let (data, response) = try await session.data(for: request)
+    let startedAt = Date()
+    recordNetwork(
+      .info,
+      event: "request_start",
+      message: "后端请求开始。",
+      request: request
+    )
+
+    let data: Data
+    let response: URLResponse
+    do {
+      (data, response) = try await session.data(for: request)
+    } catch {
+      recordNetwork(
+        .error,
+        event: "request_failed",
+        message: "后端请求失败。",
+        request: request,
+        payload: DiagnosticsPayload.error(error)
+      )
+      throw error
+    }
+
     guard let httpResponse = response as? HTTPURLResponse else {
+      recordNetwork(
+        .error,
+        event: "invalid_response",
+        message: "后端返回了无效响应。",
+        request: request,
+        payload: ["duration_ms": DiagnosticsPayload.durationMilliseconds(Date().timeIntervalSince(startedAt))]
+      )
       throw RadioStationClientError.invalidResponse
     }
 
     guard (200..<300).contains(httpResponse.statusCode) else {
+      recordNetwork(
+        .error,
+        event: "server_status",
+        message: "后端返回非 2xx 状态。",
+        request: request,
+        payload: [
+          "status_code": String(httpResponse.statusCode),
+          "duration_ms": DiagnosticsPayload.durationMilliseconds(Date().timeIntervalSince(startedAt))
+        ]
+      )
       throw RadioStationClientError.serverStatus(httpResponse.statusCode)
     }
 
-    return try decoder.decode(T.self, from: data)
+    do {
+      let payload = try decoder.decode(T.self, from: data)
+      recordNetwork(
+        .notice,
+        event: "request_success",
+        message: "后端请求完成。",
+        request: request,
+        payload: [
+          "status_code": String(httpResponse.statusCode),
+          "duration_ms": DiagnosticsPayload.durationMilliseconds(Date().timeIntervalSince(startedAt))
+        ]
+      )
+      return payload
+    } catch {
+      recordNetwork(
+        .error,
+        event: "decode_failed",
+        message: "后端响应解码失败。",
+        request: request,
+        payload: DiagnosticsPayload.error(error)
+      )
+      throw error
+    }
+  }
+
+  private func recordNetwork(
+    _ level: DiagnosticLogLevel,
+    event: String,
+    message: String,
+    request: URLRequest,
+    payload: [String: String] = [:]
+  ) {
+    guard let diagnostics else { return }
+    let requestPayload = DiagnosticsPayload.merge(
+      [
+        "method": request.httpMethod ?? "GET",
+        "endpoint_path": request.url?.path ?? "unknown",
+        "timeout_seconds": String(Int(request.timeoutInterval.rounded()))
+      ],
+      DiagnosticsPayload.url(request.url),
+      payload
+    )
+
+    Task { @MainActor in
+      diagnostics.record(
+        level,
+        chain: .network,
+        event: event,
+        message: message,
+        payload: requestPayload
+      )
+    }
   }
 }
 
@@ -329,6 +511,8 @@ enum RadioStationClientError: LocalizedError, Equatable {
 
 private struct RadioStationPayload: Decodable {
   let stationID: String
+  let stationSessionID: String?
+  let continuationCursor: String?
   let title: String
   let subtitle: String
   let items: [RadioStationItemPayload]
@@ -340,6 +524,12 @@ private struct RadioStationPayload: Decodable {
     case id
     case stationID
     case stationId
+    case stationSessionID
+    case stationSessionId
+    case sessionID
+    case sessionId
+    case continuationCursor
+    case cursor
     case title
     case subtitle
     case intro
@@ -355,6 +545,12 @@ private struct RadioStationPayload: Decodable {
       ?? container.decodeIfPresent(String.self, forKey: .stationId)
       ?? container.decodeIfPresent(String.self, forKey: .id)
       ?? "current"
+    stationSessionID = try container.decodeIfPresent(String.self, forKey: .stationSessionID)
+      ?? container.decodeIfPresent(String.self, forKey: .stationSessionId)
+      ?? container.decodeIfPresent(String.self, forKey: .sessionID)
+      ?? container.decodeIfPresent(String.self, forKey: .sessionId)
+    continuationCursor = try container.decodeIfPresent(String.self, forKey: .continuationCursor)
+      ?? container.decodeIfPresent(String.self, forKey: .cursor)
     title = try container.decodeIfPresent(String.self, forKey: .title) ?? "Airset Radio"
     subtitle = try container.decodeIfPresent(String.self, forKey: .subtitle)
       ?? container.decodeIfPresent(String.self, forKey: .intro)
@@ -384,7 +580,9 @@ private struct RadioStationPayload: Decodable {
     RadioStationResult(
       station: try station(),
       diagnostics: diagnostics,
-      memoryPatchProposals: memoryPatchProposals
+      memoryPatchProposals: memoryPatchProposals,
+      stationSessionID: stationSessionID,
+      continuationCursor: continuationCursor
     )
   }
 }

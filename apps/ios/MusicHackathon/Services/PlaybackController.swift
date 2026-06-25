@@ -44,6 +44,7 @@ final class PlaybackController: RadioPlaybackControlling {
   @ObservationIgnored private let speechSynthesizer = AVSpeechSynthesizer()
   @ObservationIgnored private let speechCompletionDelegate = SpeechCompletionDelegate()
   @ObservationIgnored private let musicAuthorization: MusicAuthorizationService
+  @ObservationIgnored private let diagnostics: DiagnosticsStore?
   @ObservationIgnored private let catalogService = AppleMusicCatalogService()
   @ObservationIgnored private var timeObserverToken: Any?
   @ObservationIgnored private var endObserverToken: NSObjectProtocol?
@@ -51,14 +52,18 @@ final class PlaybackController: RadioPlaybackControlling {
   @ObservationIgnored private var speechProgressTask: Task<Void, Never>?
   @ObservationIgnored private var playbackTask: Task<Void, Never>?
   @ObservationIgnored private var didNotifyTrackFinished = false
+  @ObservationIgnored private var currentPlaybackAttemptID: String?
+  @ObservationIgnored private var currentPlaybackStartedAt: Date?
 
-  init() {
-    self.musicAuthorization = MusicAuthorizationService()
+  init(diagnostics: DiagnosticsStore? = nil) {
+    self.musicAuthorization = MusicAuthorizationService(diagnostics: diagnostics)
+    self.diagnostics = diagnostics
     configureController()
   }
 
-  init(musicAuthorization: MusicAuthorizationService) {
+  init(musicAuthorization: MusicAuthorizationService, diagnostics: DiagnosticsStore? = nil) {
     self.musicAuthorization = musicAuthorization
+    self.diagnostics = diagnostics
     configureController()
   }
 
@@ -117,6 +122,15 @@ final class PlaybackController: RadioPlaybackControlling {
   }
 
   func pause() {
+    diagnostics?.record(
+      .info,
+      chain: activeBackend.diagnosticChain,
+      event: "pause",
+      message: "暂停当前播放。",
+      correlationID: currentPlaybackAttemptID,
+      payload: ["backend": activeBackend.rawValue]
+    )
+
     switch activeBackend {
     case .appleMusic:
       musicPlayer.pause()
@@ -155,54 +169,200 @@ final class PlaybackController: RadioPlaybackControlling {
   }
 
   private func startPlayback(for track: Track) async {
+    let attemptID = UUID().uuidString
+    currentPlaybackAttemptID = attemptID
+    currentPlaybackStartedAt = Date()
     currentTrack = track
     currentSpeech = nil
     lastErrorMessage = nil
     state = .loading
     stopCurrentPlayback(clearCurrentTrack: false)
     resetPlaybackProgress()
+    diagnostics?.record(
+      .notice,
+      chain: track.appleMusicID == nil ? .playbackPreview : .playbackAppleMusic,
+      event: "attempt_start",
+      message: "开始播放曲目。",
+      correlationID: attemptID,
+      payload: DiagnosticsPayload.track(track)
+    )
 
     if track.appleMusicID != nil {
       do {
-        try await startAppleMusicPlayback(for: track)
+        try await startAppleMusicPlayback(for: track, attemptID: attemptID)
         return
       } catch {
         if track.previewURL == nil {
-          failPlayback(error)
+          failPlayback(error, failedPhase: "apple_music_start", correlationID: attemptID)
           return
         }
 
         lastErrorMessage = nil
+        diagnostics?.record(
+          .warning,
+          chain: .playbackPreview,
+          event: "fallback_preview",
+          message: "完整歌曲启动失败，切换到试听片段。",
+          correlationID: attemptID,
+          payload: DiagnosticsPayload.merge(
+            ["failed_phase": "apple_music_start"],
+            DiagnosticsPayload.track(track),
+            DiagnosticsPayload.error(error)
+          )
+        )
       }
     }
 
     if let previewURL = track.previewURL {
-      startPreviewPlayback(for: track, previewURL: previewURL)
+      startPreviewPlayback(
+        for: track,
+        previewURL: previewURL,
+        correlationID: attemptID,
+        reason: track.appleMusicID == nil ? "direct_preview" : "apple_music_fallback"
+      )
     } else {
       do {
-        try await startAppleMusicPlayback(for: track)
+        try await startAppleMusicPlayback(for: track, attemptID: attemptID)
       } catch {
-        failPlayback(error)
+        failPlayback(error, failedPhase: "apple_music_retry", correlationID: attemptID)
       }
     }
   }
 
-  private func startAppleMusicPlayback(for track: Track) async throws {
+  private func startAppleMusicPlayback(for track: Track, attemptID: String) async throws {
     didNotifyTrackFinished = false
-    try await musicAuthorization.ensureCatalogPlaybackReady()
-
-    let song = try await catalogService.song(for: track)
-    let resolvedTrack = AppleMusicCatalogService.track(from: song, fallback: track)
-    musicPlayer.queue = [song]
+    diagnostics?.record(
+      .info,
+      chain: .musicSubscription,
+      event: "access_check_start",
+      message: "检查 Apple Music 完整播放资格。",
+      correlationID: attemptID
+    )
 
     do {
-      try await musicPlayer.prepareToPlay()
-      try await musicPlayer.play()
+      try await musicAuthorization.ensureCatalogPlaybackReady()
+      diagnostics?.record(
+        .notice,
+        chain: .musicSubscription,
+        event: "access_check_success",
+        message: "Apple Music 完整播放资格检查通过。",
+        correlationID: attemptID
+      )
     } catch {
-      if let previewURL = resolvedTrack.previewURL ?? track.previewURL {
-        currentTrack = resolvedTrack
-        lastErrorMessage = "完整歌曲暂时不可用，已切换到试听片段。"
-        startPreviewPlayback(for: resolvedTrack, previewURL: previewURL)
+      diagnostics?.record(
+        .error,
+        chain: .musicSubscription,
+        event: "access_check_failed",
+        message: "Apple Music 完整播放资格检查失败。",
+        correlationID: attemptID,
+        payload: DiagnosticsPayload.error(error)
+      )
+      throw error
+    }
+
+    diagnostics?.record(
+      .info,
+      chain: .musicCatalog,
+      event: "resolve_start",
+      message: "开始解析 Apple Music 目录歌曲。",
+      correlationID: attemptID,
+      payload: DiagnosticsPayload.track(track)
+    )
+    let song: Song
+    do {
+      song = try await catalogService.song(for: track)
+    } catch {
+      diagnostics?.record(
+        .error,
+        chain: .musicCatalog,
+        event: "resolve_failed",
+        message: "Apple Music 目录歌曲解析失败。",
+        correlationID: attemptID,
+        payload: DiagnosticsPayload.merge(
+          DiagnosticsPayload.track(track),
+          DiagnosticsPayload.error(error)
+        )
+      )
+      throw error
+    }
+
+    let resolvedTrack = AppleMusicCatalogService.track(from: song, fallback: track)
+    diagnostics?.record(
+      .notice,
+      chain: .musicCatalog,
+      event: "resolve_success",
+      message: "Apple Music 目录歌曲解析完成。",
+      correlationID: attemptID,
+      payload: DiagnosticsPayload.track(resolvedTrack)
+    )
+    musicPlayer.queue = [song]
+    diagnostics?.record(
+      .info,
+      chain: .playbackAppleMusic,
+      event: "queue_set",
+      message: "ApplicationMusicPlayer 队列已设置。",
+      correlationID: attemptID,
+      payload: DiagnosticsPayload.track(resolvedTrack)
+    )
+
+    do {
+      let prepareStart = Date()
+      diagnostics?.record(
+        .info,
+        chain: .playbackAppleMusic,
+        event: "prepare_start",
+        message: "开始准备完整歌曲播放。",
+        correlationID: attemptID
+      )
+      try await musicPlayer.prepareToPlay()
+      diagnostics?.record(
+        .notice,
+        chain: .playbackAppleMusic,
+        event: "prepare_success",
+        message: "完整歌曲播放准备完成。",
+        correlationID: attemptID,
+        payload: ["duration_ms": DiagnosticsPayload.durationMilliseconds(Date().timeIntervalSince(prepareStart))]
+      )
+    } catch {
+      if fallbackToPreviewAfterAppleMusicFailure(
+        error,
+        resolvedTrack: resolvedTrack,
+        originalTrack: track,
+        attemptID: attemptID,
+        failedPhase: "prepare_to_play"
+      ) {
+        return
+      }
+
+      throw error
+    }
+
+    do {
+      let playStart = Date()
+      diagnostics?.record(
+        .info,
+        chain: .playbackAppleMusic,
+        event: "play_start",
+        message: "开始请求完整歌曲播放。",
+        correlationID: attemptID
+      )
+      try await musicPlayer.play()
+      diagnostics?.record(
+        .notice,
+        chain: .playbackAppleMusic,
+        event: "play_success",
+        message: "完整歌曲播放已启动。",
+        correlationID: attemptID,
+        payload: ["duration_ms": DiagnosticsPayload.durationMilliseconds(Date().timeIntervalSince(playStart))]
+      )
+    } catch {
+      if fallbackToPreviewAfterAppleMusicFailure(
+        error,
+        resolvedTrack: resolvedTrack,
+        originalTrack: track,
+        attemptID: attemptID,
+        failedPhase: "play"
+      ) {
         return
       }
 
@@ -217,7 +377,58 @@ final class PlaybackController: RadioPlaybackControlling {
     startMusicProgressTimer(duration: resolvedTrack.duration)
   }
 
-  private func startPreviewPlayback(for track: Track, previewURL: URL) {
+  private func fallbackToPreviewAfterAppleMusicFailure(
+    _ error: Error,
+    resolvedTrack: Track,
+    originalTrack: Track,
+    attemptID: String,
+    failedPhase: String
+  ) -> Bool {
+    guard let previewURL = resolvedTrack.previewURL ?? originalTrack.previewURL else {
+      diagnostics?.record(
+        .error,
+        chain: .playbackAppleMusic,
+        event: "apple_music_failed",
+        message: "完整歌曲播放失败，且没有可用试听片段。",
+        correlationID: attemptID,
+        payload: DiagnosticsPayload.merge(
+          ["failed_phase": failedPhase],
+          DiagnosticsPayload.track(resolvedTrack),
+          DiagnosticsPayload.error(error)
+        )
+      )
+      return false
+    }
+
+    currentTrack = resolvedTrack
+    lastErrorMessage = "完整歌曲暂时不可用，已切换到试听片段。"
+    diagnostics?.record(
+      .warning,
+      chain: .playbackPreview,
+      event: "fallback_preview",
+      message: "完整歌曲暂时不可用，已切换到试听片段。",
+      correlationID: attemptID,
+      payload: DiagnosticsPayload.merge(
+        ["failed_phase": failedPhase],
+        DiagnosticsPayload.track(resolvedTrack),
+        DiagnosticsPayload.error(error)
+      )
+    )
+    startPreviewPlayback(
+      for: resolvedTrack,
+      previewURL: previewURL,
+      correlationID: attemptID,
+      reason: "apple_music_\(failedPhase)_fallback"
+    )
+    return true
+  }
+
+  private func startPreviewPlayback(
+    for track: Track,
+    previewURL: URL,
+    correlationID: String? = nil,
+    reason: String = "direct_preview"
+  ) {
     didNotifyTrackFinished = false
     let item = AVPlayerItem(url: previewURL)
     previewPlayer.replaceCurrentItem(with: item)
@@ -228,6 +439,18 @@ final class PlaybackController: RadioPlaybackControlling {
     activeBackend = .localPreview
     state = .playing
     updateNowPlayingInfo(for: track)
+    diagnostics?.record(
+      .notice,
+      chain: .playbackPreview,
+      event: "preview_play_start",
+      message: "试听片段播放已启动。",
+      correlationID: correlationID,
+      payload: DiagnosticsPayload.merge(
+        ["reason": reason],
+        DiagnosticsPayload.track(track),
+        DiagnosticsPayload.url(previewURL)
+      )
+    )
   }
 
   private func startSpeechPlayback(_ speech: RadioSpeechPlaybackSegment) {
@@ -256,6 +479,16 @@ final class PlaybackController: RadioPlaybackControlling {
     state = .playing
     updateNowPlayingInfo(for: speech)
     updateNowPlayingPlaybackRate(1)
+    diagnostics?.record(
+      .notice,
+      chain: .playbackSpeech,
+      event: "speech_audio_start",
+      message: "主持人语音音频播放已启动。",
+      payload: [
+        "speech_id_hash": DiagnosticsRedactor.hash(speech.id),
+        "duration_seconds": String(Int((speech.audio?.durationSeconds ?? 0).rounded()))
+      ]
+    )
   }
 
   private func startSynthesizedSpeechPlayback(for speech: RadioSpeechPlaybackSegment) {
@@ -276,6 +509,16 @@ final class PlaybackController: RadioPlaybackControlling {
     updateNowPlayingInfo(for: speech)
     updateNowPlayingPlaybackRate(1)
     startSpeechProgressTimer(duration: speech.audio?.durationSeconds ?? Self.estimatedSpeechDuration(for: spokenText))
+    diagnostics?.record(
+      .notice,
+      chain: .playbackSpeech,
+      event: "speech_synthesis_start",
+      message: "主持人语音合成播放已启动。",
+      payload: [
+        "speech_id_hash": DiagnosticsRedactor.hash(speech.id),
+        "text_length": String(spokenText.count)
+      ]
+    )
   }
 
   private func resume() {
@@ -317,8 +560,15 @@ final class PlaybackController: RadioPlaybackControlling {
       state = .playing
       updateNowPlayingPlaybackRate(1)
       startMusicProgressTimer(duration: currentTrack?.duration ?? 0)
+      diagnostics?.record(
+        .notice,
+        chain: .playbackAppleMusic,
+        event: "resume_success",
+        message: "完整歌曲播放已恢复。",
+        correlationID: currentPlaybackAttemptID
+      )
     } catch {
-      failPlayback(error)
+      failPlayback(error, failedPhase: "resume", correlationID: currentPlaybackAttemptID)
     }
   }
 
@@ -499,11 +749,27 @@ final class PlaybackController: RadioPlaybackControlling {
   }
 
   private func failPlayback(_ error: Error) {
+    failPlayback(error, failedPhase: "unknown", correlationID: currentPlaybackAttemptID)
+  }
+
+  private func failPlayback(_ error: Error, failedPhase: String, correlationID: String?) {
     lastErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     state = .failed
     activeBackend = .none
     stopMusicProgressTimer()
     updateNowPlayingPlaybackRate(0)
+    diagnostics?.record(
+      .error,
+      chain: .playbackAppleMusic,
+      event: "attempt_failed",
+      message: "播放失败。",
+      correlationID: correlationID,
+      payload: DiagnosticsPayload.merge(
+        ["failed_phase": failedPhase],
+        currentTrack.map(DiagnosticsPayload.track) ?? [:],
+        DiagnosticsPayload.error(error)
+      )
+    )
   }
 
   private func finishSynthesizedSpeech() {
@@ -517,6 +783,17 @@ final class PlaybackController: RadioPlaybackControlling {
     state = .idle
     updateNowPlayingPlaybackRate(0)
     stopSpeechProgressTimer()
+    diagnostics?.record(
+      .notice,
+      chain: activeBackend.diagnosticChain,
+      event: "playback_complete",
+      message: kind == .track ? "曲目播放完成。" : "主持人语音播放完成。",
+      correlationID: currentPlaybackAttemptID,
+      payload: [
+        "completion_kind": kind.diagnosticValue,
+        "elapsed_seconds": String(Int(elapsedSeconds.rounded()))
+      ]
+    )
 
     onPlaybackFinished?(kind)
     if kind == .track {
@@ -527,9 +804,23 @@ final class PlaybackController: RadioPlaybackControlling {
   private func configureAudioSession() {
     do {
       try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowAirPlay])
+      diagnostics?.record(
+        .info,
+        chain: .audioSession,
+        event: "configure_success",
+        message: "音频会话配置完成。",
+        payload: ["category": "playback"]
+      )
     } catch {
       lastErrorMessage = error.localizedDescription
       state = .failed
+      diagnostics?.record(
+        .error,
+        chain: .audioSession,
+        event: "configure_failed",
+        message: "音频会话配置失败。",
+        payload: DiagnosticsPayload.error(error)
+      )
     }
   }
 
@@ -598,6 +889,32 @@ enum PlaybackBackend: String {
   case appleMusic
   case speechAudio
   case speechSynthesis
+}
+
+private extension PlaybackBackend {
+  var diagnosticChain: DiagnosticLogChain {
+    switch self {
+    case .appleMusic:
+      .playbackAppleMusic
+    case .localPreview:
+      .playbackPreview
+    case .speechAudio, .speechSynthesis:
+      .playbackSpeech
+    case .none:
+      .audioSession
+    }
+  }
+}
+
+private extension PlaybackCompletionKind {
+  var diagnosticValue: String {
+    switch self {
+    case .track:
+      "track"
+    case .speech:
+      "speech"
+    }
+  }
 }
 
 private final class SpeechCompletionDelegate: NSObject, AVSpeechSynthesizerDelegate {

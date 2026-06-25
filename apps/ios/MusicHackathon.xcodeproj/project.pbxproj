@@ -38,12 +38,17 @@
 		M10000000000000000000001 /* RemoteArtworkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = M20000000000000000000001 /* RemoteArtworkView.swift */; };
 		N10000000000000000000001 /* MarbleAvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = N20000000000000000000001 /* MarbleAvatarView.swift */; };
 		N10000000000000000000002 /* MarbleAvatarRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = N20000000000000000000002 /* MarbleAvatarRendererTests.swift */; };
+		D10000000000000000000001 /* DiagnosticsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000001 /* DiagnosticsModels.swift */; };
+		D10000000000000000000002 /* AppLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000002 /* AppLog.swift */; };
+		D10000000000000000000003 /* DiagnosticsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000003 /* DiagnosticsStore.swift */; };
+		D10000000000000000000004 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000004 /* DiagnosticsView.swift */; };
 		T10000000000000000000003 /* RadioStationClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000004 /* RadioStationClientTests.swift */; };
 		T10000000000000000000004 /* RadioStationControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000005 /* RadioStationControllerTests.swift */; };
 		T10000000000000000000005 /* RadioMemoryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000006 /* RadioMemoryStoreTests.swift */; };
 		T10000000000000000000006 /* VirtualMusicLibraryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000007 /* VirtualMusicLibraryTests.swift */; };
 		T10000000000000000000007 /* MigrationModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000008 /* MigrationModelsTests.swift */; };
 		T10000000000000000000008 /* AppleMusicLibraryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000009 /* AppleMusicLibraryStoreTests.swift */; };
+		T10000000000000000000009 /* DiagnosticsLogWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000010 /* DiagnosticsLogWriterTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -89,6 +94,10 @@
 		M20000000000000000000001 /* RemoteArtworkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteArtworkView.swift; sourceTree = "<group>"; };
 		N20000000000000000000001 /* MarbleAvatarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarbleAvatarView.swift; sourceTree = "<group>"; };
 		N20000000000000000000002 /* MarbleAvatarRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarbleAvatarRendererTests.swift; sourceTree = "<group>"; };
+		D20000000000000000000001 /* DiagnosticsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsModels.swift; sourceTree = "<group>"; };
+		D20000000000000000000002 /* AppLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLog.swift; sourceTree = "<group>"; };
+		D20000000000000000000003 /* DiagnosticsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsStore.swift; sourceTree = "<group>"; };
+		D20000000000000000000004 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
 		T20000000000000000000003 /* MusicHackathonTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MusicHackathonTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		T20000000000000000000004 /* RadioStationClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationClientTests.swift; sourceTree = "<group>"; };
 		T20000000000000000000005 /* RadioStationControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationControllerTests.swift; sourceTree = "<group>"; };
@@ -96,6 +105,7 @@
 		T20000000000000000000007 /* VirtualMusicLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualMusicLibraryTests.swift; sourceTree = "<group>"; };
 		T20000000000000000000008 /* MigrationModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigrationModelsTests.swift; sourceTree = "<group>"; };
 		T20000000000000000000009 /* AppleMusicLibraryStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicLibraryStoreTests.swift; sourceTree = "<group>"; };
+		T20000000000000000000010 /* DiagnosticsLogWriterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsLogWriterTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -179,6 +189,7 @@
 		A40000000000000000000006 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				D40000000000000000000001 /* Diagnostics */,
 				A20000000000000000000006 /* PlaybackController.swift */,
 				A20000000000000000000007 /* MusicAuthorizationService.swift */,
 				E20000000000000000000001 /* AppleMusicCatalogService.swift */,
@@ -240,8 +251,19 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000011 /* SettingsView.swift */,
+				D20000000000000000000004 /* DiagnosticsView.swift */,
 			);
 			path = Settings;
+			sourceTree = "<group>";
+		};
+		D40000000000000000000001 /* Diagnostics */ = {
+			isa = PBXGroup;
+			children = (
+				D20000000000000000000001 /* DiagnosticsModels.swift */,
+				D20000000000000000000002 /* AppLog.swift */,
+				D20000000000000000000003 /* DiagnosticsStore.swift */,
+			);
+			path = Diagnostics;
 			sourceTree = "<group>";
 		};
 		A40000000000000000000015 /* Audio */ = {
@@ -285,6 +307,7 @@
 				T20000000000000000000007 /* VirtualMusicLibraryTests.swift */,
 				T20000000000000000000008 /* MigrationModelsTests.swift */,
 				T20000000000000000000009 /* AppleMusicLibraryStoreTests.swift */,
+				T20000000000000000000010 /* DiagnosticsLogWriterTests.swift */,
 				N20000000000000000000002 /* MarbleAvatarRendererTests.swift */,
 			);
 			path = MusicHackathonTests;
@@ -414,6 +437,9 @@
 				J10000000000000000000003 /* MineView.swift in Sources */,
 				A10000000000000000000009 /* LibraryView.swift in Sources */,
 				E10000000000000000000001 /* AppleMusicCatalogService.swift in Sources */,
+				D10000000000000000000001 /* DiagnosticsModels.swift in Sources */,
+				D10000000000000000000002 /* AppLog.swift in Sources */,
+				D10000000000000000000003 /* DiagnosticsStore.swift in Sources */,
 				F10000000000000000000007 /* RadioStationController.swift in Sources */,
 				G10000000000000000000001 /* RadioStationClient.swift in Sources */,
 				H10000000000000000000001 /* RadioMemoryStore.swift in Sources */,
@@ -421,6 +447,7 @@
 				E10000000000000000000002 /* SpectrumAnalysisCache.swift in Sources */,
 				A10000000000000000000010 /* PlayerView.swift in Sources */,
 				A10000000000000000000011 /* SettingsView.swift in Sources */,
+				D10000000000000000000004 /* DiagnosticsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -434,6 +461,7 @@
 				T10000000000000000000006 /* VirtualMusicLibraryTests.swift in Sources */,
 				T10000000000000000000007 /* MigrationModelsTests.swift in Sources */,
 				T10000000000000000000008 /* AppleMusicLibraryStoreTests.swift in Sources */,
+				T10000000000000000000009 /* DiagnosticsLogWriterTests.swift in Sources */,
 				N10000000000000000000002 /* MarbleAvatarRendererTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
