@@ -22,6 +22,10 @@
 		A10000000000000000000013 /* AudioSpectrumAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* AudioSpectrumAnalyzer.swift */; };
 		B10000000000000000000001 /* FluidGradient in Frameworks */ = {isa = PBXBuildFile; productRef = B30000000000000000000001 /* FluidGradient */; };
 		C10000000000000000000001 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* AppIcon.icon */; };
+		D10000000000000000000001 /* DiagnosticsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000001 /* DiagnosticsModels.swift */; };
+		D10000000000000000000002 /* AppLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000002 /* AppLog.swift */; };
+		D10000000000000000000003 /* DiagnosticsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000003 /* DiagnosticsStore.swift */; };
+		D10000000000000000000004 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000004 /* DiagnosticsView.swift */; };
 		E10000000000000000000001 /* AppleMusicCatalogService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000001 /* AppleMusicCatalogService.swift */; };
 		E10000000000000000000002 /* SpectrumAnalysisCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000002 /* SpectrumAnalysisCache.swift */; };
 		F10000000000000000000001 /* RadioModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001 /* RadioModels.swift */; };
@@ -38,10 +42,6 @@
 		M10000000000000000000001 /* RemoteArtworkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = M20000000000000000000001 /* RemoteArtworkView.swift */; };
 		N10000000000000000000001 /* MarbleAvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = N20000000000000000000001 /* MarbleAvatarView.swift */; };
 		N10000000000000000000002 /* MarbleAvatarRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = N20000000000000000000002 /* MarbleAvatarRendererTests.swift */; };
-		D10000000000000000000001 /* DiagnosticsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000001 /* DiagnosticsModels.swift */; };
-		D10000000000000000000002 /* AppLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000002 /* AppLog.swift */; };
-		D10000000000000000000003 /* DiagnosticsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000003 /* DiagnosticsStore.swift */; };
-		D10000000000000000000004 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000004 /* DiagnosticsView.swift */; };
 		T10000000000000000000003 /* RadioStationClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000004 /* RadioStationClientTests.swift */; };
 		T10000000000000000000004 /* RadioStationControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000005 /* RadioStationControllerTests.swift */; };
 		T10000000000000000000005 /* RadioMemoryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000006 /* RadioMemoryStoreTests.swift */; };
@@ -78,6 +78,10 @@
 		A20000000000000000000014 /* featured-preview.m4a */ = {isa = PBXFileReference; lastKnownFileType = audio.m4a; path = "featured-preview.m4a"; sourceTree = "<group>"; };
 		A20000000000000000000015 /* AudioSpectrumAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSpectrumAnalyzer.swift; sourceTree = "<group>"; };
 		C20000000000000000000001 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
+		D20000000000000000000001 /* DiagnosticsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsModels.swift; sourceTree = "<group>"; };
+		D20000000000000000000002 /* AppLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLog.swift; sourceTree = "<group>"; };
+		D20000000000000000000003 /* DiagnosticsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsStore.swift; sourceTree = "<group>"; };
+		D20000000000000000000004 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
 		E20000000000000000000001 /* AppleMusicCatalogService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicCatalogService.swift; sourceTree = "<group>"; };
 		E20000000000000000000002 /* SpectrumAnalysisCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpectrumAnalysisCache.swift; sourceTree = "<group>"; };
 		F20000000000000000000001 /* RadioModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioModels.swift; sourceTree = "<group>"; };
@@ -94,10 +98,6 @@
 		M20000000000000000000001 /* RemoteArtworkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteArtworkView.swift; sourceTree = "<group>"; };
 		N20000000000000000000001 /* MarbleAvatarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarbleAvatarView.swift; sourceTree = "<group>"; };
 		N20000000000000000000002 /* MarbleAvatarRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarbleAvatarRendererTests.swift; sourceTree = "<group>"; };
-		D20000000000000000000001 /* DiagnosticsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsModels.swift; sourceTree = "<group>"; };
-		D20000000000000000000002 /* AppLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLog.swift; sourceTree = "<group>"; };
-		D20000000000000000000003 /* DiagnosticsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsStore.swift; sourceTree = "<group>"; };
-		D20000000000000000000004 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
 		T20000000000000000000003 /* MusicHackathonTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MusicHackathonTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		T20000000000000000000004 /* RadioStationClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationClientTests.swift; sourceTree = "<group>"; };
 		T20000000000000000000005 /* RadioStationControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationControllerTests.swift; sourceTree = "<group>"; };
@@ -256,6 +256,14 @@
 			path = Settings;
 			sourceTree = "<group>";
 		};
+		A40000000000000000000015 /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000014 /* featured-preview.m4a */,
+			);
+			path = Audio;
+			sourceTree = "<group>";
+		};
 		D40000000000000000000001 /* Diagnostics */ = {
 			isa = PBXGroup;
 			children = (
@@ -264,14 +272,6 @@
 				D20000000000000000000003 /* DiagnosticsStore.swift */,
 			);
 			path = Diagnostics;
-			sourceTree = "<group>";
-		};
-		A40000000000000000000015 /* Audio */ = {
-			isa = PBXGroup;
-			children = (
-				A20000000000000000000014 /* featured-preview.m4a */,
-			);
-			path = Audio;
 			sourceTree = "<group>";
 		};
 		I40000000000000000000001 /* VirtualMusicLibrary */ = {
@@ -595,7 +595,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
@@ -613,7 +613,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.1pitaph.music;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = Airset;
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "Airset App Store";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -627,7 +627,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
@@ -645,7 +645,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.1pitaph.music;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = Airset;
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "Airset App Store";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;

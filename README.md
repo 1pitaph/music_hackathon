@@ -38,7 +38,7 @@ cp .env.example .env
 uvicorn radio_agent.api:app --reload --port 8000
 ```
 
-Without `OPENAI_API_KEY`, the service uses deterministic mock generation. Set `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL` in `.env` to use an OpenAI-compatible model provider.
+Without `OPENAI_API_KEY`, the service uses deterministic mock generation. Set `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL` in `.env` to use an OpenAI-compatible model provider. `OPENAI_TIMEOUT_SECONDS` controls the model request timeout and defaults to 60 seconds.
 
 Run backend tests:
 
