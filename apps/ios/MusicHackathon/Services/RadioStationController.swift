@@ -56,6 +56,7 @@ final class RadioStationController {
   @ObservationIgnored private let playbackController: any RadioPlaybackControlling
   @ObservationIgnored private let stationClient: any RadioStationFetching
   @ObservationIgnored private let memoryStore: any RadioMemoryStoring
+  @ObservationIgnored private let snapshotStore: any RadioPlaybackSnapshotStoring
   @ObservationIgnored private let artworkEnricher: any TrackArtworkEnriching
   @ObservationIgnored private let diagnostics: DiagnosticsStore?
   @ObservationIgnored private let hostSpeakerIDProvider: () -> String?
@@ -69,11 +70,13 @@ final class RadioStationController {
   @ObservationIgnored private var extensionTask: Task<Bool, Never>?
   @ObservationIgnored private var extensionTaskID: UUID?
   @ObservationIgnored private var pendingTransition: PendingRadioTransition?
+  @ObservationIgnored private var isRestoringSnapshot = false
 
   init(
     playbackController: any RadioPlaybackControlling,
     stationClient: any RadioStationFetching = RadioStationClient(),
     memoryStore: any RadioMemoryStoring = RadioMemoryStore(),
+    snapshotStore: any RadioPlaybackSnapshotStoring = RadioPlaybackSnapshotStore(),
     artworkEnricher: any TrackArtworkEnriching = AppleMusicCatalogService(),
     diagnostics: DiagnosticsStore? = nil,
     hostSpeakerIDProvider: @escaping () -> String? = { RadioHostVoiceSettings.selectedSpeakerID() },
@@ -83,6 +86,7 @@ final class RadioStationController {
     self.playbackController = playbackController
     self.stationClient = stationClient
     self.memoryStore = memoryStore
+    self.snapshotStore = snapshotStore
     self.artworkEnricher = artworkEnricher
     self.diagnostics = diagnostics
     self.hostSpeakerIDProvider = hostSpeakerIDProvider
@@ -117,6 +121,14 @@ final class RadioStationController {
     playbackController.onRemoteNextTrackRequested = { [weak self] in
       Task { @MainActor in
         await self?.handleRemoteNextTrackRequested()
+      }
+    }
+    playbackController.onPlaybackSnapshotChanged = { [weak self] in
+      guard let self else { return }
+      let isRestoringSnapshot = self.isRestoringSnapshot
+      Task { @MainActor in
+        guard !isRestoringSnapshot else { return }
+        await self.savePlaybackSnapshot()
       }
     }
   }
@@ -159,6 +171,100 @@ final class RadioStationController {
     stationTracks.map(\.radioIdentity).joined(separator: "|")
   }
 
+  @discardableResult
+  func restoreCachedSessionIfAvailable() async -> Bool {
+    guard !hasStationContent, !isLoadingStation else { return false }
+    guard let snapshot = await snapshotStore.load() else { return false }
+
+    isRestoringSnapshot = true
+    defer {
+      isRestoringSnapshot = false
+    }
+
+    extensionTask?.cancel()
+    extensionTask = nil
+    extensionTaskID = nil
+    isLoadingStation = false
+    isExtendingStation = false
+    errorMessage = nil
+    extensionErrorMessage = nil
+    pendingTransition = nil
+
+    station = snapshot.station
+    queue = snapshot.queue
+    currentItem = snapshot.currentItem
+    history = snapshot.history
+    stationTitle = snapshot.stationTitle
+    stationIntro = snapshot.stationIntro
+    hasPlayedStationIntro = snapshot.hasPlayedStationIntro
+    stationSessionID = snapshot.stationSessionID
+    continuationCursor = snapshot.continuationCursor
+
+    if let track = snapshot.playback.track ?? currentItem?.track {
+      playbackController.restorePausedTrack(
+        track,
+        policy: snapshot.playback.policy,
+        elapsedSeconds: snapshot.playback.elapsedSeconds
+      )
+    } else {
+      prepareUpcomingTrack(queue.first?.track)
+    }
+
+    prepareUpcomingTrack(queue.first?.track)
+    await refreshMemoryStatus()
+    return true
+  }
+
+  func savePlaybackSnapshot() async {
+    guard !isRestoringSnapshot, !isLoadingStation else { return }
+    guard let snapshot = playbackSnapshot() else {
+      try? await snapshotStore.clear()
+      return
+    }
+
+    try? await snapshotStore.save(snapshot)
+  }
+
+  private func playbackSnapshot(now: Date = Date()) -> RadioPlaybackSnapshot? {
+    let currentPlayback = playbackController.playbackSnapshot
+    let isSpeechBackend = currentPlayback.activeBackend == .speechAudio
+      || currentPlayback.activeBackend == .speechSynthesis
+    let snapshotTrack = playbackSnapshotTrack()
+    let isPlaybackTrackCurrent = snapshotTrack?.radioIdentity == currentPlayback.track?.radioIdentity
+    let elapsedSeconds = isPlaybackTrackCurrent && !isSpeechBackend
+      ? PlaybackController.clampedResumeOffset(currentPlayback.elapsedSeconds, duration: snapshotTrack?.duration)
+      : 0
+    let activeBackend = snapshotTrack == nil || isSpeechBackend || !isPlaybackTrackCurrent
+      ? PlaybackBackend.none
+      : currentPlayback.activeBackend
+    let playback = RadioPlaybackSnapshot.Playback(
+      track: snapshotTrack,
+      policy: snapshotTrack.map(playbackPolicy(for:)) ?? currentPlayback.policy,
+      elapsedSeconds: elapsedSeconds,
+      wasPlaying: snapshotTrack != nil && isPlaybackTrackCurrent && currentPlayback.wasPlaying,
+      activeBackend: activeBackend
+    )
+    let snapshot = RadioPlaybackSnapshot(
+      savedAt: now,
+      station: station,
+      queue: queue,
+      currentItem: currentItem,
+      history: history,
+      stationTitle: stationTitle,
+      stationIntro: stationIntro,
+      hasPlayedStationIntro: hasPlayedStationIntro,
+      stationSessionID: stationSessionID,
+      continuationCursor: continuationCursor,
+      playback: playback
+    )
+
+    return snapshot.hasContent ? snapshot : nil
+  }
+
+  private func playbackSnapshotTrack() -> Track? {
+    currentItem?.track
+  }
+
   func startStation() async {
     diagnostics?.record(
       .notice,
@@ -198,6 +304,7 @@ final class RadioStationController {
       )
       prepareUpcomingTrack(queue.first?.track)
       playbackController.playSpeech(intro.playbackSegment, mode: .standalone)
+      await savePlaybackSnapshot()
       return
     }
 
@@ -285,6 +392,7 @@ final class RadioStationController {
       preservesSpeech: false
     )
     prepareUpcomingTrack(queue.first?.track)
+    await savePlaybackSnapshot()
     prefetchStationExtensionIfNeeded()
   }
 
@@ -314,6 +422,9 @@ final class RadioStationController {
       preservesSpeech: false
     )
     prepareUpcomingTrack(queue.first?.track)
+    Task {
+      await savePlaybackSnapshot()
+    }
   }
 
   func refreshStation() async {
@@ -351,10 +462,12 @@ final class RadioStationController {
     await recordMemoryEvent(type: "station_generate", track: station.items.first?.track)
 
     if playImmediately, !station.items.isEmpty {
+      await savePlaybackSnapshot()
       await playNext(reason: .stationStart)
     } else {
       prepareUpcomingTrack(nil)
       playbackController.stop()
+      await savePlaybackSnapshot()
     }
   }
 
@@ -414,9 +527,10 @@ final class RadioStationController {
         ]
       )
       await recordMemoryEvent(type: "station_generate", track: station.items.first?.track)
+      isLoadingStation = false
+      await savePlaybackSnapshot()
 
       if playImmediately {
-        isLoadingStation = false
         await playNext(reason: .stationStart)
         return
       }
@@ -431,6 +545,7 @@ final class RadioStationController {
       stationTitle = L10n.tr("radio.defaultTitle")
       stationIntro = L10n.tr("radio.backendUnavailable")
       errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+      try? await snapshotStore.clear()
       diagnostics?.record(
         .error,
         chain: .radioBackend,
@@ -439,7 +554,6 @@ final class RadioStationController {
         payload: DiagnosticsPayload.error(error)
       )
     }
-
     isLoadingStation = false
   }
 
@@ -601,6 +715,7 @@ final class RadioStationController {
         prepareUpcomingTrack(queue.first?.track)
       }
       isExtendingStation = false
+      await savePlaybackSnapshot()
 
       guard let firstNewItem = newItems.first else {
         extensionErrorMessage = L10n.tr("radio.error.noNewBackendTracks")
@@ -611,6 +726,7 @@ final class RadioStationController {
           message: L10n.tr("diagnostic.message.radioExtendEmpty"),
           payload: ["known_queue_count": String(queue.count)]
         )
+        await savePlaybackSnapshot()
         return false
       }
 
@@ -628,6 +744,7 @@ final class RadioStationController {
           "station_session_id_hash": stationSessionID.map(DiagnosticsRedactor.hash) ?? "none"
         ]
       )
+      await savePlaybackSnapshot()
       return true
     } catch {
       guard generationID == stationGenerationID else {
@@ -643,6 +760,7 @@ final class RadioStationController {
         message: L10n.tr("diagnostic.message.radioExtendFailed"),
         payload: DiagnosticsPayload.error(error)
       )
+      await savePlaybackSnapshot()
       return false
     }
   }
@@ -816,6 +934,7 @@ final class RadioStationController {
     if currentItem?.id == item.id {
       currentItem = nil
     }
+    await savePlaybackSnapshot()
   }
 
   private func handleTrackTransitionWindowReached() async {
@@ -881,6 +1000,7 @@ final class RadioStationController {
       preservesSpeech: preservesSpeech
     )
     prepareUpcomingTrack(queue.first?.track)
+    await savePlaybackSnapshot()
     prefetchStationExtensionIfNeeded()
   }
 
@@ -940,6 +1060,7 @@ final class RadioStationController {
     currentItem = nil
     errorMessage = nil
     await playNext(reason: .playbackFailure)
+    await savePlaybackSnapshot()
   }
 
   private func transitionCopy(from finishedItem: RadioQueueItem, to nextItem: RadioQueueItem) -> RadioTransitionCopy? {
@@ -975,7 +1096,6 @@ final class RadioStationController {
     }
 
     await retireCurrentItem(finishedItem, memoryEventType: memoryEventType)
-    prefetchStationExtensionIfNeeded()
     let speech = transition.playbackSegment
     pendingTransition = PendingRadioTransition(
       fromItem: finishedItem,
@@ -998,6 +1118,8 @@ final class RadioStationController {
       ]
     )
     playbackController.playSpeech(speech, mode: style == .overlay ? .transitionOverlay : .standalone)
+    await savePlaybackSnapshot()
+    prefetchStationExtensionIfNeeded()
     return true
   }
 

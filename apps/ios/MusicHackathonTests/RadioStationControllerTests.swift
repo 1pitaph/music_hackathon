@@ -129,6 +129,27 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertGreaterThan(middle, end)
   }
 
+  func testClampedResumeOffsetKeepsDistanceFromTrackEnd() {
+    XCTAssertEqual(PlaybackController.clampedResumeOffset(42, duration: 210), 42)
+    XCTAssertEqual(PlaybackController.clampedResumeOffset(209, duration: 210), 207)
+    XCTAssertEqual(PlaybackController.clampedResumeOffset(-3, duration: 210), 0)
+    XCTAssertEqual(PlaybackController.clampedResumeOffset(12, duration: nil), 0)
+    XCTAssertEqual(PlaybackController.clampedResumeOffset(12, duration: 2), 0)
+  }
+
+  @MainActor
+  func testRestorePausedTrackPreservesPlaybackSnapshotOffset() {
+    let playbackController = PlaybackController()
+    let track = makeTrack(title: "One", appleMusicID: "one")
+
+    playbackController.restorePausedTrack(track, policy: .fullSongPreferred, elapsedSeconds: 37)
+
+    XCTAssertEqual(playbackController.playbackSnapshot.track?.title, "One")
+    XCTAssertEqual(playbackController.playbackSnapshot.elapsedSeconds, 37)
+    XCTAssertEqual(playbackController.elapsedTimeText, "0:37")
+    playbackController.stop()
+  }
+
   func testLoadCurrentStationUsesLibraryTracksForGenerationCandidates() async {
     let station = makeStation(items: [
       makeQueueItem(title: "Generated", appleMusicID: "generated")
@@ -1025,7 +1046,7 @@ final class RadioStationControllerTests: XCTestCase {
 
   func testRefreshStationStartsNewStationInsteadOfContinuing() async {
     let stationClient = SequencedStationClient(results: [
-      .success(makeResult(titles: ["One", "Two"])),
+      .success(makeResult(titles: ["One", "Two", "Three", "Four"])),
       .success(makeResult(titles: ["Fresh"]))
     ])
     let controller = RadioStationController(
@@ -1043,7 +1064,7 @@ final class RadioStationControllerTests: XCTestCase {
 
   func testRefreshStationClearsPreparedUpcomingTrack() async {
     let stationClient = SequencedStationClient(results: [
-      .success(makeResult(titles: ["One", "Two"])),
+      .success(makeResult(titles: ["One", "Two", "Three", "Four"])),
       .success(makeResult(titles: ["Fresh"]))
     ])
     let playbackController = MockPlaybackController()
@@ -1063,6 +1084,163 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertEqual(controller.queue.map(\.track.title), ["Fresh"])
   }
 
+  func testStartStationSavesPlaybackSnapshotWithQueueAndSession() async {
+    let stationClient = SequencedStationClient(results: [
+      .success(makeResult(titles: ["One", "Two"], sessionID: "session-1", cursor: "cursor-1"))
+    ])
+    let snapshotStore = MockSnapshotStore()
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore(),
+      snapshotStore: snapshotStore
+    )
+
+    await controller.startStation()
+    await waitForPlayback(playbackController, title: "One")
+    playbackController.elapsedSeconds = 42
+    await controller.savePlaybackSnapshot()
+
+    let snapshot = await snapshotStore.lastSavedSnapshot()
+    XCTAssertEqual(snapshot?.currentItem?.track.title, "One")
+    XCTAssertEqual(snapshot?.queue.map(\.track.title), ["Two"])
+    XCTAssertEqual(snapshot?.stationSessionID, "session-1")
+    XCTAssertEqual(snapshot?.continuationCursor, "cursor-1")
+    XCTAssertEqual(snapshot?.playback.elapsedSeconds, 42)
+    XCTAssertEqual(snapshot?.playback.policy, .fullSongPreferred)
+  }
+
+  func testStationExtensionUpdatesPlaybackSnapshotQueue() async {
+    let stationClient = SequencedStationClient(results: [
+      .success(makeResult(titles: ["One", "Two"], sessionID: "session-1", cursor: "cursor-1")),
+      .success(makeResult(titles: ["Three"], sessionID: "session-1", cursor: "cursor-2"))
+    ])
+    let snapshotStore = MockSnapshotStore()
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore(),
+      snapshotStore: snapshotStore
+    )
+
+    await controller.startStation()
+    _ = await controller.extendCurrentStation()
+
+    let snapshot = await snapshotStore.lastSavedSnapshot()
+    XCTAssertEqual(snapshot?.queue.map(\.track.title), ["Two", "Three"])
+    XCTAssertEqual(snapshot?.continuationCursor, "cursor-2")
+  }
+
+  func testPlaybackSnapshotUsesCurrentItemWhenPlaybackTrackIsStale() async {
+    let stationClient = SequencedStationClient(results: [
+      .success(makeResult(titles: ["One", "Two"], sessionID: "session-1", cursor: "cursor-1"))
+    ])
+    let snapshotStore = MockSnapshotStore()
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore(),
+      snapshotStore: snapshotStore
+    )
+
+    await controller.startStation()
+    await waitForPlayback(playbackController, title: "One")
+    playbackController.elapsedSeconds = 88
+    playbackController.defersTrackUpdate = true
+
+    await controller.playNext(reason: .manual)
+
+    let snapshot = await snapshotStore.lastSavedSnapshot()
+    XCTAssertEqual(snapshot?.currentItem?.track.title, "Two")
+    XCTAssertEqual(snapshot?.playback.track?.title, "Two")
+    XCTAssertEqual(snapshot?.playback.elapsedSeconds, 0)
+  }
+
+  func testRestoreCachedSessionRestoresPausedTrackWithoutPlaying() async {
+    let current = makeQueueItem(title: "One", appleMusicID: "one")
+    let snapshotStore = MockSnapshotStore(
+      snapshotToLoad: makePlaybackSnapshot(
+        currentItem: current,
+        queue: [makeQueueItem(title: "Two", appleMusicID: "two")],
+        playbackTrack: current.track,
+        elapsedSeconds: 37
+      )
+    )
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: MockStationClient(result: .success(makeStation(items: []))),
+      memoryStore: MockMemoryStore(),
+      snapshotStore: snapshotStore
+    )
+
+    let didRestore = await controller.restoreCachedSessionIfAvailable()
+
+    XCTAssertTrue(didRestore)
+    XCTAssertEqual(controller.currentItem?.track.title, "One")
+    XCTAssertEqual(controller.queue.map(\.track.title), ["Two"])
+    XCTAssertEqual(playbackController.restoredPausedTrack?.title, "One")
+    XCTAssertEqual(playbackController.restoredElapsedSeconds, 37)
+    XCTAssertEqual(playbackController.playCallCount, 0)
+  }
+
+  func testRestoreCachedSessionDoesNotImmediatelyRewriteSnapshot() async {
+    let current = makeQueueItem(title: "One", appleMusicID: "one")
+    let snapshotStore = MockSnapshotStore(
+      snapshotToLoad: makePlaybackSnapshot(
+        currentItem: current,
+        queue: [makeQueueItem(title: "Two", appleMusicID: "two")],
+        playbackTrack: current.track,
+        elapsedSeconds: 37
+      )
+    )
+    let playbackController = MockPlaybackController()
+    playbackController.notifiesDuringRestore = true
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: MockStationClient(result: .success(makeStation(items: []))),
+      memoryStore: MockMemoryStore(),
+      snapshotStore: snapshotStore
+    )
+
+    let didRestore = await controller.restoreCachedSessionIfAvailable()
+    try? await Task.sleep(for: .milliseconds(50))
+    let savedSnapshot = await snapshotStore.lastSavedSnapshot()
+
+    XCTAssertTrue(didRestore)
+    XCTAssertNil(savedSnapshot)
+  }
+
+  func testRestoreCachedSessionWithQueueOnlyDoesNotRestorePlayback() async {
+    let snapshotStore = MockSnapshotStore(
+      snapshotToLoad: makePlaybackSnapshot(
+        currentItem: nil,
+        queue: [makeQueueItem(title: "Ready", appleMusicID: "ready")],
+        playbackTrack: nil,
+        elapsedSeconds: 0
+      )
+    )
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: MockStationClient(result: .success(makeStation(items: []))),
+      memoryStore: MockMemoryStore(),
+      snapshotStore: snapshotStore
+    )
+
+    let didRestore = await controller.restoreCachedSessionIfAvailable()
+
+    XCTAssertTrue(didRestore)
+    XCTAssertNil(controller.currentItem)
+    XCTAssertEqual(controller.queue.map(\.track.title), ["Ready"])
+    XCTAssertNil(playbackController.restoredPausedTrack)
+    XCTAssertEqual(playbackController.playCallCount, 0)
+    XCTAssertEqual(playbackController.preparedUpcomingTrack?.title, "Ready")
+  }
+
   private func makeStation(
     items: [RadioQueueItem],
     speech: RadioSpeech? = nil,
@@ -1078,12 +1256,46 @@ final class RadioStationControllerTests: XCTestCase {
     )
   }
 
-  private func makeResult(titles: [String]) -> RadioStationResult {
+  private func makeResult(
+    titles: [String],
+    sessionID: String? = nil,
+    cursor: String? = nil
+  ) -> RadioStationResult {
     RadioStationResult(
       station: makeStation(
         items: titles.map { title in
           makeQueueItem(title: title, appleMusicID: title.lowercased())
         }
+      ),
+      stationSessionID: sessionID,
+      continuationCursor: cursor
+    )
+  }
+
+  private func makePlaybackSnapshot(
+    currentItem: RadioQueueItem?,
+    queue: [RadioQueueItem],
+    playbackTrack: Track?,
+    elapsedSeconds: TimeInterval
+  ) -> RadioPlaybackSnapshot {
+    let stationItems = [currentItem].compactMap { $0 } + queue
+    return RadioPlaybackSnapshot(
+      savedAt: Date(),
+      station: makeStation(items: stationItems),
+      queue: queue,
+      currentItem: currentItem,
+      history: [makeQueueItem(title: "Previous", appleMusicID: "previous")],
+      stationTitle: "Backend Radio",
+      stationIntro: "Complete backend station.",
+      hasPlayedStationIntro: true,
+      stationSessionID: "session-1",
+      continuationCursor: "cursor-1",
+      playback: RadioPlaybackSnapshot.Playback(
+        track: playbackTrack,
+        policy: .fullSongPreferred,
+        elapsedSeconds: elapsedSeconds,
+        wasPlaying: true,
+        activeBackend: playbackTrack == nil ? .none : .appleMusic
       )
     )
   }
@@ -1187,13 +1399,30 @@ private final class MockPlaybackController: RadioPlaybackControlling {
   var onFullSongHandoffWindowReached: (() -> Void)?
   var onSpeechAdvancePointReached: (() -> Void)?
   var onRemoteNextTrackRequested: (() -> Void)?
+  var onPlaybackSnapshotChanged: (() -> Void)?
   var currentTrack: Track?
   var currentSpeech: RadioSpeechPlaybackSegment?
+  var elapsedSeconds: TimeInterval = 0
   var lastTrackPolicy: RadioTrackPlaybackPolicy?
   var lastPreservesSpeech = false
   var lastSpeechMode: RadioSpeechPlaybackMode?
   var preparedUpcomingTrack: Track?
   var preparedUpcomingPolicy: RadioTrackPlaybackPolicy?
+  var restoredPausedTrack: Track?
+  var restoredElapsedSeconds: TimeInterval?
+  var playCallCount = 0
+  var defersTrackUpdate = false
+  var notifiesDuringRestore = false
+
+  var playbackSnapshot: RadioPlaybackSnapshot.Playback {
+    RadioPlaybackSnapshot.Playback(
+      track: currentTrack,
+      policy: lastTrackPolicy ?? .fullSongPreferred,
+      elapsedSeconds: elapsedSeconds,
+      wasPlaying: currentTrack != nil || currentSpeech != nil,
+      activeBackend: currentTrack == nil ? .none : .appleMusic
+    )
+  }
 
   func prepareUpcomingTrack(_ track: Track?, policy: RadioTrackPlaybackPolicy) {
     preparedUpcomingTrack = track
@@ -1205,11 +1434,29 @@ private final class MockPlaybackController: RadioPlaybackControlling {
   }
 
   func play(track: Track, policy: RadioTrackPlaybackPolicy, preservesSpeech: Bool) {
-    currentTrack = track
+    playCallCount += 1
+    if !defersTrackUpdate {
+      currentTrack = track
+    }
     lastTrackPolicy = policy
     lastPreservesSpeech = preservesSpeech
     if !preservesSpeech {
       currentSpeech = nil
+    }
+  }
+
+  func restorePausedTrack(
+    _ track: Track,
+    policy: RadioTrackPlaybackPolicy,
+    elapsedSeconds: TimeInterval
+  ) {
+    currentTrack = track
+    lastTrackPolicy = policy
+    self.elapsedSeconds = elapsedSeconds
+    restoredPausedTrack = track
+    restoredElapsedSeconds = elapsedSeconds
+    if notifiesDuringRestore {
+      onPlaybackSnapshotChanged?()
     }
   }
 
@@ -1259,6 +1506,37 @@ private final class MockPlaybackController: RadioPlaybackControlling {
         message: "Mock playback failed."
       )
     )
+  }
+}
+
+private actor MockSnapshotStore: RadioPlaybackSnapshotStoring {
+  var snapshotToLoad: RadioPlaybackSnapshot?
+  private var savedSnapshots: [RadioPlaybackSnapshot] = []
+  private var didClear = false
+
+  init(snapshotToLoad: RadioPlaybackSnapshot? = nil) {
+    self.snapshotToLoad = snapshotToLoad
+  }
+
+  func load(now: Date) async -> RadioPlaybackSnapshot? {
+    snapshotToLoad
+  }
+
+  func save(_ snapshot: RadioPlaybackSnapshot) async throws {
+    savedSnapshots.append(snapshot)
+  }
+
+  func clear() async throws {
+    didClear = true
+    savedSnapshots = []
+  }
+
+  func lastSavedSnapshot() -> RadioPlaybackSnapshot? {
+    savedSnapshots.last
+  }
+
+  func wasCleared() -> Bool {
+    didClear
   }
 }
 

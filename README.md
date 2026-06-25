@@ -57,6 +57,15 @@ Create a Railway service from this GitHub repository and point it at the backend
 
 Railway builds the service from `apps/radio-agent/Dockerfile`, starts it with `sh ./start.sh`, and uses `/` as its health check path. `OPENAI_API_KEY` is optional; without it, the agent returns deterministic mock recommendations.
 
+Discover station publishing persists to SQLite. For Railway, mount a persistent volume at `/data` and keep:
+
+```sh
+DISCOVER_STATIONS_DB_PATH=/data/airset-discover.sqlite3
+DISCOVER_STATIONS_PUBLIC_BASE_URL=https://your-radio-agent.example.com
+```
+
+Use `GET /v1/discover/storage/status` after deploy to confirm that the database path exists, the directory is writable, and public station counts match expectation.
+
 ### Local-first radio memory
 
 The iOS app keeps Airset radio memory on device in Application Support as `memory.json` plus a generated, user-readable `memory.md`. The backend does not persist raw memory. When the app generates a station, it sends a trimmed structured memory context with playable candidate tracks to:

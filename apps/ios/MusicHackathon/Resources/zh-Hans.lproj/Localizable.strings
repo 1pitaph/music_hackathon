@@ -209,6 +209,12 @@
 "discover.share.accessibilityLabel" = "分享当前电台";
 "discover.share.title" = "分享电台";
 "discover.share.message" = "正在收听 %@ 的 %@";
+"discover.feed.loading.title" = "正在接收公开频率";
+"discover.feed.loading.message" = "正在查找已发布的公开电台。";
+"discover.feed.empty.title" = "暂无公开电台";
+"discover.feed.empty.message" = "公开发布的电台会在同步后出现在这里。";
+"discover.feed.failed.title" = "发现页暂时不可用";
+"discover.feed.localRecovery" = "已显示本机保存的公开电台，等待发现页同步。";
 "discover.publish.accessibilityLabel" = "发布电台";
 "discover.publish.title" = "发布电台";
 "discover.publish.selectionTitle" = "选择 5 首歌";

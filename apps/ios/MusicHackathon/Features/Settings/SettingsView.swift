@@ -13,9 +13,9 @@ struct SettingsView: View {
   @AppStorage(RadioHostVoiceSettings.speakerIDKey) private var selectedHostSpeakerID = ""
   @AppStorage(AppLanguage.storageKey) private var selectedLanguageRawValue = AppLanguage.system.rawValue
   @AppStorage(RadioSpeechLanguage.storageKey) private var selectedSpeechLanguageRawValue = RadioSpeechLanguage.chinese.rawValue
+  @AppStorage(RadioPlaybackSettings.backgroundPlayKey) private var backgroundPlay = RadioPlaybackSettings.defaultBackgroundPlay
 
   @State private var autoPlayNextStation = false
-  @State private var backgroundPlay = false
   @State private var publicStation = false
   @State private var dataCollection = true
   @State private var activeAppleMusicAlert: AppleMusicAlert?

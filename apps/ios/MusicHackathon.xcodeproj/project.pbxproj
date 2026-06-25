@@ -64,6 +64,8 @@
 		T10000000000000000000009 /* DiagnosticsLogWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000010 /* DiagnosticsLogWriterTests.swift */; };
 		T10000000000000000000010 /* AppLanguageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000011 /* AppLanguageTests.swift */; };
 		T10000000000000000000011 /* LocalizationResourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000000000000000000012 /* LocalizationResourceTests.swift */; };
+		U10000000000000000000001 /* RadioPlaybackSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = U20000000000000000000001 /* RadioPlaybackSnapshotStore.swift */; };
+		U10000000000000000000002 /* RadioPlaybackSnapshotStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = U20000000000000000000002 /* RadioPlaybackSnapshotStoreTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -142,6 +144,8 @@
 		T20000000000000000000010 /* DiagnosticsLogWriterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsLogWriterTests.swift; sourceTree = "<group>"; };
 		T20000000000000000000011 /* AppLanguageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLanguageTests.swift; sourceTree = "<group>"; };
 		T20000000000000000000012 /* LocalizationResourceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationResourceTests.swift; sourceTree = "<group>"; };
+		U20000000000000000000001 /* RadioPlaybackSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioPlaybackSnapshotStore.swift; sourceTree = "<group>"; };
+		U20000000000000000000002 /* RadioPlaybackSnapshotStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioPlaybackSnapshotStoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -239,6 +243,7 @@
 				F20000000000000000000007 /* RadioStationController.swift */,
 				G20000000000000000000001 /* RadioStationClient.swift */,
 				H20000000000000000000001 /* RadioMemoryStore.swift */,
+				U20000000000000000000001 /* RadioPlaybackSnapshotStore.swift */,
 				E20000000000000000000002 /* SpectrumAnalysisCache.swift */,
 				A20000000000000000000015 /* AudioSpectrumAnalyzer.swift */,
 				P20000000000000000000003 /* ImageAssetStore.swift */,
@@ -351,6 +356,7 @@
 				T20000000000000000000004 /* RadioStationClientTests.swift */,
 				T20000000000000000000005 /* RadioStationControllerTests.swift */,
 				T20000000000000000000006 /* RadioMemoryStoreTests.swift */,
+				U20000000000000000000002 /* RadioPlaybackSnapshotStoreTests.swift */,
 				T20000000000000000000007 /* VirtualMusicLibraryTests.swift */,
 				T20000000000000000000008 /* MigrationModelsTests.swift */,
 				T20000000000000000000009 /* AppleMusicLibraryStoreTests.swift */,
@@ -504,6 +510,7 @@
 				F10000000000000000000007 /* RadioStationController.swift in Sources */,
 				G10000000000000000000001 /* RadioStationClient.swift in Sources */,
 				H10000000000000000000001 /* RadioMemoryStore.swift in Sources */,
+				U10000000000000000000001 /* RadioPlaybackSnapshotStore.swift in Sources */,
 				L10000000000000000000001 /* AppleMusicLibraryStore.swift in Sources */,
 				Q10000000000000000000001 /* AppleMusicLibraryCacheStore.swift in Sources */,
 				E10000000000000000000002 /* SpectrumAnalysisCache.swift in Sources */,
@@ -522,6 +529,7 @@
 				T10000000000000000000003 /* RadioStationClientTests.swift in Sources */,
 				T10000000000000000000004 /* RadioStationControllerTests.swift in Sources */,
 				T10000000000000000000005 /* RadioMemoryStoreTests.swift in Sources */,
+				U10000000000000000000002 /* RadioPlaybackSnapshotStoreTests.swift in Sources */,
 				T10000000000000000000006 /* VirtualMusicLibraryTests.swift in Sources */,
 				T10000000000000000000007 /* MigrationModelsTests.swift in Sources */,
 				T10000000000000000000008 /* AppleMusicLibraryStoreTests.swift in Sources */,

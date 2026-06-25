@@ -11,29 +11,20 @@ struct DiscoverView: View {
   @State private var expandedStationID: String?
   @State private var activeStationID: String?
   @State private var presentedSheet: DiscoverSheet?
+  @State private var searchText = ""
 
   var body: some View {
     ZStack {
       ScrollView(.vertical, showsIndicators: false) {
         VStack(spacing: 26) {
-          header
-
-          DiscoverCardStack(
-            stations: stations,
-            currentIndex: currentIndex,
-            isPlaying: isCurrentCardPlaying,
-            favoritedIDs: favoritedIDs,
-            expandedStationID: expandedStationID,
-            onPlayToggle: toggleCurrentStationPlayback,
-            onToggleFavorite: toggleFavorite,
-            onToggleExpanded: toggleExpanded,
-            onPreviousCard: showPreviousCard,
-            onNextCard: showNextCard
-          )
+          discoverContent
         }
         .padding(.horizontal, 16)
         .padding(.top, 20)
         .padding(.bottom, 36)
+      }
+      .refreshable {
+        await discoverStationStore.refresh()
       }
     }
     .sheet(item: $presentedSheet) { sheet in
@@ -46,15 +37,37 @@ struct DiscoverView: View {
     }
     .task {
       await discoverStationStore.loadIfNeeded()
+      await discoverStationStore.loadNextPageIfNeeded(currentIndex: safeCurrentIndex)
     }
     .animation(.spring(response: 0.35, dampingFraction: 0.82), value: activeStationID)
     .onChange(of: stationIDs) { _, _ in
       normalizeSelectionForAvailableStations()
     }
+    .navigationTitle(L10n.tr("tab.discover"))
+    .toolbarTitleDisplayMode(.inlineLarge)
+    .searchable(text: $searchText, placement: .toolbar, prompt: L10n.tr("common.search"))
+    .minimizedSearchToolbar()
+    .toolbar {
+      ToolbarItem(placement: .topBarTrailing) {
+        Button {
+          presentedSheet = .publish
+        } label: {
+          Image(systemName: "plus")
+        }
+        .accessibilityLabel(L10n.tr("discover.publish.accessibilityLabel"))
+      }
+    }
   }
 
   private var stations: [DiscoverStation] {
-    discoverStationStore.stations.isEmpty ? DiscoverStation.mockStations : discoverStationStore.stations
+    if !discoverStationStore.stations.isEmpty {
+      return discoverStationStore.stations
+    }
+    return discoverStationStore.locallyRecoveredStations
+  }
+
+  private var isShowingLocalRecovery: Bool {
+    discoverStationStore.stations.isEmpty && !discoverStationStore.locallyRecoveredStations.isEmpty
   }
 
   private var stationIDs: [String] {
@@ -74,35 +87,59 @@ struct DiscoverView: View {
     activeStationID == currentStation.id && playbackController.state == .playing
   }
 
-  private var header: some View {
-    HStack {
-      Button {} label: {
-        Image(systemName: "magnifyingglass")
-          .font(.system(size: 20, weight: .semibold))
-          .frame(width: 44, height: 44)
+  @ViewBuilder
+  private var discoverContent: some View {
+    if stations.isEmpty {
+      emptyOrFailedContent
+    } else {
+      if isShowingLocalRecovery {
+        DiscoverFeedRecoveryBanner()
       }
-      .buttonStyle(.plain)
-      .foregroundStyle(.white.opacity(0.58))
-      .accessibilityLabel(L10n.tr("common.search"))
 
-      Spacer()
+      DiscoverCardStack(
+        stations: stations,
+        currentIndex: currentIndex,
+        isPlaying: isCurrentCardPlaying,
+        favoritedIDs: favoritedIDs,
+        expandedStationID: expandedStationID,
+        onPlayToggle: toggleCurrentStationPlayback,
+        onToggleFavorite: toggleFavorite,
+        onToggleExpanded: toggleExpanded,
+        onPreviousCard: showPreviousCard,
+        onNextCard: showNextCard
+      )
+    }
+  }
 
-      Text(L10n.tr("tab.discover"))
-        .font(.system(size: 30, weight: .bold, design: .rounded))
-        .foregroundStyle(.white)
-
-      Spacer()
-
-      Button {
+  @ViewBuilder
+  private var emptyOrFailedContent: some View {
+    switch discoverStationStore.state {
+    case .idle, .loading:
+      DiscoverFeedStatusPanel(
+        systemImage: "dot.radiowaves.left.and.right",
+        title: L10n.tr("discover.feed.loading.title"),
+        message: L10n.tr("discover.feed.loading.message")
+      )
+    case .empty, .loaded:
+      DiscoverFeedStatusPanel(
+        systemImage: "antenna.radiowaves.left.and.right",
+        title: L10n.tr("discover.feed.empty.title"),
+        message: L10n.tr("discover.feed.empty.message"),
+        actionTitle: L10n.tr("discover.publish.title")
+      ) {
         presentedSheet = .publish
-      } label: {
-        Image(systemName: "plus")
-          .font(.system(size: 20, weight: .semibold))
-          .frame(width: 44, height: 44)
       }
-      .buttonStyle(.plain)
-      .foregroundStyle(.white.opacity(0.72))
-      .accessibilityLabel(L10n.tr("discover.publish.accessibilityLabel"))
+    case let .failed(message):
+      DiscoverFeedStatusPanel(
+        systemImage: "wifi.exclamationmark",
+        title: L10n.tr("discover.feed.failed.title"),
+        message: message,
+        actionTitle: L10n.tr("common.retry")
+      ) {
+        Task {
+          await discoverStationStore.refresh()
+        }
+      }
     }
   }
 
@@ -116,6 +153,7 @@ struct DiscoverView: View {
     guard !stations.isEmpty else { return }
     currentIndex = (currentIndex + 1) % stations.count
     expandedStationID = nil
+    loadNextPageIfNeeded()
   }
 
   private func toggleCurrentStationPlayback() {
@@ -138,7 +176,12 @@ struct DiscoverView: View {
   }
 
   private func normalizeSelectionForAvailableStations() {
-    guard !stations.isEmpty else { return }
+    guard !stations.isEmpty else {
+      currentIndex = 0
+      activeStationID = nil
+      expandedStationID = nil
+      return
+    }
 
     currentIndex = safeCurrentIndex
 
@@ -146,6 +189,8 @@ struct DiscoverView: View {
        !stations.contains(where: { $0.id == activeStationID }) {
       self.activeStationID = nil
     }
+
+    loadNextPageIfNeeded()
   }
 
   private func toggleFavorite(_ station: DiscoverStation) {
@@ -159,6 +204,12 @@ struct DiscoverView: View {
   private func toggleExpanded(_ station: DiscoverStation) {
     expandedStationID = expandedStationID == station.id ? nil : station.id
   }
+
+  private func loadNextPageIfNeeded() {
+    Task {
+      await discoverStationStore.loadNextPageIfNeeded(currentIndex: safeCurrentIndex)
+    }
+  }
 }
 
 private enum DiscoverSheet: Identifiable {
@@ -168,6 +219,98 @@ private enum DiscoverSheet: Identifiable {
     switch self {
     case .publish:
       "publish"
+    }
+  }
+}
+
+private struct MinimizedSearchToolbarModifier: ViewModifier {
+  func body(content: Content) -> some View {
+    if #available(iOS 26.0, *) {
+      content.searchToolbarBehavior(.minimize)
+    } else {
+      content
+    }
+  }
+}
+
+private extension View {
+  func minimizedSearchToolbar() -> some View {
+    modifier(MinimizedSearchToolbarModifier())
+  }
+}
+
+private struct DiscoverFeedRecoveryBanner: View {
+  var body: some View {
+    HStack(spacing: 10) {
+      Image(systemName: "externaldrive.fill.badge.checkmark")
+        .font(.system(size: 16, weight: .semibold))
+        .foregroundStyle(Color(hex: "#7BCFA6"))
+        .frame(width: 24)
+
+      Text(L10n.tr("discover.feed.localRecovery"))
+        .font(.system(size: 13, weight: .semibold, design: .rounded))
+        .foregroundStyle(.white.opacity(0.72))
+        .lineLimit(2)
+
+      Spacer(minLength: 0)
+    }
+    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .stroke(.white.opacity(0.08), lineWidth: 1)
+    }
+  }
+}
+
+private struct DiscoverFeedStatusPanel: View {
+  let systemImage: String
+  let title: String
+  let message: String
+  var actionTitle: String?
+  var action: (() -> Void)?
+
+  var body: some View {
+    VStack(spacing: 18) {
+      Image(systemName: systemImage)
+        .font(.system(size: 34, weight: .semibold))
+        .foregroundStyle(Color(hex: "#7BCFA6"))
+        .frame(width: 64, height: 64)
+        .background(.white.opacity(0.08), in: Circle())
+
+      VStack(spacing: 7) {
+        Text(title)
+          .font(.system(size: 20, weight: .bold, design: .rounded))
+          .foregroundStyle(.white)
+          .multilineTextAlignment(.center)
+
+        Text(message)
+          .font(.system(size: 14, weight: .medium, design: .rounded))
+          .foregroundStyle(.white.opacity(0.54))
+          .lineSpacing(3)
+          .multilineTextAlignment(.center)
+      }
+
+      if let actionTitle, let action {
+        Button(action: action) {
+          Text(actionTitle)
+            .font(.system(size: 14, weight: .bold, design: .rounded))
+            .foregroundStyle(.black.opacity(0.86))
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .background(Color(hex: "#7BCFA6"), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+      }
+    }
+    .padding(22)
+    .frame(maxWidth: .infinity)
+    .frame(minHeight: 360, alignment: .center)
+    .background(Color(hex: "#24211E").opacity(0.82), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .stroke(.white.opacity(0.1), lineWidth: 1)
     }
   }
 }

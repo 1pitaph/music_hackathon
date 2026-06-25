@@ -8,6 +8,7 @@ struct AppView: View {
   @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
   @Environment(\.scenePhase) private var scenePhase
 
+  @AppStorage(RadioPlaybackSettings.backgroundPlayKey) private var backgroundPlay = RadioPlaybackSettings.defaultBackgroundPlay
   @State private var selectedTab: AppTab = .radio
   @State private var isPlayerPresented = false
 
@@ -24,12 +25,29 @@ struct AppView: View {
       .task {
         await musicAuthorization.refreshAccessState()
         await appleMusicLibrary.loadIfNeeded(authorizationStatus: musicAuthorization.status)
+        await radioStation.restoreCachedSessionIfAvailable()
       }
       .onChange(of: scenePhase) { _, phase in
-        guard phase == .active else { return }
-        Task {
-          await musicAuthorization.refreshAccessState()
-          await appleMusicLibrary.loadIfNeeded(authorizationStatus: musicAuthorization.status)
+        switch phase {
+        case .active:
+          Task {
+            await musicAuthorization.refreshAccessState()
+            await appleMusicLibrary.loadIfNeeded(authorizationStatus: musicAuthorization.status)
+            await radioStation.restoreCachedSessionIfAvailable()
+          }
+        case .inactive:
+          Task {
+            await radioStation.savePlaybackSnapshot()
+          }
+        case .background:
+          Task {
+            if !backgroundPlay {
+              playbackController.pause()
+            }
+            await radioStation.savePlaybackSnapshot()
+          }
+        @unknown default:
+          break
         }
       }
   }

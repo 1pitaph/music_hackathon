@@ -197,6 +197,43 @@ def test_publish_discover_station_persists_feed_and_station_lookup(monkeypatch, 
   assert persisted_response.json()["title"] == "Second"
 
 
+def test_discover_storage_status_reports_path_writability_and_counts(monkeypatch, tmp_path):
+  db_path = tmp_path / "discover.sqlite3"
+  monkeypatch.setenv("DISCOVER_STATIONS_DB_PATH", str(db_path))
+  monkeypatch.setenv("DISCOVER_STATIONS_PUBLIC_BASE_URL", "https://share.test")
+  client = TestClient(app)
+
+  empty_status = client.get("/v1/discover/storage/status")
+  empty_body = empty_status.json()
+  assert empty_status.status_code == 200
+  assert empty_body["dbPath"] == str(db_path)
+  assert empty_body["dbExists"] is False
+  assert empty_body["directoryExists"] is True
+  assert empty_body["directoryWritable"] is True
+  assert empty_body["totalStations"] == 0
+  assert empty_body["publicStations"] == 0
+
+  timestamps = iter([
+    "2026-06-25T01:00:00.000Z",
+    "2026-06-25T01:01:00.000Z",
+    "2026-06-25T01:02:00.000Z",
+  ])
+  monkeypatch.setattr(api, "_timestamp_now", lambda: next(timestamps))
+  client.post("/v1/discover/stations", json=_publish_payload(title="Public", visibility="public"))
+  client.post("/v1/discover/stations", json=_publish_payload(title="Unlisted", visibility="unlisted"))
+  client.post("/v1/discover/stations", json=_publish_payload(title="Private", visibility="private"))
+
+  status = client.get("/v1/discover/storage/status")
+  body = status.json()
+  assert status.status_code == 200
+  assert body["dbExists"] is True
+  assert body["totalStations"] == 3
+  assert body["publicStations"] == 1
+  assert body["unlistedStations"] == 1
+  assert body["privateStations"] == 1
+  assert body["latestPublishedAt"] == "2026-06-25T01:02:00.000Z"
+
+
 def test_publish_discover_station_requires_five_unique_seed_tracks(monkeypatch, tmp_path):
   monkeypatch.setenv("DISCOVER_STATIONS_DB_PATH", str(tmp_path / "discover.sqlite3"))
   client = TestClient(app)

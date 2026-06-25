@@ -18,6 +18,7 @@ from radio_agent.schemas import (
   DiscoverStationPage,
   DiscoverStationPublishRequest,
   DiscoverStationResponse,
+  DiscoverStorageStatus,
   RadioGenerateRequest,
   RadioGenerateResponse,
   RadioMemoryCompressionRequest,
@@ -195,6 +196,11 @@ def discover_stations(cursor: str | None = None, limit: int = 20) -> DiscoverSta
   return _discover_station_page(cursor=cursor, limit=limit)
 
 
+@app.get("/v1/discover/storage/status", response_model=DiscoverStorageStatus)
+def discover_storage_status() -> DiscoverStorageStatus:
+  return _discover_storage_status()
+
+
 @app.get("/v1/radio/stations/{station_id}", response_model=DiscoverStationResponse)
 def station_by_id(station_id: str) -> DiscoverStationResponse:
   station = _load_discover_station(station_id)
@@ -350,6 +356,58 @@ def _load_discover_station(station_id: str) -> DiscoverStationResponse | None:
   if row is None:
     return None
   return _station_from_payload_json(row["payload_json"])
+
+
+def _discover_storage_status() -> DiscoverStorageStatus:
+  db_path = _discover_db_path()
+  is_memory = db_path == ":memory:"
+  db_file = None if is_memory else Path(db_path)
+  db_exists = is_memory or bool(db_file and db_file.is_file())
+  directory = None if db_file is None else db_file.parent
+  directory_exists = is_memory or bool(directory and directory.exists())
+  directory_writable = is_memory or bool(directory and directory.exists() and os.access(directory, os.W_OK))
+
+  counts = {
+    "totalStations": 0,
+    "publicStations": 0,
+    "unlistedStations": 0,
+    "privateStations": 0,
+    "latestPublishedAt": None,
+  }
+  if db_exists:
+    connection = _discover_db_connection()
+    try:
+      _ensure_discover_schema(connection)
+      row = connection.execute(
+        """
+        SELECT
+          COUNT(*) AS total_stations,
+          SUM(CASE WHEN visibility = 'public' THEN 1 ELSE 0 END) AS public_stations,
+          SUM(CASE WHEN visibility = 'unlisted' THEN 1 ELSE 0 END) AS unlisted_stations,
+          SUM(CASE WHEN visibility = 'private' THEN 1 ELSE 0 END) AS private_stations,
+          MAX(published_at) AS latest_published_at
+        FROM discover_stations
+        """
+      ).fetchone()
+    finally:
+      connection.close()
+
+    if row is not None:
+      counts = {
+        "totalStations": int(row["total_stations"] or 0),
+        "publicStations": int(row["public_stations"] or 0),
+        "unlistedStations": int(row["unlisted_stations"] or 0),
+        "privateStations": int(row["private_stations"] or 0),
+        "latestPublishedAt": row["latest_published_at"],
+      }
+
+  return DiscoverStorageStatus(
+    dbPath=db_path,
+    dbExists=db_exists,
+    directoryExists=directory_exists,
+    directoryWritable=directory_writable,
+    **counts,
+  )
 
 
 def _station_from_payload_json(payload_json: str) -> DiscoverStationResponse:

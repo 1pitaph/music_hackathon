@@ -9,7 +9,7 @@ enum PlaybackCompletionKind {
   case speech
 }
 
-enum RadioTrackPlaybackPolicy: Equatable {
+enum RadioTrackPlaybackPolicy: String, Codable, Equatable {
   case fullSongPreferred
   case mixablePreferred
 }
@@ -33,12 +33,15 @@ protocol RadioPlaybackControlling: AnyObject {
   var onFullSongHandoffWindowReached: (() -> Void)? { get set }
   var onSpeechAdvancePointReached: (() -> Void)? { get set }
   var onRemoteNextTrackRequested: (() -> Void)? { get set }
+  var onPlaybackSnapshotChanged: (() -> Void)? { get set }
+  var playbackSnapshot: RadioPlaybackSnapshot.Playback { get }
 
   func prepareUpcomingTrack(_ track: Track?, policy: RadioTrackPlaybackPolicy)
   func play(track: Track)
   func play(track: Track, policy: RadioTrackPlaybackPolicy, preservesSpeech: Bool)
   func playSpeech(_ speech: RadioSpeechPlaybackSegment)
   func playSpeech(_ speech: RadioSpeechPlaybackSegment, mode: RadioSpeechPlaybackMode)
+  func restorePausedTrack(_ track: Track, policy: RadioTrackPlaybackPolicy, elapsedSeconds: TimeInterval)
   func stop()
 }
 
@@ -128,6 +131,7 @@ final class PlaybackController: RadioPlaybackControlling {
   var onFullSongHandoffWindowReached: (() -> Void)?
   var onSpeechAdvancePointReached: (() -> Void)?
   var onRemoteNextTrackRequested: (() -> Void)?
+  var onPlaybackSnapshotChanged: (() -> Void)?
   var onTrackFinished: (() -> Void)?
 
   @ObservationIgnored private let trackPreviewPlayer = AVPlayer()
@@ -170,6 +174,8 @@ final class PlaybackController: RadioPlaybackControlling {
   @ObservationIgnored private var backgroundContinuationTask: UIBackgroundTaskIdentifier = .invalid
   @ObservationIgnored private var backgroundContinuationReason: String?
   @ObservationIgnored private var remoteCommandTargets: [(command: MPRemoteCommand, target: Any)] = []
+  @ObservationIgnored private var pendingPlaybackStartOffset: (trackKey: String, seconds: TimeInterval)?
+  @ObservationIgnored private var lastSnapshotNotificationElapsedSecond = -1
 
   init(diagnostics: DiagnosticsStore? = nil) {
     self.musicAuthorization = MusicAuthorizationService(diagnostics: diagnostics)
@@ -276,6 +282,41 @@ final class PlaybackController: RadioPlaybackControlling {
     startSpeechPlayback(speech, mode: mode)
   }
 
+  var playbackSnapshot: RadioPlaybackSnapshot.Playback {
+    let isSpeechBackend = activeBackend == .speechAudio || activeBackend == .speechSynthesis
+    return RadioPlaybackSnapshot.Playback(
+      track: currentTrack,
+      policy: currentTrackPlaybackPolicy,
+      elapsedSeconds: isSpeechBackend ? 0 : currentPlaybackSeconds(),
+      wasPlaying: state == .playing,
+      activeBackend: activeBackend
+    )
+  }
+
+  func restorePausedTrack(
+    _ track: Track,
+    policy: RadioTrackPlaybackPolicy,
+    elapsedSeconds: TimeInterval
+  ) {
+    playbackTask?.cancel()
+    stopCurrentPlayback(clearCurrentTrack: false)
+    currentTrack = track
+    currentTrackPlaybackPolicy = policy
+    currentSpeech = nil
+    currentSpeechCue = nil
+    activeBackend = .none
+    state = .paused
+    lastErrorMessage = nil
+    let clampedOffset = Self.clampedResumeOffset(elapsedSeconds, duration: track.duration)
+    self.elapsedSeconds = clampedOffset
+    elapsedTimeText = Self.timeText(for: clampedOffset)
+    playbackProgress = track.duration > 0 ? min(max(clampedOffset / track.duration, 0), 1) : 0
+    pendingPlaybackStartOffset = (track.radioIdentity, clampedOffset)
+    updateNowPlayingInfo(for: track)
+    updateNowPlayingPlaybackRate(0)
+    notifyPlaybackSnapshotChanged(force: true)
+  }
+
   func togglePlayback() {
     playbackTask?.cancel()
 
@@ -331,12 +372,15 @@ final class PlaybackController: RadioPlaybackControlling {
 
     state = .paused
     updateNowPlayingPlaybackRate(0)
+    notifyPlaybackSnapshotChanged(force: true)
   }
 
   func stop() {
     playbackTask?.cancel()
     cancelUpcomingTrackPreparation()
     stopCurrentPlayback(clearCurrentTrack: true)
+    pendingPlaybackStartOffset = nil
+    notifyPlaybackSnapshotChanged(force: true)
   }
 
   func currentPlaybackSeconds() -> TimeInterval {
@@ -353,7 +397,7 @@ final class PlaybackController: RadioPlaybackControlling {
     case .speechSynthesis:
       return elapsedSeconds
     case .none:
-      return 0
+      return currentTrack == nil && currentSpeech == nil ? 0 : elapsedSeconds
     }
   }
 
@@ -620,6 +664,7 @@ final class PlaybackController: RadioPlaybackControlling {
       )
     )
     musicPlayer.queue = [song]
+    retargetPendingPlaybackStartOffset(from: track, to: resolvedTrack)
     diagnostics?.record(
       .info,
       chain: .playbackAppleMusic,
@@ -661,6 +706,13 @@ final class PlaybackController: RadioPlaybackControlling {
       throw error
     }
 
+    let resumeOffset = pendingPlaybackStartOffsetSeconds(for: resolvedTrack, duration: resolvedTrack.duration)
+    if resumeOffset > 0 {
+      musicPlayer.playbackTime = resumeOffset
+      elapsedSeconds = resumeOffset
+      elapsedTimeText = Self.timeText(for: resumeOffset)
+    }
+
     do {
       let playStart = Date()
       diagnostics?.record(
@@ -693,6 +745,7 @@ final class PlaybackController: RadioPlaybackControlling {
       throw error
     }
 
+    _ = consumePendingPlaybackStartOffset(for: resolvedTrack, duration: resolvedTrack.duration)
     currentTrack = resolvedTrack
     activeBackend = .appleMusic
     state = .playing
@@ -700,6 +753,7 @@ final class PlaybackController: RadioPlaybackControlling {
     updateNowPlayingPlaybackRate(1)
     startMusicProgressTimer(duration: resolvedTrack.duration)
     endBackgroundContinuationTask(reason: "apple_music_started")
+    notifyPlaybackSnapshotChanged(force: true)
   }
 
   private func fallbackToPreviewAfterAppleMusicFailure(
@@ -762,10 +816,17 @@ final class PlaybackController: RadioPlaybackControlling {
     didNotifyTrackFinished = false
     didNotifyTrackTransitionWindow = false
     let item = AVPlayerItem(url: previewURL)
+    let resumeOffset = consumePendingPlaybackStartOffset(for: track, duration: track.duration)
     trackPreviewPlayer.volume = initialVolume
     trackPreviewPlayer.replaceCurrentItem(with: item)
     addTrackPeriodicTimeObserver()
     addTrackPlaybackItemObservers(for: item, mediaKind: .track(track, correlationID))
+    if resumeOffset > 0 {
+      let time = CMTime(seconds: resumeOffset, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+      trackPreviewPlayer.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+      elapsedSeconds = resumeOffset
+      elapsedTimeText = Self.timeText(for: resumeOffset)
+    }
     trackPreviewPlayer.play()
     endBackgroundContinuationTask(reason: "preview_started")
 
@@ -775,6 +836,7 @@ final class PlaybackController: RadioPlaybackControlling {
     state = .playing
     updateNowPlayingInfo(for: track)
     updateNowPlayingPlaybackRate(1)
+    notifyPlaybackSnapshotChanged(force: true)
     diagnostics?.record(
       .notice,
       chain: .playbackPreview,
@@ -849,6 +911,7 @@ final class PlaybackController: RadioPlaybackControlling {
     state = .playing
     updateNowPlayingInfo(for: speech)
     updateNowPlayingPlaybackRate(1)
+    notifyPlaybackSnapshotChanged(force: true)
     diagnostics?.record(
       .notice,
       chain: .playbackSpeech,
@@ -885,6 +948,7 @@ final class PlaybackController: RadioPlaybackControlling {
     updateNowPlayingInfo(for: speech)
     updateNowPlayingPlaybackRate(1)
     startSpeechProgressTimer(duration: speechDuration(for: nil, speech: speech))
+    notifyPlaybackSnapshotChanged(force: true)
     diagnostics?.record(
       .notice,
       chain: .playbackSpeech,
@@ -908,6 +972,7 @@ final class PlaybackController: RadioPlaybackControlling {
         trackPreviewPlayer.play()
         state = .playing
         updateNowPlayingPlaybackRate(1)
+        notifyPlaybackSnapshotChanged(force: true)
       } else if let currentTrack {
         play(track: currentTrack)
       } else if let currentSpeech {
@@ -921,6 +986,7 @@ final class PlaybackController: RadioPlaybackControlling {
         speechAudioPlayer.play()
         state = .playing
         updateNowPlayingPlaybackRate(1)
+        notifyPlaybackSnapshotChanged(force: true)
       } else if let currentSpeech {
         playSpeech(currentSpeech, mode: currentSpeechPlaybackMode)
       }
@@ -934,6 +1000,7 @@ final class PlaybackController: RadioPlaybackControlling {
         if let currentSpeech {
           startSpeechProgressTimer(duration: speechDuration(for: nil, speech: currentSpeech))
         }
+        notifyPlaybackSnapshotChanged(force: true)
       } else if let currentSpeech {
         playSpeech(currentSpeech)
       }
@@ -952,6 +1019,7 @@ final class PlaybackController: RadioPlaybackControlling {
       state = .playing
       updateNowPlayingPlaybackRate(1)
       startMusicProgressTimer(duration: currentTrack?.duration ?? 0)
+      notifyPlaybackSnapshotChanged(force: true)
       diagnostics?.record(
         .notice,
         chain: .playbackAppleMusic,
@@ -1305,6 +1373,8 @@ final class PlaybackController: RadioPlaybackControlling {
           self.elapsedSeconds += 0.5
           self.elapsedTimeText = Self.timeText(for: self.elapsedSeconds)
           self.playbackProgress = min(max(self.elapsedSeconds / duration, 0), 1)
+          self.updateNowPlayingElapsedTime(self.elapsedSeconds)
+          self.notifyPlaybackSnapshotChangedIfNeeded()
           if let currentSpeech = self.currentSpeech, self.currentSpeechCue == nil {
             self.updateCurrentSpeechCue(for: self.elapsedSeconds, speech: currentSpeech)
           }
@@ -1336,6 +1406,7 @@ final class PlaybackController: RadioPlaybackControlling {
       elapsedTimeText = newElapsedTimeText
       updateNowPlayingElapsedTime(elapsedSeconds)
     }
+    notifyPlaybackSnapshotChangedIfNeeded()
 
     guard
       let duration = trackDurationForCurrentPreview(),
@@ -1363,6 +1434,7 @@ final class PlaybackController: RadioPlaybackControlling {
       elapsedTimeText = newElapsedTimeText
       updateNowPlayingElapsedTime(elapsedSeconds)
     }
+    notifyPlaybackSnapshotChangedIfNeeded()
     if let currentSpeech {
       updateCurrentSpeechCue(for: elapsedSeconds, speech: currentSpeech)
     }
@@ -1379,6 +1451,7 @@ final class PlaybackController: RadioPlaybackControlling {
   private func updateMusicPlaybackProgress(duration: TimeInterval) {
     elapsedTimeText = Self.timeText(for: elapsedSeconds)
     updateNowPlayingElapsedTime(elapsedSeconds)
+    notifyPlaybackSnapshotChangedIfNeeded()
 
     guard duration > 0 else {
       playbackProgress = 0
@@ -1646,6 +1719,57 @@ final class PlaybackController: RadioPlaybackControlling {
     elapsedTimeText = "0:00"
   }
 
+  private func consumePendingPlaybackStartOffset(for track: Track, duration: TimeInterval?) -> TimeInterval {
+    guard pendingPlaybackStartOffset?.trackKey == track.radioIdentity else {
+      return 0
+    }
+
+    let seconds = pendingPlaybackStartOffsetSeconds(for: track, duration: duration)
+    self.pendingPlaybackStartOffset = nil
+    return seconds
+  }
+
+  private func pendingPlaybackStartOffsetSeconds(for track: Track, duration: TimeInterval?) -> TimeInterval {
+    guard let pendingPlaybackStartOffset,
+          pendingPlaybackStartOffset.trackKey == track.radioIdentity else {
+      return 0
+    }
+
+    return Self.clampedResumeOffset(pendingPlaybackStartOffset.seconds, duration: duration)
+  }
+
+  private func retargetPendingPlaybackStartOffset(from originalTrack: Track, to resolvedTrack: Track) {
+    guard let pendingPlaybackStartOffset,
+          pendingPlaybackStartOffset.trackKey == originalTrack.radioIdentity,
+          originalTrack.radioIdentity != resolvedTrack.radioIdentity else {
+      return
+    }
+
+    self.pendingPlaybackStartOffset = (resolvedTrack.radioIdentity, pendingPlaybackStartOffset.seconds)
+  }
+
+  private func notifyPlaybackSnapshotChanged(force: Bool = false) {
+    let currentSecond = Int(currentPlaybackSeconds().rounded(.down))
+    if force {
+      lastSnapshotNotificationElapsedSecond = currentSecond
+      onPlaybackSnapshotChanged?()
+      return
+    }
+
+    guard state == .playing else { return }
+    guard lastSnapshotNotificationElapsedSecond < 0
+      || currentSecond - lastSnapshotNotificationElapsedSecond >= 10 else {
+      return
+    }
+
+    lastSnapshotNotificationElapsedSecond = currentSecond
+    onPlaybackSnapshotChanged?()
+  }
+
+  private func notifyPlaybackSnapshotChangedIfNeeded() {
+    notifyPlaybackSnapshotChanged(force: false)
+  }
+
   private func failPlayback(_ error: Error) {
     failPlayback(error, failedPhase: "unknown", correlationID: currentPlaybackAttemptID)
   }
@@ -1666,6 +1790,7 @@ final class PlaybackController: RadioPlaybackControlling {
     stopMusicProgressTimer()
     updateNowPlayingPlaybackRate(0)
     beginBackgroundContinuationTask(reason: "playback_failed")
+    notifyPlaybackSnapshotChanged(force: true)
     diagnostics?.record(
       .error,
       chain: failureChain,
@@ -1754,6 +1879,7 @@ final class PlaybackController: RadioPlaybackControlling {
       ]
     )
 
+    notifyPlaybackSnapshotChanged(force: true)
     onPlaybackFinished?(kind)
     if kind == .track {
       onTrackFinished?()
@@ -1974,6 +2100,12 @@ final class PlaybackController: RadioPlaybackControlling {
     return startVolume + (targetVolume - startVolume) * easedProgress
   }
 
+  static func clampedResumeOffset(_ seconds: TimeInterval, duration: TimeInterval?) -> TimeInterval {
+    guard seconds.isFinite, seconds > 0 else { return 0 }
+    guard let duration, duration.isFinite, duration > 3 else { return 0 }
+    return min(seconds, max(0, duration - 3))
+  }
+
   static func estimatedSpeechDuration(for text: String) -> TimeInterval {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return 1.2 }
@@ -2018,7 +2150,7 @@ final class PlaybackController: RadioPlaybackControlling {
   }
 }
 
-enum PlaybackBackend: String {
+enum PlaybackBackend: String, Codable, Equatable {
   case none
   case localPreview
   case appleMusic

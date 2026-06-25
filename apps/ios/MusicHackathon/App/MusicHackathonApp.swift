@@ -13,6 +13,7 @@ struct MusicHackathonApp: App {
 
   init() {
     AppLanguage.applyStoredPreference()
+    RadioPlaybackSettings.registerDefaults()
 
     let diagnostics = DiagnosticsStore()
     let musicAuthorization = MusicAuthorizationService(diagnostics: diagnostics)

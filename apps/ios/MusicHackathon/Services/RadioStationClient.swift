@@ -91,9 +91,16 @@ final class DiscoverStationStore {
   var nextCursor: String?
   var lastErrorMessage: String?
 
+  var locallyRecoveredStations: [DiscoverStation] {
+    myPublishedStations
+      .filter { $0.visibility == .public }
+      .map { $0.discoverStation() }
+  }
+
   @ObservationIgnored private let client: any RadioStationFetching & DiscoverStationServing
   @ObservationIgnored private let publishedArchive: any PublishedDiscoverStationArchiving
   @ObservationIgnored private var hasLoadedMyPublishedStations = false
+  @ObservationIgnored private var isLoadingNextPage = false
 
   init(
     client: any RadioStationFetching & DiscoverStationServing = RadioStationClient(),
@@ -104,6 +111,7 @@ final class DiscoverStationStore {
   }
 
   func loadIfNeeded() async {
+    await loadMyPublishedStationsIfNeeded()
     guard stations.isEmpty else { return }
     await refresh()
   }
@@ -111,6 +119,7 @@ final class DiscoverStationStore {
   func refresh() async {
     state = .loading
     lastErrorMessage = nil
+    await loadMyPublishedStationsIfNeeded()
 
     do {
       let page = try await client.fetchDiscoverStations(cursor: nil, limit: 20)
@@ -118,10 +127,35 @@ final class DiscoverStationStore {
     } catch is CancellationError {
       return
     } catch {
-      state = .failed(Self.errorMessage(for: error))
+      let message = Self.errorMessage(for: error)
+      state = stations.isEmpty ? .failed(message) : .loaded
+      lastErrorMessage = message
+      if stations.isEmpty {
+        nextCursor = nil
+      }
+    }
+  }
+
+  func loadNextPageIfNeeded(currentIndex: Int, threshold: Int = 4) async {
+    guard !isLoadingNextPage,
+          !stations.isEmpty,
+          let nextCursor,
+          currentIndex >= max(stations.count - threshold, 0) else {
+      return
+    }
+
+    isLoadingNextPage = true
+    defer {
+      isLoadingNextPage = false
+    }
+
+    do {
+      let page = try await client.fetchDiscoverStations(cursor: nextCursor, limit: 20)
+      append(page)
+    } catch is CancellationError {
+      return
+    } catch {
       lastErrorMessage = Self.errorMessage(for: error)
-      stations = []
-      nextCursor = nil
     }
   }
 
@@ -201,6 +235,17 @@ final class DiscoverStationStore {
 
   private func apply(_ page: DiscoverFeedPage) {
     stations = page.stations.map { $0.discoverStation() }
+    nextCursor = page.nextCursor
+    state = stations.isEmpty ? .empty : .loaded
+  }
+
+  private func append(_ page: DiscoverFeedPage) {
+    let incomingStations = page.stations.map { $0.discoverStation() }
+    var seenStationIDs = Set(stations.map(\.id))
+    for station in incomingStations where !seenStationIDs.contains(station.id) {
+      stations.append(station)
+      seenStationIDs.insert(station.id)
+    }
     nextCursor = page.nextCursor
     state = stations.isEmpty ? .empty : .loaded
   }

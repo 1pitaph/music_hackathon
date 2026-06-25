@@ -29,9 +29,9 @@ enum AppTab: String, CaseIterable, Identifiable {
 
   var prefersHiddenNavigationBar: Bool {
     switch self {
-    case .radio, .discover:
+    case .radio:
       true
-    case .mine:
+    case .discover, .mine:
       false
     }
   }

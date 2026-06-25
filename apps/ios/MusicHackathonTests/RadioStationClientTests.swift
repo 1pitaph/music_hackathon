@@ -628,6 +628,70 @@ final class RadioStationClientTests: XCTestCase {
     }
   }
 
+  @MainActor
+  func testDiscoverStationStoreExposesLocalPublicArchiveWhenRemoteFeedIsEmpty() async throws {
+    let publicStation = makePublishedStation(stationID: "station-public", visibility: .public)
+    let privateStation = makePublishedStation(stationID: "station-private", visibility: .private)
+    let archive = InMemoryPublishedStationArchive(stations: [privateStation, publicStation])
+    let store = DiscoverStationStore(
+      client: FakeDiscoverStationService(
+        publishResponses: [],
+        fetchResponses: [.success(DiscoverFeedPage(stations: [], nextCursor: nil))]
+      ),
+      publishedArchive: archive
+    )
+
+    await store.loadIfNeeded()
+
+    XCTAssertTrue(store.stations.isEmpty)
+    XCTAssertEqual(store.state, .empty)
+    XCTAssertEqual(store.locallyRecoveredStations.map(\.id), ["station-public"])
+  }
+
+  @MainActor
+  func testDiscoverStationStoreKeepsLoadedFeedWhenRefreshFails() async throws {
+    let existingStation = makePublishedStation(stationID: "station-1")
+    let store = DiscoverStationStore(
+      client: FakeDiscoverStationService(
+        publishResponses: [],
+        fetchResponses: [
+          .success(DiscoverFeedPage(stations: [existingStation], nextCursor: nil)),
+          .failure(URLError(.timedOut))
+        ]
+      ),
+      publishedArchive: InMemoryPublishedStationArchive()
+    )
+
+    await store.refresh()
+    await store.refresh()
+
+    XCTAssertEqual(store.state, .loaded)
+    XCTAssertEqual(store.stations.map(\.id), ["station-1"])
+    XCTAssertEqual(store.lastErrorMessage, URLError(.timedOut).localizedDescription)
+  }
+
+  @MainActor
+  func testDiscoverStationStoreLoadsNextPageAndDedupesStations() async throws {
+    let firstStation = makePublishedStation(stationID: "station-1")
+    let secondStation = makePublishedStation(stationID: "station-2")
+    let store = DiscoverStationStore(
+      client: FakeDiscoverStationService(
+        publishResponses: [],
+        fetchResponses: [
+          .success(DiscoverFeedPage(stations: [firstStation], nextCursor: "cursor-2")),
+          .success(DiscoverFeedPage(stations: [firstStation, secondStation], nextCursor: nil))
+        ]
+      ),
+      publishedArchive: InMemoryPublishedStationArchive()
+    )
+
+    await store.refresh()
+    await store.loadNextPageIfNeeded(currentIndex: 0)
+
+    XCTAssertEqual(store.stations.map(\.id), ["station-1", "station-2"])
+    XCTAssertNil(store.nextCursor)
+  }
+
   func testPublishedStationArchiveStoreRoundTripsStations() async throws {
     let fileURL = FileManager.default.temporaryDirectory
       .appending(path: "airset-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -1098,9 +1162,14 @@ private actor InMemoryPublishedStationArchive: PublishedDiscoverStationArchiving
 
 private final class FakeDiscoverStationService: RadioStationFetching, DiscoverStationServing {
   private var publishResponses: [PublishedDiscoverStation]
+  private var fetchResponses: [Result<DiscoverFeedPage, Error>]
 
-  init(publishResponses: [PublishedDiscoverStation]) {
+  init(
+    publishResponses: [PublishedDiscoverStation],
+    fetchResponses: [Result<DiscoverFeedPage, Error>] = []
+  ) {
     self.publishResponses = publishResponses
+    self.fetchResponses = fetchResponses
   }
 
   func fetchCurrentStation() async throws -> RadioStation {
@@ -1108,7 +1177,16 @@ private final class FakeDiscoverStationService: RadioStationFetching, DiscoverSt
   }
 
   func fetchDiscoverStations(cursor: String?, limit: Int) async throws -> DiscoverFeedPage {
-    DiscoverFeedPage(stations: [], nextCursor: nil)
+    guard !fetchResponses.isEmpty else {
+      return DiscoverFeedPage(stations: [], nextCursor: nil)
+    }
+
+    switch fetchResponses.removeFirst() {
+    case let .success(page):
+      return page
+    case let .failure(error):
+      throw error
+    }
   }
 
   func publishDiscoverStation(_ draft: DiscoverStationPublicationDraft) async throws -> PublishedDiscoverStation {

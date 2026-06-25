@@ -261,6 +261,18 @@ class DiscoverStationPage(BaseModel):
   nextCursor: str | None = None
 
 
+class DiscoverStorageStatus(BaseModel):
+  dbPath: str
+  dbExists: bool
+  directoryExists: bool
+  directoryWritable: bool
+  totalStations: int = 0
+  publicStations: int = 0
+  unlistedStations: int = 0
+  privateStations: int = 0
+  latestPublishedAt: str | None = None
+
+
 class RadioSpeechSegment(BaseModel):
   id: str
   kind: Literal["stationIntro", "transition"]

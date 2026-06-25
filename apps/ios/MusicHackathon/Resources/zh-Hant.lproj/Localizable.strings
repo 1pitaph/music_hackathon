@@ -209,6 +209,12 @@
 "discover.share.accessibilityLabel" = "分享當前電臺";
 "discover.share.title" = "分享電臺";
 "discover.share.message" = "正在收聽 %@ 的 %@";
+"discover.feed.loading.title" = "正在接收公開頻率";
+"discover.feed.loading.message" = "正在查找已發布的公開電臺。";
+"discover.feed.empty.title" = "暫無公開電臺";
+"discover.feed.empty.message" = "公開發布的電臺會在同步後出現在這裏。";
+"discover.feed.failed.title" = "發現頁暫時不可用";
+"discover.feed.localRecovery" = "已顯示本機保存的公開電臺，等待發現頁同步。";
 "discover.publish.accessibilityLabel" = "發布電臺";
 "discover.publish.title" = "發布電臺";
 "discover.publish.selectionTitle" = "選擇 5 首歌";

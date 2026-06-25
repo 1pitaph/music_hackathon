@@ -209,6 +209,12 @@
 "discover.share.accessibilityLabel" = "Share current station";
 "discover.share.title" = "Share station";
 "discover.share.message" = "Listening to %@'s %@";
+"discover.feed.loading.title" = "Tuning the public feed";
+"discover.feed.loading.message" = "Finding published stations now.";
+"discover.feed.empty.title" = "No public stations yet";
+"discover.feed.empty.message" = "Published public stations will appear here as soon as the feed has them.";
+"discover.feed.failed.title" = "Feed unavailable";
+"discover.feed.localRecovery" = "Showing public stations saved on this device while the feed catches up.";
 "discover.publish.accessibilityLabel" = "Publish station";
 "discover.publish.title" = "Publish Station";
 "discover.publish.selectionTitle" = "Choose 5 songs";
