@@ -42,6 +42,16 @@ struct RadioQueueItem: Identifiable, Hashable {
     self.reason = reason
     self.handoffText = handoffText
   }
+
+  func replacingTrack(_ track: Track) -> RadioQueueItem {
+    RadioQueueItem(
+      id: id,
+      track: track,
+      sourceTitle: sourceTitle,
+      reason: reason,
+      handoffText: handoffText
+    )
+  }
 }
 
 struct RadioSpeech: Codable, Hashable {
@@ -130,6 +140,22 @@ struct RadioTransitionCopy: Codable, Hashable {
   }
 }
 
+struct RadioSpeechTimingWord: Codable, Hashable {
+  let word: String
+  let startTime: TimeInterval
+  let endTime: TimeInterval
+  let confidence: Double?
+}
+
+struct RadioSpeechCue: Codable, Hashable, Identifiable {
+  let id: String
+  let text: String
+  let displayText: String
+  let startTime: TimeInterval
+  let endTime: TimeInterval
+  let words: [RadioSpeechTimingWord]
+}
+
 struct RadioSpeechAudio: Codable, Hashable {
   let audioURL: URL?
   let mimeType: String
@@ -138,6 +164,7 @@ struct RadioSpeechAudio: Codable, Hashable {
   let voice: String
   let model: String
   let status: String
+  let cues: [RadioSpeechCue]
 
   enum CodingKeys: String, CodingKey {
     case audioURL
@@ -148,6 +175,7 @@ struct RadioSpeechAudio: Codable, Hashable {
     case voice
     case model
     case status
+    case cues
   }
 
   init(
@@ -157,7 +185,8 @@ struct RadioSpeechAudio: Codable, Hashable {
     cacheKey: String,
     voice: String,
     model: String,
-    status: String = "unavailable"
+    status: String = "unavailable",
+    cues: [RadioSpeechCue] = []
   ) {
     self.audioURL = audioURL
     self.mimeType = mimeType
@@ -166,6 +195,7 @@ struct RadioSpeechAudio: Codable, Hashable {
     self.voice = voice
     self.model = model
     self.status = status
+    self.cues = cues
   }
 
   init(from decoder: Decoder) throws {
@@ -178,6 +208,7 @@ struct RadioSpeechAudio: Codable, Hashable {
     voice = try container.decode(String.self, forKey: .voice)
     model = try container.decode(String.self, forKey: .model)
     status = try container.decodeIfPresent(String.self, forKey: .status) ?? "unavailable"
+    cues = try container.decodeIfPresent([RadioSpeechCue].self, forKey: .cues) ?? []
   }
 
   func encode(to encoder: Encoder) throws {
@@ -189,6 +220,7 @@ struct RadioSpeechAudio: Codable, Hashable {
     try container.encode(voice, forKey: .voice)
     try container.encode(model, forKey: .model)
     try container.encode(status, forKey: .status)
+    try container.encode(cues, forKey: .cues)
   }
 }
 
@@ -207,6 +239,10 @@ struct RadioSpeechPlaybackSegment: Identifiable, Hashable {
   var playableAudioURL: URL? {
     guard audio?.status == "ready" else { return nil }
     return audio?.audioURL
+  }
+
+  var timedCues: [RadioSpeechCue] {
+    audio?.cues ?? []
   }
 }
 

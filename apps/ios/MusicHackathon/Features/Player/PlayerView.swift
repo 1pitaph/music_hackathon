@@ -5,7 +5,6 @@ struct PlayerView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(PlaybackController.self) private var playbackController
   @Environment(RadioStationController.self) private var radioStation
-  @Environment(ImageAssetStore.self) private var imageAssetStore
   @Environment(ArtworkAnalysisStore.self) private var analysisStore
 
   let showsPresentationHandle: Bool
@@ -115,9 +114,7 @@ struct PlayerView: View {
 
   private func artworkStage(size: CGSize) -> some View {
     PlayerArtworkStage(
-      artworkResolution: playerArtworkResolution,
-      fallbackSeed: fallbackArtworkSeed,
-      accentColor: accentColor
+      artworkResolution: playerArtworkResolution
     )
     .frame(width: size.width, height: size.height)
   }
@@ -274,48 +271,16 @@ struct PlayerView: View {
   }
 
   private var playerArtworkResolution: ArtworkResolution {
-    let stationID = radioStation.station?.id ?? radioStation.stationTitle
-    let hasRemoteArtwork = artworkURLs.compactMap { $0 }.isEmpty == false
-    return ArtworkResolution(
-      overrideSource: hasRemoteArtwork
-        ? nil
-        : (radioStation.station.flatMap { imageAssetStore.coverSource(for: $0.id) } ?? imageAssetStore.profileAvatarSource),
-      remoteURLs: artworkURLs,
-      bundledFallback: BundledCoverCatalog.fallbackSource(
-        forID: stationID,
-        title: radioStation.stationTitle,
-        genre: nil
-      ),
-      fallbackSeed: fallbackArtworkSeed,
-      fallbackTitle: playbackTitle,
-      fallbackColorHex: "#D9523A"
-    )
+    ArtworkResolution(remoteURLs: artworkURLs)
   }
 
   private var activeArtworkAnalysis: ArtworkAnalysisResult? {
-    if let overrideSource = playerArtworkResolution.overrideSource,
-       let analysis = analysisStore.analysis(for: overrideSource.id) {
-      return analysis
-    }
-
     if let remoteURL = artworkURLs.compactMap({ $0 }).first,
        let analysis = analysisStore.analysis(for: "remote:\(remoteURL.absoluteString)") {
       return analysis
     }
 
-    if let bundledFallback = playerArtworkResolution.bundledFallback,
-       let analysis = analysisStore.analysis(for: bundledFallback.id) {
-      return analysis
-    }
-
     return nil
-  }
-
-  private var fallbackArtworkSeed: String {
-    playbackController.currentTrack?.title
-      ?? playbackController.currentSpeech?.id
-      ?? radioStation.station?.id
-      ?? radioStation.stationTitle
   }
 
   private var playbackTitle: String {
@@ -468,8 +433,6 @@ private struct PlayerBackgroundSurface: View {
 
 private struct PlayerArtworkStage: View {
   let artworkResolution: ArtworkResolution
-  let fallbackSeed: String
-  let accentColor: Color
 
   var body: some View {
     GeometryReader { proxy in
@@ -515,24 +478,7 @@ private struct PlayerArtworkStage: View {
   }
 
   private var fallbackArtwork: some View {
-    ZStack {
-      LinearGradient(
-        colors: [
-          accentColor.opacity(0.9),
-          Color(hex: "#5B3822"),
-          Color(hex: "#16100D")
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-      )
-
-      MarbleAvatarView(
-        seed: fallbackSeed,
-        size: 280,
-        palette: ["#F6A46D", "#D9523A", "#7BC9C8", "#2B1C2A"],
-        accessibilityLabel: nil
-      )
-    }
+    Color.clear
   }
 }
 
@@ -970,14 +916,7 @@ private struct QueueTrackRow: View {
   var body: some View {
     HStack(spacing: 13) {
       RemoteArtworkView(urls: [track.artworkURL], showsLoadingIndicator: false) {
-        LinearGradient(
-          colors: [
-            Color(hex: "#D9523A").opacity(0.9),
-            Color(hex: "#2A1D19")
-          ],
-          startPoint: .topLeading,
-          endPoint: .bottomTrailing
-        )
+        Color.clear
       }
       .frame(width: 50, height: 50)
       .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))

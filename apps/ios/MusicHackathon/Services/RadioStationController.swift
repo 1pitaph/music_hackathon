@@ -1,6 +1,38 @@
 import Foundation
 import Observation
 
+private enum RadioStationArtworkError: LocalizedError {
+  case emptyQueue
+
+  var errorDescription: String? {
+    "No tracks with real Apple Music artwork are ready from this station."
+  }
+}
+
+private enum RadioTransitionPlaybackStyle {
+  case standalone
+  case overlay
+}
+
+private struct PendingRadioTransition {
+  let fromItem: RadioQueueItem
+  let toItem: RadioQueueItem
+  let speech: RadioSpeechPlaybackSegment
+  let reason: RadioAdvanceReason
+  var didStartNextTrack = false
+}
+
+private extension RadioTransitionPlaybackStyle {
+  var diagnosticValue: String {
+    switch self {
+    case .standalone:
+      "standalone"
+    case .overlay:
+      "overlay"
+    }
+  }
+}
+
 @MainActor
 @Observable
 final class RadioStationController {
@@ -24,6 +56,7 @@ final class RadioStationController {
   @ObservationIgnored private let playbackController: any RadioPlaybackControlling
   @ObservationIgnored private let stationClient: any RadioStationFetching
   @ObservationIgnored private let memoryStore: any RadioMemoryStoring
+  @ObservationIgnored private let artworkEnricher: any TrackArtworkEnriching
   @ObservationIgnored private let diagnostics: DiagnosticsStore?
   @ObservationIgnored private let hostSpeakerIDProvider: () -> String?
   @ObservationIgnored private let libraryTrackProvider: @MainActor () -> [Track]
@@ -34,11 +67,13 @@ final class RadioStationController {
   @ObservationIgnored private var stationGenerationID = UUID()
   @ObservationIgnored private var extensionTask: Task<Bool, Never>?
   @ObservationIgnored private var extensionTaskID: UUID?
+  @ObservationIgnored private var pendingTransition: PendingRadioTransition?
 
   init(
     playbackController: any RadioPlaybackControlling,
     stationClient: any RadioStationFetching = RadioStationClient(),
     memoryStore: any RadioMemoryStoring = RadioMemoryStore(),
+    artworkEnricher: any TrackArtworkEnriching = AppleMusicCatalogService(),
     diagnostics: DiagnosticsStore? = nil,
     hostSpeakerIDProvider: @escaping () -> String? = { RadioHostVoiceSettings.selectedSpeakerID() },
     libraryTrackProvider: @escaping @MainActor () -> [Track] = { [] }
@@ -46,6 +81,7 @@ final class RadioStationController {
     self.playbackController = playbackController
     self.stationClient = stationClient
     self.memoryStore = memoryStore
+    self.artworkEnricher = artworkEnricher
     self.diagnostics = diagnostics
     self.hostSpeakerIDProvider = hostSpeakerIDProvider
     self.libraryTrackProvider = libraryTrackProvider
@@ -58,6 +94,16 @@ final class RadioStationController {
     playbackController.onPlaybackFailed = { [weak self] context in
       Task { @MainActor in
         await self?.handlePlaybackFailed(context)
+      }
+    }
+    playbackController.onTrackTransitionWindowReached = { [weak self] in
+      Task { @MainActor in
+        await self?.handleTrackTransitionWindowReached()
+      }
+    }
+    playbackController.onSpeechAdvancePointReached = { [weak self] in
+      Task { @MainActor in
+        await self?.handleSpeechAdvancePointReached()
       }
     }
   }
@@ -131,26 +177,38 @@ final class RadioStationController {
           "speech_id_hash": DiagnosticsRedactor.hash(intro.id)
         ]
       )
-      playbackController.playSpeech(intro.playbackSegment)
+      playbackController.playSpeech(intro.playbackSegment, mode: .standalone)
       return
     }
 
     if reason == .automaticCompletion, let finishedItem = currentItem {
-      await recordMemoryEvent(type: "complete", track: finishedItem.track)
-      history.append(finishedItem)
-      currentItem = nil
-
-      if playTransitionIfAvailable(from: finishedItem, reason: reason) {
+      if await playTransitionIfAvailable(
+        from: finishedItem,
+        reason: reason,
+        style: .standalone,
+        memoryEventType: "complete"
+      ) {
         return
       }
+      await retireCurrentItem(finishedItem, memoryEventType: "complete")
     } else if reason == .manual, let skippedItem = currentItem {
-      await recordMemoryEvent(type: "skip", track: skippedItem.track)
-      history.append(skippedItem)
-      currentItem = nil
-
-      if playTransitionIfAvailable(from: skippedItem, reason: reason) {
+      if await playTransitionIfAvailable(
+        from: skippedItem,
+        reason: reason,
+        style: .overlay,
+        memoryEventType: "skip"
+      ) {
         return
       }
+      if await playTransitionIfAvailable(
+        from: skippedItem,
+        reason: reason,
+        style: .standalone,
+        memoryEventType: "skip"
+      ) {
+        return
+      }
+      await retireCurrentItem(skippedItem, memoryEventType: "skip")
     }
 
     if queue.isEmpty, let extensionTask {
@@ -200,7 +258,7 @@ final class RadioStationController {
         DiagnosticsPayload.track(nextItem.track)
       )
     )
-    playbackController.play(track: nextItem.track)
+    playbackController.play(track: nextItem.track, policy: .mixablePreferred, preservesSpeech: false)
     prefetchStationExtensionIfNeeded()
   }
 
@@ -224,7 +282,7 @@ final class RadioStationController {
       try? await memoryStore.record(RadioMemoryEvent(type: "replay", track: previousItem.track))
       await refreshMemoryStatus()
     }
-    playbackController.play(track: previousItem.track)
+    playbackController.play(track: previousItem.track, policy: .mixablePreferred, preservesSpeech: false)
   }
 
   func refreshStation() async {
@@ -234,6 +292,7 @@ final class RadioStationController {
 
   func loadLocalStation(_ station: RadioStation, playImmediately: Bool = false) async {
     beginNewStationSession()
+    let station = await stationWithRealArtwork(station)
     isLoadingStation = false
     errorMessage = nil
     extensionErrorMessage = nil
@@ -244,6 +303,9 @@ final class RadioStationController {
     history = []
     queue = station.items
     hasPlayedStationIntro = false
+    if station.items.isEmpty {
+      errorMessage = RadioStationArtworkError.emptyQueue.errorDescription
+    }
     diagnostics?.record(
       .notice,
       chain: .radioStation,
@@ -257,7 +319,7 @@ final class RadioStationController {
     )
     await recordMemoryEvent(type: "station_generate", track: station.items.first?.track)
 
-    if playImmediately {
+    if playImmediately, !station.items.isEmpty {
       await playNext(reason: .stationStart)
     } else {
       playbackController.stop()
@@ -292,7 +354,10 @@ final class RadioStationController {
         hostSpeakerID: hostSpeakerIDProvider()
       )
       let result = try await stationClient.generateStation(context: generationContext)
-      let station = result.station
+      let station = await stationWithRealArtwork(result.station)
+      guard !station.items.isEmpty else {
+        throw RadioStationArtworkError.emptyQueue
+      }
       stationSessionID = result.stationSessionID
       continuationCursor = result.continuationCursor
       self.station = station
@@ -493,9 +558,10 @@ final class RadioStationController {
         return false
       }
 
+      let nextStation = await stationWithRealArtwork(result.station)
       stationSessionID = result.stationSessionID ?? stationSessionID
       continuationCursor = result.continuationCursor ?? continuationCursor
-      let newItems = appendStationExtension(result.station)
+      let newItems = appendStationExtension(nextStation)
       isExtendingStation = false
 
       guard let firstNewItem = newItems.first else {
@@ -561,6 +627,26 @@ final class RadioStationController {
     return newItems
   }
 
+  private func stationWithRealArtwork(_ station: RadioStation) async -> RadioStation {
+    let items = await queueItemsWithRealArtwork(station.items)
+    return RadioStation(
+      id: station.id,
+      title: station.title,
+      subtitle: station.subtitle,
+      items: items,
+      speech: station.speech
+    )
+  }
+
+  private func queueItemsWithRealArtwork(_ items: [RadioQueueItem]) async -> [RadioQueueItem] {
+    guard !items.isEmpty else { return [] }
+    let enrichedTracks = await artworkEnricher.enrichArtwork(items.map(\.track))
+    return zip(items, enrichedTracks).compactMap { item, track in
+      guard track.hasRealArtwork else { return nil }
+      return item.replacingTrack(track)
+    }
+  }
+
   private func uniqueExtensionItems(from items: [RadioQueueItem]) -> [RadioQueueItem] {
     var seenTrackKeys = knownStationTrackKeys()
     var uniqueItems: [RadioQueueItem] = []
@@ -623,6 +709,7 @@ final class RadioStationController {
     continuationCursor = nil
     isExtendingStation = false
     extensionErrorMessage = nil
+    pendingTransition = nil
   }
 
   private func stationSeeds() -> [Track] {
@@ -682,11 +769,85 @@ final class RadioStationController {
     await refreshMemoryStatus()
   }
 
+  private func retireCurrentItem(_ item: RadioQueueItem, memoryEventType: String) async {
+    await recordMemoryEvent(type: memoryEventType, track: item.track)
+    history.append(item)
+    if currentItem?.id == item.id {
+      currentItem = nil
+    }
+  }
+
+  private func handleTrackTransitionWindowReached() async {
+    guard let currentItem else { return }
+    _ = await playTransitionIfAvailable(
+      from: currentItem,
+      reason: .automaticCompletion,
+      style: .overlay,
+      memoryEventType: "complete"
+    )
+  }
+
+  private func handleSpeechAdvancePointReached() async {
+    await startPendingTransitionNextTrackIfNeeded(preservesSpeech: true)
+  }
+
+  private func startPendingTransitionNextTrackIfNeeded(preservesSpeech: Bool) async {
+    guard var transition = pendingTransition else { return }
+    guard !transition.didStartNextTrack else { return }
+    guard let nextItem = removePendingTransitionNextItem(transition.toItem) else {
+      pendingTransition = nil
+      return
+    }
+
+    transition.didStartNextTrack = true
+    pendingTransition = transition
+    currentItem = nextItem
+    errorMessage = nil
+    await recordMemoryEvent(type: "play", track: nextItem.track)
+    diagnostics?.record(
+      .notice,
+      chain: .radioStation,
+      event: "transition_next_track_selected",
+      message: "串词进入推进点，开始播放下一首曲目。",
+      payload: DiagnosticsPayload.merge(
+        [
+          "advance_reason": transition.reason.diagnosticValue,
+          "queue_count_after_pop": String(queue.count),
+          "item_id_hash": DiagnosticsRedactor.hash(nextItem.id),
+          "preserves_speech": DiagnosticsPayload.bool(preservesSpeech)
+        ],
+        DiagnosticsPayload.track(nextItem.track)
+      )
+    )
+    playbackController.play(track: nextItem.track, policy: .mixablePreferred, preservesSpeech: preservesSpeech)
+    prefetchStationExtensionIfNeeded()
+  }
+
+  private func removePendingTransitionNextItem(_ expectedItem: RadioQueueItem) -> RadioQueueItem? {
+    if let firstItem = queue.first, idsMatch(expectedItem.id, firstItem) {
+      return queue.removeFirst()
+    }
+    guard let index = queue.firstIndex(where: { item in
+      item.id == expectedItem.id || item.track.radioIdentity == expectedItem.track.radioIdentity
+    }) else {
+      return nil
+    }
+    return queue.remove(at: index)
+  }
+
   private func handlePlaybackFinished(_ kind: PlaybackCompletionKind) async {
     switch kind {
     case .track:
+      if pendingTransition != nil {
+        return
+      }
       await playNext(reason: .automaticCompletion)
     case .speech:
+      if pendingTransition != nil {
+        await startPendingTransitionNextTrackIfNeeded(preservesSpeech: false)
+        pendingTransition = nil
+        return
+      }
       await playNext(reason: .speechCompletion)
     }
   }
@@ -737,14 +898,27 @@ final class RadioStationController {
 
   private func playTransitionIfAvailable(
     from finishedItem: RadioQueueItem,
-    reason: RadioAdvanceReason
-  ) -> Bool {
+    reason: RadioAdvanceReason,
+    style: RadioTransitionPlaybackStyle,
+    memoryEventType: String
+  ) async -> Bool {
     guard let nextItem = queue.first,
           let transition = transitionCopy(from: finishedItem, to: nextItem) else {
       return false
     }
+    if style == .overlay, !canUseOverlayTransition(from: finishedItem, to: nextItem) {
+      return false
+    }
 
+    await retireCurrentItem(finishedItem, memoryEventType: memoryEventType)
     prefetchStationExtensionIfNeeded()
+    let speech = transition.playbackSegment
+    pendingTransition = PendingRadioTransition(
+      fromItem: finishedItem,
+      toItem: nextItem,
+      speech: speech,
+      reason: reason
+    )
     diagnostics?.record(
       .notice,
       chain: .playbackSpeech,
@@ -754,11 +928,16 @@ final class RadioStationController {
         "advance_reason": reason.diagnosticValue,
         "from_item_hash": DiagnosticsRedactor.hash(finishedItem.id),
         "to_item_hash": DiagnosticsRedactor.hash(nextItem.id),
-        "speech_id_hash": DiagnosticsRedactor.hash(transition.id)
+        "speech_id_hash": DiagnosticsRedactor.hash(transition.id),
+        "transition_style": style.diagnosticValue
       ]
     )
-    playbackController.playSpeech(transition.playbackSegment)
+    playbackController.playSpeech(speech, mode: style == .overlay ? .transitionOverlay : .standalone)
     return true
+  }
+
+  private func canUseOverlayTransition(from finishedItem: RadioQueueItem, to nextItem: RadioQueueItem) -> Bool {
+    finishedItem.track.previewURL != nil && nextItem.track.previewURL != nil
   }
 
   private func idsMatch(_ id: String, _ item: RadioQueueItem) -> Bool {

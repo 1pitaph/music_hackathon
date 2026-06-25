@@ -103,7 +103,7 @@ extension DiscoverStation {
     libraryTracks: [Track]
   ) -> [DiscoverStation] {
     let playlistStations = playlists.enumerated().compactMap { index, playlist -> DiscoverStation? in
-      let playableTracks = playlist.tracks.filter(\.isPlayable)
+      let playableTracks = playlist.tracks.filter { $0.isPlayable && $0.hasRealArtwork }
       guard !playableTracks.isEmpty else { return nil }
 
       return make(
@@ -125,10 +125,10 @@ extension DiscoverStation {
       return playlistStations
     }
 
-    let playableTracks = libraryTracks.filter(\.isPlayable)
+    let playableTracks = libraryTracks.filter { $0.isPlayable && $0.hasRealArtwork }
     guard !playableTracks.isEmpty else { return [] }
 
-    return playableTracks.chunked(maxSize: 6).enumerated().map { index, tracks in
+    return playableTracks.chunked(maxSize: 6).enumerated().compactMap { index, tracks in
       make(
         id: "apple-music-library-\(index)",
         title: index == 0 ? "我的 Apple Music" : "我的 Apple Music \(index + 1)",
@@ -227,7 +227,7 @@ extension DiscoverStation {
         tracks: tracks,
         startIndex: 10
       )
-    ]
+    ].compactMap { $0 }
   }()
 
   private static func make(
@@ -242,9 +242,13 @@ extension DiscoverStation {
     artworkURL: URL?,
     tracks: [Track],
     startIndex: Int
-  ) -> DiscoverStation {
-    let playableTracks = tracks.filter(\.isPlayable)
-    let sourceTracks = playableTracks.isEmpty ? MockCatalog.featuredTracks : playableTracks
+  ) -> DiscoverStation? {
+    let playableTracks = tracks.filter { $0.isPlayable && $0.hasRealArtwork }
+    let fallbackTracks = MockCatalog.featuredTracks.filter { $0.isPlayable && $0.hasRealArtwork }
+    let sourceTracks = playableTracks.isEmpty ? fallbackTracks : playableTracks
+    let realArtworkURL = ArtworkURLCandidates.normalized(artworkURL) ?? sourceTracks.first?.artworkURL
+    guard !sourceTracks.isEmpty, realArtworkURL != nil else { return nil }
+
     let items = (0..<min(5, sourceTracks.count)).map { offset in
       let track = sourceTracks[(startIndex + offset) % sourceTracks.count]
       return RadioQueueItem(
@@ -266,7 +270,7 @@ extension DiscoverStation {
       favorites: favorites,
       items: items,
       colorHex: colorHex,
-      artworkURL: artworkURL,
+      artworkURL: realArtworkURL,
       shareURL: URL(string: "https://airset.example/stations/\(id)")!
     )
   }

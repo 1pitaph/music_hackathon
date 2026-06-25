@@ -23,6 +23,46 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertNil(controller.errorMessage)
   }
 
+  func testLoadCurrentStationEnrichesMissingArtworkAndFiltersFailures() async {
+    let station = makeStation(items: [
+      makeQueueItem(title: "Recovered", appleMusicID: "recovered", includeArtwork: false),
+      makeQueueItem(title: "Dropped", appleMusicID: "dropped", includeArtwork: false)
+    ])
+    let controller = RadioStationController(
+      playbackController: MockPlaybackController(),
+      stationClient: MockStationClient(result: .success(station)),
+      memoryStore: MockMemoryStore(),
+      artworkEnricher: FakeArtworkEnricher(
+        artworkURLsByTitle: ["Recovered": URL(string: "https://example.com/recovered.jpg")!]
+      )
+    )
+
+    await controller.loadCurrentStation()
+
+    XCTAssertEqual(controller.queue.map(\.track.title), ["Recovered"])
+    XCTAssertEqual(controller.queue.first?.track.artworkURL?.absoluteString, "https://example.com/recovered.jpg")
+    XCTAssertNil(controller.errorMessage)
+  }
+
+  func testLoadCurrentStationFailsWhenArtworkFilteringEmptiesQueue() async {
+    let station = makeStation(items: [
+      makeQueueItem(title: "No Cover", appleMusicID: "no-cover", includeArtwork: false)
+    ])
+    let controller = RadioStationController(
+      playbackController: MockPlaybackController(),
+      stationClient: MockStationClient(result: .success(station)),
+      memoryStore: MockMemoryStore(),
+      artworkEnricher: FakeArtworkEnricher(artworkURLsByTitle: [:])
+    )
+
+    await controller.loadCurrentStation()
+
+    XCTAssertNil(controller.station)
+    XCTAssertTrue(controller.queue.isEmpty)
+    XCTAssertEqual(controller.stationIntro, "The backend station is not available right now.")
+    XCTAssertEqual(controller.errorMessage, "No tracks with real Apple Music artwork are ready from this station.")
+  }
+
   func testLoadCurrentStationSendsSelectedHostSpeaker() async {
     let station = makeStation(items: [
       makeQueueItem(title: "One", appleMusicID: "one")
@@ -269,6 +309,135 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertTrue(controller.queue.isEmpty)
   }
 
+  func testTransitionWindowOverlaysSpeechAndStartsNextTrackAtAdvancePoint() async {
+    let station = makeStation(
+      items: [
+        makeQueueItem(title: "One", appleMusicID: "one", includePreview: true),
+        makeQueueItem(title: "Two", appleMusicID: "two", includePreview: true)
+      ],
+      speech: RadioSpeech(
+        betweenTracks: [
+          RadioTransitionCopy(
+            id: "transition-1",
+            fromItemId: "one",
+            toItemId: "two",
+            text: "Next up is Two.",
+            displayText: "Next up is Two."
+          )
+        ]
+      )
+    )
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: MockStationClient(result: .success(station)),
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    XCTAssertEqual(playbackController.currentTrack?.title, "One")
+
+    playbackController.triggerTransitionWindow()
+    await waitForSpeech(playbackController, text: "Next up is Two.")
+
+    XCTAssertNil(controller.currentItem)
+    XCTAssertEqual(controller.queue.map(\.track.title), ["Two"])
+    XCTAssertEqual(playbackController.lastSpeechMode, .transitionOverlay)
+
+    playbackController.triggerSpeechAdvancePoint()
+    await waitForPlayback(playbackController, title: "Two")
+
+    XCTAssertEqual(controller.currentItem?.track.title, "Two")
+    XCTAssertTrue(controller.queue.isEmpty)
+    XCTAssertEqual(playbackController.lastTrackPolicy, .mixablePreferred)
+    XCTAssertTrue(playbackController.lastPreservesSpeech)
+
+    playbackController.finish(.speech)
+
+    XCTAssertEqual(controller.currentItem?.track.title, "Two")
+    XCTAssertNil(playbackController.currentSpeech)
+  }
+
+  func testTransitionSpeechCompletionBeforeAdvancePointStartsPendingNextTrack() async {
+    let station = makeStation(
+      items: [
+        makeQueueItem(title: "One", appleMusicID: "one", includePreview: true),
+        makeQueueItem(title: "Two", appleMusicID: "two", includePreview: true)
+      ],
+      speech: RadioSpeech(
+        betweenTracks: [
+          RadioTransitionCopy(
+            id: "transition-1",
+            fromItemId: "one",
+            toItemId: "two",
+            text: "Next up is Two.",
+            displayText: "Next up is Two."
+          )
+        ]
+      )
+    )
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: MockStationClient(result: .success(station)),
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    playbackController.triggerTransitionWindow()
+    await waitForSpeech(playbackController, text: "Next up is Two.")
+
+    playbackController.finish(.speech)
+    await waitForPlayback(playbackController, title: "Two")
+
+    XCTAssertEqual(controller.currentItem?.track.title, "Two")
+    XCTAssertFalse(playbackController.lastPreservesSpeech)
+  }
+
+  func testAppleMusicOnlyTransitionKeepsSerialSpeechFlow() async {
+    let station = makeStation(
+      items: [
+        makeQueueItem(title: "One", appleMusicID: "one"),
+        makeQueueItem(title: "Two", appleMusicID: "two")
+      ],
+      speech: RadioSpeech(
+        betweenTracks: [
+          RadioTransitionCopy(
+            id: "transition-1",
+            fromItemId: "one",
+            toItemId: "two",
+            text: "Next up is Two.",
+            displayText: "Next up is Two."
+          )
+        ]
+      )
+    )
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: MockStationClient(result: .success(station)),
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    playbackController.triggerTransitionWindow()
+
+    XCTAssertEqual(controller.currentItem?.track.title, "One")
+    XCTAssertNil(playbackController.currentSpeech)
+
+    playbackController.finish(.track)
+    await waitForSpeech(playbackController, text: "Next up is Two.")
+
+    XCTAssertEqual(playbackController.lastSpeechMode, .standalone)
+    XCTAssertNil(controller.currentItem)
+    XCTAssertEqual(controller.queue.map(\.track.title), ["Two"])
+
+    playbackController.finish(.speech)
+    await waitForPlayback(playbackController, title: "Two")
+
+    XCTAssertEqual(controller.currentItem?.track.title, "Two")
+  }
+
   func testAutomaticCompletionUsesHandoffTextWhenSpeechIsMissing() async {
     let station = makeStation(
       items: [
@@ -393,6 +562,49 @@ final class RadioStationControllerTests: XCTestCase {
 
     XCTAssertEqual(controller.currentItem?.track.title, "Two")
     XCTAssertTrue(controller.queue.isEmpty)
+    let eventTypes = await memoryStore.eventTypes()
+    XCTAssertTrue(eventTypes.contains("skip"))
+  }
+
+  func testManualNextUsesOverlayTransitionWhenTracksAreMixable() async {
+    let memoryStore = MockMemoryStore()
+    let station = makeStation(
+      items: [
+        makeQueueItem(title: "One", appleMusicID: "one", includePreview: true),
+        makeQueueItem(title: "Two", appleMusicID: "two", includePreview: true)
+      ],
+      speech: RadioSpeech(
+        betweenTracks: [
+          RadioTransitionCopy(
+            id: "transition-1",
+            fromItemId: "one",
+            toItemId: "two",
+            text: "Next up is Two.",
+            displayText: "Next up is Two."
+          )
+        ]
+      )
+    )
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: MockStationClient(result: .success(station)),
+      memoryStore: memoryStore
+    )
+
+    await controller.startStation()
+    await controller.playNext(reason: .manual)
+    await waitForSpeech(playbackController, text: "Next up is Two.")
+
+    XCTAssertEqual(playbackController.lastSpeechMode, .transitionOverlay)
+    XCTAssertNil(controller.currentItem)
+    XCTAssertEqual(controller.queue.map(\.track.title), ["Two"])
+
+    playbackController.triggerSpeechAdvancePoint()
+    await waitForPlayback(playbackController, title: "Two")
+
+    XCTAssertEqual(controller.currentItem?.track.title, "Two")
+    XCTAssertTrue(playbackController.lastPreservesSpeech)
     let eventTypes = await memoryStore.eventTypes()
     XCTAssertTrue(eventTypes.contains("skip"))
   }
@@ -625,17 +837,33 @@ final class RadioStationControllerTests: XCTestCase {
     )
   }
 
-  private func makeQueueItem(title: String, appleMusicID: String, handoffText: String? = nil) -> RadioQueueItem {
+  private func makeQueueItem(
+    title: String,
+    appleMusicID: String,
+    handoffText: String? = nil,
+    includeArtwork: Bool = true,
+    includePreview: Bool = false
+  ) -> RadioQueueItem {
     RadioQueueItem(
       id: appleMusicID,
-      track: makeTrack(title: title, appleMusicID: appleMusicID),
+      track: makeTrack(
+        title: title,
+        appleMusicID: appleMusicID,
+        includeArtwork: includeArtwork,
+        includePreview: includePreview
+      ),
       sourceTitle: "Backend",
       reason: "Programmed by backend.",
       handoffText: handoffText
     )
   }
 
-  private func makeTrack(title: String, appleMusicID: String) -> Track {
+  private func makeTrack(
+    title: String,
+    appleMusicID: String,
+    includeArtwork: Bool = true,
+    includePreview: Bool = false
+  ) -> Track {
     Track(
       title: title,
       artist: "Artist",
@@ -643,6 +871,8 @@ final class RadioStationControllerTests: XCTestCase {
       mood: "Radio",
       duration: 210,
       artworkSystemName: "music.note",
+      artworkURL: includeArtwork ? URL(string: "https://example.com/\(appleMusicID).jpg") : nil,
+      previewURL: includePreview ? URL(string: "https://example.com/\(appleMusicID).m4a") : nil,
       appleMusicID: appleMusicID
     )
   }
@@ -702,16 +932,34 @@ final class RadioStationControllerTests: XCTestCase {
 private final class MockPlaybackController: RadioPlaybackControlling {
   var onPlaybackFinished: ((PlaybackCompletionKind) -> Void)?
   var onPlaybackFailed: ((PlaybackFailureContext) -> Void)?
+  var onTrackTransitionWindowReached: (() -> Void)?
+  var onSpeechAdvancePointReached: (() -> Void)?
   var currentTrack: Track?
   var currentSpeech: RadioSpeechPlaybackSegment?
+  var lastTrackPolicy: RadioTrackPlaybackPolicy?
+  var lastPreservesSpeech = false
+  var lastSpeechMode: RadioSpeechPlaybackMode?
 
   func play(track: Track) {
+    play(track: track, policy: .fullSongPreferred, preservesSpeech: false)
+  }
+
+  func play(track: Track, policy: RadioTrackPlaybackPolicy, preservesSpeech: Bool) {
     currentTrack = track
-    currentSpeech = nil
+    lastTrackPolicy = policy
+    lastPreservesSpeech = preservesSpeech
+    if !preservesSpeech {
+      currentSpeech = nil
+    }
   }
 
   func playSpeech(_ speech: RadioSpeechPlaybackSegment) {
+    playSpeech(speech, mode: .standalone)
+  }
+
+  func playSpeech(_ speech: RadioSpeechPlaybackSegment, mode: RadioSpeechPlaybackMode) {
     currentSpeech = speech
+    lastSpeechMode = mode
   }
 
   func stop() {
@@ -720,7 +968,18 @@ private final class MockPlaybackController: RadioPlaybackControlling {
   }
 
   func finish(_ kind: PlaybackCompletionKind) {
+    if kind == .speech {
+      currentSpeech = nil
+    }
     onPlaybackFinished?(kind)
+  }
+
+  func triggerTransitionWindow() {
+    onTrackTransitionWindowReached?()
+  }
+
+  func triggerSpeechAdvancePoint() {
+    onSpeechAdvancePointReached?()
   }
 
   func failCurrent(phase: String) {
@@ -740,6 +999,19 @@ private struct MockStationClient: RadioStationFetching {
 
   func fetchCurrentStation() async throws -> RadioStation {
     try result.get()
+  }
+}
+
+private struct FakeArtworkEnricher: TrackArtworkEnriching {
+  let artworkURLsByTitle: [String: URL]
+
+  func enrichArtwork(_ tracks: [Track]) async -> [Track] {
+    tracks.map { track in
+      guard !track.hasRealArtwork, let artworkURL = artworkURLsByTitle[track.title] else {
+        return track
+      }
+      return track.replacingArtworkURL(artworkURL)
+    }
   }
 }
 
@@ -766,6 +1038,29 @@ private final class SequencedStationClient: RadioStationFetching {
     }
 
     return try results.removeFirst().get()
+  }
+}
+
+private extension Track {
+  func replacingArtworkURL(_ artworkURL: URL?) -> Track {
+    Track(
+      id: id,
+      title: title,
+      artist: artist,
+      album: album,
+      mood: mood,
+      duration: duration,
+      artworkSystemName: artworkSystemName,
+      artworkURL: artworkURL,
+      previewURL: previewURL,
+      appleMusicID: appleMusicID,
+      isExplicit: isExplicit,
+      playlistName: playlistName,
+      source: source,
+      sourceLane: sourceLane,
+      sourceScore: sourceScore,
+      reasonSignals: reasonSignals
+    )
   }
 }
 

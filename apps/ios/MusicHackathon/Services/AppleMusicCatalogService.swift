@@ -20,7 +20,18 @@ struct AppleMusicCatalogResolution {
   let idError: Error?
 }
 
-struct AppleMusicCatalogService {
+protocol TrackArtworkEnriching {
+  func enrichArtwork(_ tracks: [Track]) async -> [Track]
+}
+
+extension TrackArtworkEnriching {
+  func tracksWithRealArtwork(_ tracks: [Track]) async -> [Track] {
+    let enrichedTracks = await enrichArtwork(tracks)
+    return enrichedTracks.filter(\.hasRealArtwork)
+  }
+}
+
+struct AppleMusicCatalogService: TrackArtworkEnriching {
   func featuredTracks() async throws -> [Track] {
     try await tracks(matching: "WRABEL up up above", limit: 6)
   }
@@ -34,6 +45,35 @@ struct AppleMusicCatalogService {
           }
 
           return (index, Self.track(from: song, fallback: track))
+        }
+      }
+
+      var enrichedTracks = tracks
+      for await (index, track) in group {
+        enrichedTracks[index] = track
+      }
+      return enrichedTracks
+    }
+  }
+
+  func tracksWithRealArtwork(_ tracks: [Track]) async -> [Track] {
+    let enrichedTracks = await enrichArtwork(tracks)
+    return enrichedTracks.filter(\.hasRealArtwork)
+  }
+
+  func enrichArtwork(_ tracks: [Track]) async -> [Track] {
+    await withTaskGroup(of: (Int, Track).self) { group in
+      for (index, track) in tracks.enumerated() {
+        group.addTask {
+          guard !track.hasRealArtwork else {
+            return (index, track)
+          }
+
+          guard let resolution = try? await resolveSong(for: track) else {
+            return (index, track)
+          }
+
+          return (index, Self.track(from: resolution.song, fallback: track))
         }
       }
 
@@ -273,14 +313,19 @@ extension AppleMusicCatalogService: AppleMusicLibraryProviding {
     var playlistTracks: [Track] = []
 
     for playlist in playlists {
-      let tracks = (try? await tracks(in: playlist, playlistName: playlist.name, pageSize: pageSize)) ?? []
+      let rawTracks = (try? await tracks(in: playlist, playlistName: playlist.name, pageSize: pageSize)) ?? []
+      let tracks = await tracksWithRealArtwork(rawTracks)
+      let artworkURL = Self.normalizedArtworkURL(playlist.artwork?.url(width: 512, height: 512))
+        ?? tracks.first?.artworkURL
+      guard !tracks.isEmpty, artworkURL != nil else { continue }
+
       playlistTracks.append(contentsOf: tracks)
       playlistSnapshots.append(
         AppleMusicPlaylistSnapshot(
           id: playlist.id.rawValue,
           name: playlist.name,
           curatorName: playlist.curatorName,
-          artworkURL: Self.normalizedArtworkURL(playlist.artwork?.url(width: 512, height: 512)),
+          artworkURL: artworkURL,
           tracks: tracks
         )
       )
@@ -303,7 +348,7 @@ extension AppleMusicCatalogService: AppleMusicLibraryProviding {
 
     let response = try await request.response()
     let songs = try await allItems(from: response.items, pageSize: pageSize)
-    return uniqued(
+    let tracks = uniqued(
       songs.map {
         Self.track(
           from: $0,
@@ -313,6 +358,7 @@ extension AppleMusicCatalogService: AppleMusicLibraryProviding {
         )
       }
     )
+    return await tracksWithRealArtwork(tracks)
   }
 
   private func allItems<Item: MusicItem>(

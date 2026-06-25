@@ -39,6 +39,7 @@ struct RadioView: View {
 
           RadioSpeechSubtitleCard(
             speech: speechSubtitleSegment,
+            activeCue: playbackController.currentSpeechCue,
             isActive: playbackController.currentSpeech != nil,
             elapsedTimeText: playbackController.elapsedTimeText,
             isLoading: radioStation.isLoadingStation
@@ -220,8 +221,6 @@ private struct RadioHeaderCard: View {
 }
 
 private struct NowPlayingSetCard: View {
-  @Environment(ImageAssetStore.self) private var imageStore
-
   let track: Track
   let station: RadioStation?
   let currentItem: RadioQueueItem?
@@ -347,13 +346,7 @@ private struct NowPlayingSetCard: View {
 
   private var artwork: some View {
     ArtworkImageView(resolution: artworkResolution, showsLoadingIndicator: false) {
-      ZStack {
-        Color.black.opacity(0.08)
-
-        Image(systemName: track.artworkSystemName)
-          .font(.system(size: 22, weight: .bold))
-          .foregroundStyle(.black.opacity(0.34))
-      }
+      Color.clear
     }
     .frame(width: 66, height: 66)
     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -365,21 +358,7 @@ private struct NowPlayingSetCard: View {
   }
 
   private var artworkResolution: ArtworkResolution {
-    let stationID = station?.id ?? sourceText
-    let remoteURLs: [URL?] = [track.artworkURL]
-    let hasRemoteArtwork = remoteURLs.compactMap { $0 }.isEmpty == false
-    return ArtworkResolution(
-      overrideSource: hasRemoteArtwork ? nil : station.flatMap { imageStore.coverSource(for: $0.id) },
-      remoteURLs: remoteURLs,
-      bundledFallback: BundledCoverCatalog.fallbackSource(
-        forID: stationID,
-        title: station?.title ?? track.album,
-        genre: track.mood
-      ),
-      fallbackSeed: track.radioIdentity,
-      fallbackTitle: track.title,
-      fallbackColorHex: "#D9523A"
-    )
+    ArtworkResolution(remoteURLs: [track.artworkURL])
   }
 
   private var playButtonSystemImage: String {
@@ -414,7 +393,10 @@ private struct NowPlayingSetCard: View {
 }
 
 private struct RadioSpeechSubtitleCard: View {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   let speech: RadioSpeechPlaybackSegment?
+  let activeCue: RadioSpeechCue?
   let isActive: Bool
   let elapsedTimeText: String
   let isLoading: Bool
@@ -428,13 +410,16 @@ private struct RadioSpeechSubtitleCard: View {
         .minimumScaleFactor(0.76)
 
       Text(captionText)
+        .id(captionIdentity)
         .font(.system(size: 26, weight: .heavy, design: .rounded))
         .foregroundStyle(.black)
         .lineSpacing(3)
         .lineLimit(4)
         .truncationMode(.tail)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .transition(.opacity)
     }
+    .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: captionIdentity)
     .padding(.horizontal, 20)
     .padding(.vertical, 18)
     .frame(maxWidth: .infinity, minHeight: 132, alignment: .leading)
@@ -457,6 +442,7 @@ private struct RadioSpeechSubtitleCard: View {
     }
     .shadow(color: .black.opacity(0.12), radius: 18, y: 10)
     .accessibilityElement(children: .combine)
+    .accessibilityLabel("\(subtitleTitle), \(subtitleTimeText), \(captionText)")
   }
 
   private var subtitleTitle: String {
@@ -487,12 +473,43 @@ private struct RadioSpeechSubtitleCard: View {
         : "串词字幕会在电台开场或串场时显示。"
     }
 
-    let displayText = speech.displayText.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !displayText.isEmpty {
-      return displayText
+    if let cue = displayCue {
+      let displayText = cue.displayText.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !displayText.isEmpty {
+        return displayText
+      }
     }
 
-    return speech.text
+    let displayText = speech.displayText.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !displayText.isEmpty {
+      return Self.firstSentence(in: displayText)
+    }
+
+    return Self.firstSentence(in: speech.text)
+  }
+
+  private var captionIdentity: String {
+    if let speech, let displayCue {
+      return "\(speech.id)-\(displayCue.id)"
+    }
+    return "\(speech?.id ?? "empty")-\(captionText)"
+  }
+
+  private var displayCue: RadioSpeechCue? {
+    if isActive, let activeCue {
+      return activeCue
+    }
+    return speech?.timedCues.first
+  }
+
+  private static func firstSentence(in text: String) -> String {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return trimmed }
+
+    if let terminatorIndex = trimmed.firstIndex(where: { ".!?。！？".contains($0) }) {
+      return String(trimmed[...terminatorIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    return trimmed
   }
 }
 

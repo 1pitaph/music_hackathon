@@ -279,10 +279,10 @@ struct SettingsView: View {
       Button(role: .destructive) {
         imageAssetStore.clearAllCustomImages()
       } label: {
-        Label("清除本地头像与封面", systemImage: "trash")
+        Label("清除本地头像", systemImage: "trash")
       }
 
-      Text("只会删除本机保存的用户头像和自定义封面，不影响 Apple Music 封面或内置封面素材。")
+      Text("只会删除本机保存的用户头像；歌曲、歌单和电台封面始终使用 Apple Music artwork。")
         .font(.footnote)
         .foregroundStyle(.secondary)
     }

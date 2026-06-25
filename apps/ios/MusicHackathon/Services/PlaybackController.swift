@@ -8,6 +8,16 @@ enum PlaybackCompletionKind {
   case speech
 }
 
+enum RadioTrackPlaybackPolicy: Equatable {
+  case fullSongPreferred
+  case mixablePreferred
+}
+
+enum RadioSpeechPlaybackMode: Equatable {
+  case standalone
+  case transitionOverlay
+}
+
 struct PlaybackFailureContext {
   let track: Track
   let phase: String
@@ -18,9 +28,13 @@ struct PlaybackFailureContext {
 protocol RadioPlaybackControlling: AnyObject {
   var onPlaybackFinished: ((PlaybackCompletionKind) -> Void)? { get set }
   var onPlaybackFailed: ((PlaybackFailureContext) -> Void)? { get set }
+  var onTrackTransitionWindowReached: (() -> Void)? { get set }
+  var onSpeechAdvancePointReached: (() -> Void)? { get set }
 
   func play(track: Track)
+  func play(track: Track, policy: RadioTrackPlaybackPolicy, preservesSpeech: Bool)
   func playSpeech(_ speech: RadioSpeechPlaybackSegment)
+  func playSpeech(_ speech: RadioSpeechPlaybackSegment, mode: RadioSpeechPlaybackMode)
   func stop()
 }
 
@@ -35,6 +49,35 @@ enum PlaybackState: String {
 private enum PlaybackMediaKind {
   case track(Track, String?)
   case speech(RadioSpeechPlaybackSegment)
+}
+
+private struct RadioTransitionOverlayTiming {
+  let fadeDuration: TimeInterval
+  let speechDelay: TimeInterval
+  let duckVolume: Float
+  let advanceRatio: Double
+  let restoreDuration: TimeInterval
+
+  static let automatic = RadioTransitionOverlayTiming(
+    fadeDuration: 1.2,
+    speechDelay: 0.7,
+    duckVolume: 0.22,
+    advanceRatio: 0.667,
+    restoreDuration: 1.2
+  )
+
+  static let manual = RadioTransitionOverlayTiming(
+    fadeDuration: 0.8,
+    speechDelay: 0.35,
+    duckVolume: 0.22,
+    advanceRatio: 0.667,
+    restoreDuration: 1.2
+  )
+}
+
+private struct SpeechCueRange {
+  let cue: RadioSpeechCue
+  let range: NSRange
 }
 
 private enum PlaybackControllerError: LocalizedError {
@@ -53,6 +96,7 @@ private enum PlaybackControllerError: LocalizedError {
 final class PlaybackController: RadioPlaybackControlling {
   var currentTrack: Track?
   var currentSpeech: RadioSpeechPlaybackSegment?
+  var currentSpeechCue: RadioSpeechCue?
   var state: PlaybackState = .idle
   var lastErrorMessage: String?
   var playbackProgress: Double = 0
@@ -61,26 +105,42 @@ final class PlaybackController: RadioPlaybackControlling {
   var activeBackend: PlaybackBackend = .none
   var onPlaybackFinished: ((PlaybackCompletionKind) -> Void)?
   var onPlaybackFailed: ((PlaybackFailureContext) -> Void)?
+  var onTrackTransitionWindowReached: (() -> Void)?
+  var onSpeechAdvancePointReached: (() -> Void)?
   var onTrackFinished: (() -> Void)?
 
-  @ObservationIgnored private let previewPlayer = AVPlayer()
+  @ObservationIgnored private let trackPreviewPlayer = AVPlayer()
+  @ObservationIgnored private let speechAudioPlayer = AVPlayer()
   @ObservationIgnored private let musicPlayer = ApplicationMusicPlayer.shared
   @ObservationIgnored private let speechSynthesizer = AVSpeechSynthesizer()
   @ObservationIgnored private let speechCompletionDelegate = SpeechCompletionDelegate()
   @ObservationIgnored private let musicAuthorization: MusicAuthorizationService
   @ObservationIgnored private let diagnostics: DiagnosticsStore?
   @ObservationIgnored private let catalogService = AppleMusicCatalogService()
-  @ObservationIgnored private var timeObserverToken: Any?
-  @ObservationIgnored private var endObserverToken: NSObjectProtocol?
-  @ObservationIgnored private var failedItemObserverToken: NSObjectProtocol?
-  @ObservationIgnored private var itemStatusObserver: NSKeyValueObservation?
+  @ObservationIgnored private var trackTimeObserverToken: Any?
+  @ObservationIgnored private var speechTimeObserverToken: Any?
+  @ObservationIgnored private var trackEndObserverToken: NSObjectProtocol?
+  @ObservationIgnored private var trackFailedItemObserverToken: NSObjectProtocol?
+  @ObservationIgnored private var speechEndObserverToken: NSObjectProtocol?
+  @ObservationIgnored private var speechFailedItemObserverToken: NSObjectProtocol?
+  @ObservationIgnored private var trackItemStatusObserver: NSKeyValueObservation?
+  @ObservationIgnored private var speechItemStatusObserver: NSKeyValueObservation?
   @ObservationIgnored private var musicProgressTask: Task<Void, Never>?
   @ObservationIgnored private var speechProgressTask: Task<Void, Never>?
   @ObservationIgnored private var playbackTask: Task<Void, Never>?
+  @ObservationIgnored private var speechStartTask: Task<Void, Never>?
+  @ObservationIgnored private var trackVolumeRampTask: Task<Void, Never>?
   @ObservationIgnored private var didNotifyTrackFinished = false
+  @ObservationIgnored private var didNotifySpeechFinished = false
+  @ObservationIgnored private var didNotifyTrackTransitionWindow = false
+  @ObservationIgnored private var didNotifySpeechAdvancePoint = false
   @ObservationIgnored private var didNotifyPlaybackFailed = false
   @ObservationIgnored private var currentPlaybackAttemptID: String?
   @ObservationIgnored private var currentPlaybackStartedAt: Date?
+  @ObservationIgnored private var synthesizedSpeechCueRanges: [SpeechCueRange] = []
+  @ObservationIgnored private var currentTrackPlaybackPolicy: RadioTrackPlaybackPolicy = .fullSongPreferred
+  @ObservationIgnored private var currentSpeechPlaybackMode: RadioSpeechPlaybackMode = .standalone
+  @ObservationIgnored private var currentOverlayTiming: RadioTransitionOverlayTiming = .automatic
 
   init(diagnostics: DiagnosticsStore? = nil) {
     self.musicAuthorization = MusicAuthorizationService(diagnostics: diagnostics)
@@ -100,37 +160,55 @@ final class PlaybackController: RadioPlaybackControlling {
         self?.finishSynthesizedSpeech()
       }
     }
+    speechCompletionDelegate.onSpeakRange = { [weak self] range, utterance in
+      Task { @MainActor in
+        self?.updateSynthesizedSpeechCue(for: range, spokenText: utterance.speechString)
+      }
+    }
     speechSynthesizer.delegate = speechCompletionDelegate
     configureAudioSession()
     configureRemoteCommands()
   }
 
   deinit {
-    timeObserverToken.map(previewPlayer.removeTimeObserver)
+    if let trackTimeObserverToken {
+      trackPreviewPlayer.removeTimeObserver(trackTimeObserverToken)
+    }
+    if let speechTimeObserverToken {
+      speechAudioPlayer.removeTimeObserver(speechTimeObserverToken)
+    }
 
-    if let endObserverToken {
-      NotificationCenter.default.removeObserver(endObserverToken)
-    }
-    if let failedItemObserverToken {
-      NotificationCenter.default.removeObserver(failedItemObserverToken)
-    }
-    itemStatusObserver?.invalidate()
+    [trackEndObserverToken, trackFailedItemObserverToken, speechEndObserverToken, speechFailedItemObserverToken]
+      .compactMap { $0 }
+      .forEach(NotificationCenter.default.removeObserver)
+    trackItemStatusObserver?.invalidate()
+    speechItemStatusObserver?.invalidate()
 
     musicProgressTask?.cancel()
     speechProgressTask?.cancel()
     playbackTask?.cancel()
+    speechStartTask?.cancel()
+    trackVolumeRampTask?.cancel()
   }
 
   func play(track: Track) {
+    play(track: track, policy: .fullSongPreferred, preservesSpeech: false)
+  }
+
+  func play(track: Track, policy: RadioTrackPlaybackPolicy, preservesSpeech: Bool) {
     playbackTask?.cancel()
     playbackTask = Task { [weak self] in
-      await self?.startPlayback(for: track)
+      await self?.startPlayback(for: track, policy: policy, preservesSpeech: preservesSpeech)
     }
   }
 
   func playSpeech(_ speech: RadioSpeechPlaybackSegment) {
+    playSpeech(speech, mode: .standalone)
+  }
+
+  func playSpeech(_ speech: RadioSpeechPlaybackSegment, mode: RadioSpeechPlaybackMode) {
     playbackTask?.cancel()
-    startSpeechPlayback(speech)
+    startSpeechPlayback(speech, mode: mode)
   }
 
   func togglePlayback() {
@@ -166,10 +244,21 @@ final class PlaybackController: RadioPlaybackControlling {
     case .appleMusic:
       musicPlayer.pause()
       stopMusicProgressTimer()
-    case .localPreview, .speechAudio:
-      previewPlayer.pause()
+    case .localPreview:
+      trackPreviewPlayer.pause()
+      speechAudioPlayer.pause()
+      speechSynthesizer.pauseSpeaking(at: .word)
+      stopSpeechProgressTimer()
+    case .speechAudio:
+      speechAudioPlayer.pause()
+      if trackPreviewPlayer.currentItem != nil {
+        trackPreviewPlayer.pause()
+      }
     case .speechSynthesis:
       speechSynthesizer.pauseSpeaking(at: .word)
+      if trackPreviewPlayer.currentItem != nil {
+        trackPreviewPlayer.pause()
+      }
       stopSpeechProgressTimer()
     case .none:
       break
@@ -189,8 +278,11 @@ final class PlaybackController: RadioPlaybackControlling {
     case .appleMusic:
       let seconds = musicPlayer.playbackTime
       return seconds.isFinite ? max(0, seconds) : elapsedSeconds
-    case .localPreview, .speechAudio:
-      let seconds = previewPlayer.currentTime().seconds
+    case .localPreview:
+      let seconds = trackPreviewPlayer.currentTime().seconds
+      return seconds.isFinite ? max(0, seconds) : 0
+    case .speechAudio:
+      let seconds = speechAudioPlayer.currentTime().seconds
       return seconds.isFinite ? max(0, seconds) : 0
     case .speechSynthesis:
       return elapsedSeconds
@@ -199,25 +291,52 @@ final class PlaybackController: RadioPlaybackControlling {
     }
   }
 
-  private func startPlayback(for track: Track) async {
+  private func startPlayback(
+    for track: Track,
+    policy: RadioTrackPlaybackPolicy,
+    preservesSpeech: Bool
+  ) async {
     let attemptID = UUID().uuidString
     currentPlaybackAttemptID = attemptID
     currentPlaybackStartedAt = Date()
     currentTrack = track
-    currentSpeech = nil
+    currentTrackPlaybackPolicy = policy
+    if !preservesSpeech {
+      currentSpeech = nil
+      currentSpeechCue = nil
+      synthesizedSpeechCueRanges = []
+      currentSpeechPlaybackMode = .standalone
+      didNotifySpeechAdvancePoint = false
+    }
     lastErrorMessage = nil
     state = .loading
-    stopCurrentPlayback(clearCurrentTrack: false)
+    if preservesSpeech {
+      stopTrackPlayback(clearCurrentTrack: false)
+    } else {
+      stopCurrentPlayback(clearCurrentTrack: false)
+    }
     didNotifyPlaybackFailed = false
     resetPlaybackProgress()
+    let shouldPreferPreview = policy == .mixablePreferred && track.previewURL != nil
     diagnostics?.record(
       .notice,
-      chain: track.normalizedAppleMusicID == nil ? .playbackPreview : .playbackAppleMusic,
+      chain: shouldPreferPreview || track.normalizedAppleMusicID == nil ? .playbackPreview : .playbackAppleMusic,
       event: "attempt_start",
       message: "开始播放曲目。",
       correlationID: attemptID,
       payload: DiagnosticsPayload.track(track)
     )
+
+    if shouldPreferPreview, let previewURL = track.previewURL {
+      startPreviewPlayback(
+        for: track,
+        previewURL: previewURL,
+        correlationID: attemptID,
+        reason: "mixable_preferred",
+        initialVolume: preservesSpeech ? currentOverlayTiming.duckVolume : 1.0
+      )
+      return
+    }
 
     if track.normalizedAppleMusicID != nil {
       do {
@@ -477,18 +596,24 @@ final class PlaybackController: RadioPlaybackControlling {
     for track: Track,
     previewURL: URL,
     correlationID: String? = nil,
-    reason: String = "direct_preview"
+    reason: String = "direct_preview",
+    initialVolume: Float = 1.0
   ) {
     didNotifyTrackFinished = false
+    didNotifyTrackTransitionWindow = false
     let item = AVPlayerItem(url: previewURL)
-    previewPlayer.replaceCurrentItem(with: item)
-    addPeriodicTimeObserver()
-    addPlaybackItemObservers(for: item, mediaKind: .track(track, correlationID))
-    previewPlayer.play()
+    trackPreviewPlayer.volume = initialVolume
+    trackPreviewPlayer.replaceCurrentItem(with: item)
+    addTrackPeriodicTimeObserver()
+    addTrackPlaybackItemObservers(for: item, mediaKind: .track(track, correlationID))
+    trackPreviewPlayer.play()
 
-    activeBackend = .localPreview
+    if currentSpeech == nil {
+      activeBackend = .localPreview
+    }
     state = .playing
     updateNowPlayingInfo(for: track)
+    updateNowPlayingPlaybackRate(1)
     diagnostics?.record(
       .notice,
       chain: .playbackPreview,
@@ -503,13 +628,45 @@ final class PlaybackController: RadioPlaybackControlling {
     )
   }
 
-  private func startSpeechPlayback(_ speech: RadioSpeechPlaybackSegment) {
+  private func startSpeechPlayback(_ speech: RadioSpeechPlaybackSegment, mode: RadioSpeechPlaybackMode) {
     lastErrorMessage = nil
-    state = .loading
-    stopCurrentPlayback(clearCurrentTrack: false, clearCurrentSpeech: false)
+    currentSpeechPlaybackMode = mode
+    currentOverlayTiming = overlayTiming(for: mode)
+    didNotifySpeechFinished = false
+    didNotifySpeechAdvancePoint = false
+    speechStartTask?.cancel()
+    if mode == .standalone {
+      state = .loading
+      stopCurrentPlayback(clearCurrentTrack: false, clearCurrentSpeech: false)
+    } else {
+      state = .playing
+      startTrackPreviewVolumeRamp(to: currentOverlayTiming.duckVolume, duration: currentOverlayTiming.fadeDuration)
+    }
     currentSpeech = speech
-    resetPlaybackProgress()
+    currentSpeechCue = initialSpeechCue(
+      for: speech,
+      spokenText: speech.text.trimmedNilIfEmpty ?? speech.displayText
+    )
+    synthesizedSpeechCueRanges = []
+    if mode == .standalone {
+      resetPlaybackProgress()
+    }
 
+    if mode == .transitionOverlay {
+      let delay = currentOverlayTiming.speechDelay
+      speechStartTask = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(delay))
+        guard !Task.isCancelled else { return }
+        await MainActor.run {
+          self?.beginSpeechOutput(for: speech)
+        }
+      }
+    } else {
+      beginSpeechOutput(for: speech)
+    }
+  }
+
+  private func beginSpeechOutput(for speech: RadioSpeechPlaybackSegment) {
     if let audioURL = speech.playableAudioURL {
       startSpeechAudioPlayback(for: speech, audioURL: audioURL)
     } else {
@@ -518,12 +675,12 @@ final class PlaybackController: RadioPlaybackControlling {
   }
 
   private func startSpeechAudioPlayback(for speech: RadioSpeechPlaybackSegment, audioURL: URL) {
-    didNotifyTrackFinished = false
+    didNotifySpeechFinished = false
     let item = AVPlayerItem(url: audioURL)
-    previewPlayer.replaceCurrentItem(with: item)
-    addPeriodicTimeObserver()
-    addPlaybackItemObservers(for: item, mediaKind: .speech(speech))
-    previewPlayer.play()
+    speechAudioPlayer.replaceCurrentItem(with: item)
+    addSpeechPeriodicTimeObserver()
+    addSpeechPlaybackItemObservers(for: item, mediaKind: .speech(speech))
+    speechAudioPlayer.play()
 
     activeBackend = .speechAudio
     state = .playing
@@ -548,7 +705,9 @@ final class PlaybackController: RadioPlaybackControlling {
       return
     }
 
-    didNotifyTrackFinished = false
+    didNotifySpeechFinished = false
+    synthesizedSpeechCueRanges = cueRanges(for: speech, spokenText: spokenText)
+    currentSpeechCue = synthesizedSpeechCueRanges.first?.cue ?? initialSpeechCue(for: speech, spokenText: spokenText)
     let utterance = AVSpeechUtterance(string: spokenText)
     utterance.voice = AVSpeechSynthesisVoice(language: Self.speechVoiceLanguage(for: spokenText))
     utterance.rate = AVSpeechUtteranceDefaultSpeechRate
@@ -577,9 +736,9 @@ final class PlaybackController: RadioPlaybackControlling {
       playbackTask = Task { [weak self] in
         await self?.resumeAppleMusicPlayback()
       }
-    case .localPreview, .speechAudio:
-      if previewPlayer.currentItem != nil {
-        previewPlayer.play()
+    case .localPreview:
+      if trackPreviewPlayer.currentItem != nil {
+        trackPreviewPlayer.play()
         state = .playing
         updateNowPlayingPlaybackRate(1)
       } else if let currentTrack {
@@ -587,7 +746,21 @@ final class PlaybackController: RadioPlaybackControlling {
       } else if let currentSpeech {
         playSpeech(currentSpeech)
       }
+    case .speechAudio:
+      if trackPreviewPlayer.currentItem != nil {
+        trackPreviewPlayer.play()
+      }
+      if speechAudioPlayer.currentItem != nil {
+        speechAudioPlayer.play()
+        state = .playing
+        updateNowPlayingPlaybackRate(1)
+      } else if let currentSpeech {
+        playSpeech(currentSpeech, mode: currentSpeechPlaybackMode)
+      }
     case .speechSynthesis:
+      if trackPreviewPlayer.currentItem != nil {
+        trackPreviewPlayer.play()
+      }
       if speechSynthesizer.continueSpeaking() {
         state = .playing
         updateNowPlayingPlaybackRate(1)
@@ -597,9 +770,9 @@ final class PlaybackController: RadioPlaybackControlling {
       }
     case .none:
       if let currentTrack {
-        play(track: currentTrack)
+        play(track: currentTrack, policy: currentTrackPlaybackPolicy, preservesSpeech: false)
       } else if let currentSpeech {
-        playSpeech(currentSpeech)
+        playSpeech(currentSpeech, mode: currentSpeechPlaybackMode)
       }
     }
   }
@@ -623,60 +796,99 @@ final class PlaybackController: RadioPlaybackControlling {
   }
 
   private func stopCurrentPlayback(clearCurrentTrack: Bool, clearCurrentSpeech: Bool = true) {
-    previewPlayer.pause()
-    previewPlayer.replaceCurrentItem(with: nil)
+    stopTrackPlayback(clearCurrentTrack: clearCurrentTrack)
+    stopSpeechPlayback(clearCurrentSpeech: clearCurrentSpeech)
     musicPlayer.stop()
-    speechSynthesizer.stopSpeaking(at: .immediate)
 
     activeBackend = .none
-    didNotifyTrackFinished = false
     state = .idle
-    if clearCurrentTrack {
-      currentTrack = nil
-    }
-    if clearCurrentSpeech {
-      currentSpeech = nil
-    }
-
     resetPlaybackProgress()
-    removePeriodicTimeObserver()
-    removePlaybackItemObservers()
     stopMusicProgressTimer()
-    stopSpeechProgressTimer()
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
   }
 
-  private func addPeriodicTimeObserver() {
-    removePeriodicTimeObserver()
+  private func stopTrackPlayback(clearCurrentTrack: Bool) {
+    trackVolumeRampTask?.cancel()
+    trackPreviewPlayer.pause()
+    trackPreviewPlayer.replaceCurrentItem(with: nil)
+    trackPreviewPlayer.volume = 1.0
+    musicPlayer.stop()
+    didNotifyTrackFinished = false
+    didNotifyTrackTransitionWindow = false
+    removeTrackPeriodicTimeObserver()
+    removeTrackPlaybackItemObservers()
+    stopMusicProgressTimer()
+    if clearCurrentTrack {
+      currentTrack = nil
+    }
+  }
+
+  private func stopSpeechPlayback(clearCurrentSpeech: Bool) {
+    speechStartTask?.cancel()
+    speechAudioPlayer.pause()
+    speechAudioPlayer.replaceCurrentItem(with: nil)
+    speechSynthesizer.stopSpeaking(at: .immediate)
+    didNotifySpeechFinished = false
+    didNotifySpeechAdvancePoint = false
+    removeSpeechPeriodicTimeObserver()
+    removeSpeechPlaybackItemObservers()
+    stopSpeechProgressTimer()
+    if clearCurrentSpeech {
+      currentSpeech = nil
+      currentSpeechCue = nil
+      synthesizedSpeechCueRanges = []
+      currentSpeechPlaybackMode = .standalone
+    }
+  }
+
+  private func addTrackPeriodicTimeObserver() {
+    removeTrackPeriodicTimeObserver()
 
     let interval = CMTime(seconds: 1.0 / 30.0, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-    timeObserverToken = previewPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+    trackTimeObserverToken = trackPreviewPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
       Task { @MainActor in
-        self?.updatePlaybackProgress(for: time)
+        self?.updateTrackPlaybackProgress(for: time)
       }
     }
   }
 
-  private func removePeriodicTimeObserver() {
-    guard let timeObserverToken else { return }
-    previewPlayer.removeTimeObserver(timeObserverToken)
-    self.timeObserverToken = nil
+  private func removeTrackPeriodicTimeObserver() {
+    guard let trackTimeObserverToken else { return }
+    trackPreviewPlayer.removeTimeObserver(trackTimeObserverToken)
+    self.trackTimeObserverToken = nil
   }
 
-  private func addPlaybackItemObservers(for item: AVPlayerItem, mediaKind: PlaybackMediaKind) {
-    removePlaybackItemObservers()
+  private func addSpeechPeriodicTimeObserver() {
+    removeSpeechPeriodicTimeObserver()
 
-    endObserverToken = NotificationCenter.default.addObserver(
+    let interval = CMTime(seconds: 1.0 / 30.0, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+    speechTimeObserverToken = speechAudioPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+      Task { @MainActor in
+        self?.updateSpeechPlaybackProgress(for: time)
+      }
+    }
+  }
+
+  private func removeSpeechPeriodicTimeObserver() {
+    guard let speechTimeObserverToken else { return }
+    speechAudioPlayer.removeTimeObserver(speechTimeObserverToken)
+    self.speechTimeObserverToken = nil
+  }
+
+  private func addTrackPlaybackItemObservers(for item: AVPlayerItem, mediaKind: PlaybackMediaKind) {
+    removeTrackPlaybackItemObservers()
+
+    trackEndObserverToken = NotificationCenter.default.addObserver(
       forName: AVPlayerItem.didPlayToEndTimeNotification,
       object: item,
       queue: .main
     ) { [weak self] _ in
       Task { @MainActor in
-        self?.handleFinishedPlayerItem()
+        self?.handleFinishedTrackPlayerItem()
       }
     }
 
-    failedItemObserverToken = NotificationCenter.default.addObserver(
+    trackFailedItemObserverToken = NotificationCenter.default.addObserver(
       forName: AVPlayerItem.failedToPlayToEndTimeNotification,
       object: item,
       queue: .main
@@ -689,7 +901,7 @@ final class PlaybackController: RadioPlaybackControlling {
       }
     }
 
-    itemStatusObserver = item.observe(\.status, options: [.new]) { [weak self] observedItem, _ in
+    trackItemStatusObserver = item.observe(\.status, options: [.new]) { [weak self] observedItem, _ in
       guard observedItem.status == .failed else { return }
 
       Task { @MainActor in
@@ -701,17 +913,68 @@ final class PlaybackController: RadioPlaybackControlling {
     }
   }
 
-  private func removePlaybackItemObservers() {
-    if let endObserverToken {
-      NotificationCenter.default.removeObserver(endObserverToken)
-      self.endObserverToken = nil
+  private func removeTrackPlaybackItemObservers() {
+    if let trackEndObserverToken {
+      NotificationCenter.default.removeObserver(trackEndObserverToken)
+      self.trackEndObserverToken = nil
     }
-    if let failedItemObserverToken {
-      NotificationCenter.default.removeObserver(failedItemObserverToken)
-      self.failedItemObserverToken = nil
+    if let trackFailedItemObserverToken {
+      NotificationCenter.default.removeObserver(trackFailedItemObserverToken)
+      self.trackFailedItemObserverToken = nil
     }
-    itemStatusObserver?.invalidate()
-    itemStatusObserver = nil
+    trackItemStatusObserver?.invalidate()
+    trackItemStatusObserver = nil
+  }
+
+  private func addSpeechPlaybackItemObservers(for item: AVPlayerItem, mediaKind: PlaybackMediaKind) {
+    removeSpeechPlaybackItemObservers()
+
+    speechEndObserverToken = NotificationCenter.default.addObserver(
+      forName: AVPlayerItem.didPlayToEndTimeNotification,
+      object: item,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor in
+        self?.handleFinishedSpeechPlayerItem()
+      }
+    }
+
+    speechFailedItemObserverToken = NotificationCenter.default.addObserver(
+      forName: AVPlayerItem.failedToPlayToEndTimeNotification,
+      object: item,
+      queue: .main
+    ) { [weak self] notification in
+      Task { @MainActor in
+        let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+          ?? item.error
+          ?? PlaybackControllerError.playerItemFailed
+        self?.handleFailedPlayerItem(mediaKind: mediaKind, error: error)
+      }
+    }
+
+    speechItemStatusObserver = item.observe(\.status, options: [.new]) { [weak self] observedItem, _ in
+      guard observedItem.status == .failed else { return }
+
+      Task { @MainActor in
+        self?.handleFailedPlayerItem(
+          mediaKind: mediaKind,
+          error: observedItem.error ?? PlaybackControllerError.playerItemFailed
+        )
+      }
+    }
+  }
+
+  private func removeSpeechPlaybackItemObservers() {
+    if let speechEndObserverToken {
+      NotificationCenter.default.removeObserver(speechEndObserverToken)
+      self.speechEndObserverToken = nil
+    }
+    if let speechFailedItemObserverToken {
+      NotificationCenter.default.removeObserver(speechFailedItemObserverToken)
+      self.speechFailedItemObserverToken = nil
+    }
+    speechItemStatusObserver?.invalidate()
+    speechItemStatusObserver = nil
   }
 
   private func handleFailedPlayerItem(mediaKind: PlaybackMediaKind, error: Error) {
@@ -730,29 +993,30 @@ final class PlaybackController: RadioPlaybackControlling {
           DiagnosticsPayload.error(error)
         )
       )
-      removePlaybackItemObservers()
-      previewPlayer.replaceCurrentItem(with: nil)
+      removeSpeechPlaybackItemObservers()
+      removeSpeechPeriodicTimeObserver()
+      speechAudioPlayer.replaceCurrentItem(with: nil)
       startSynthesizedSpeechPlayback(for: speech)
     }
   }
 
-  private func handleFinishedPlayerItem() {
+  private func handleFinishedTrackPlayerItem() {
     guard state == .playing else { return }
-
-    if activeBackend == .speechAudio {
-      finishPlayback(kind: .speech)
-      return
-    }
 
     if onPlaybackFinished != nil || onTrackFinished != nil {
       finishPlayback(kind: .track)
       return
     }
 
-    previewPlayer.seek(to: .zero)
+    trackPreviewPlayer.seek(to: .zero)
     resetPlaybackProgress()
-    previewPlayer.play()
+    trackPreviewPlayer.play()
     updateNowPlayingPlaybackRate(1)
+  }
+
+  private func handleFinishedSpeechPlayerItem() {
+    guard state == .playing else { return }
+    finishPlayback(kind: .speech)
   }
 
   private func startMusicProgressTimer(duration: TimeInterval) {
@@ -799,6 +1063,10 @@ final class PlaybackController: RadioPlaybackControlling {
           self.elapsedSeconds += 0.5
           self.elapsedTimeText = Self.timeText(for: self.elapsedSeconds)
           self.playbackProgress = min(max(self.elapsedSeconds / duration, 0), 1)
+          if let currentSpeech = self.currentSpeech, self.currentSpeechCue == nil {
+            self.updateCurrentSpeechCue(for: self.elapsedSeconds, speech: currentSpeech)
+          }
+          self.notifySpeechAdvancePointIfNeeded(elapsedSeconds: self.elapsedSeconds, duration: duration)
         }
       }
     }
@@ -809,7 +1077,35 @@ final class PlaybackController: RadioPlaybackControlling {
     speechProgressTask = nil
   }
 
-  private func updatePlaybackProgress(for time: CMTime) {
+  private func updateTrackPlaybackProgress(for time: CMTime) {
+    let elapsedSeconds = time.seconds.isFinite ? max(0, time.seconds) : 0
+    if activeBackend == .localPreview {
+      self.elapsedSeconds = elapsedSeconds
+    }
+
+    let newElapsedTimeText = Self.timeText(for: elapsedSeconds)
+    if activeBackend == .localPreview, elapsedTimeText != newElapsedTimeText {
+      elapsedTimeText = newElapsedTimeText
+    }
+
+    guard
+      let duration = trackDurationForCurrentPreview(),
+      duration.isFinite,
+      duration > 0
+    else {
+      if activeBackend == .localPreview {
+        playbackProgress = 0
+      }
+      return
+    }
+
+    if activeBackend == .localPreview {
+      playbackProgress = min(max(elapsedSeconds / duration, 0), 1)
+    }
+    notifyTrackTransitionWindowIfNeeded(elapsedSeconds: elapsedSeconds, duration: duration)
+  }
+
+  private func updateSpeechPlaybackProgress(for time: CMTime) {
     let elapsedSeconds = time.seconds.isFinite ? max(0, time.seconds) : 0
     self.elapsedSeconds = elapsedSeconds
 
@@ -817,17 +1113,17 @@ final class PlaybackController: RadioPlaybackControlling {
     if elapsedTimeText != newElapsedTimeText {
       elapsedTimeText = newElapsedTimeText
     }
+    if let currentSpeech {
+      updateCurrentSpeechCue(for: elapsedSeconds, speech: currentSpeech)
+    }
 
-    guard
-      let duration = previewPlayer.currentItem?.duration.seconds,
-      duration.isFinite,
-      duration > 0
-    else {
+    guard let currentSpeech else {
       playbackProgress = 0
       return
     }
-
+    let duration = speechDuration(for: speechAudioPlayer.currentItem, speech: currentSpeech)
     playbackProgress = min(max(elapsedSeconds / duration, 0), 1)
+    notifySpeechAdvancePointIfNeeded(elapsedSeconds: elapsedSeconds, duration: duration)
   }
 
   private func updateMusicPlaybackProgress(duration: TimeInterval) {
@@ -842,6 +1138,181 @@ final class PlaybackController: RadioPlaybackControlling {
 
     if playbackProgress >= 0.995, !didNotifyTrackFinished {
       finishPlayback(kind: .track)
+    }
+  }
+
+  private func trackDurationForCurrentPreview() -> TimeInterval? {
+    if let duration = trackPreviewPlayer.currentItem?.duration.seconds,
+       duration.isFinite,
+       duration > 0 {
+      return duration
+    }
+    guard let duration = currentTrack?.duration, duration > 0 else { return nil }
+    return duration
+  }
+
+  private func speechDuration(
+    for item: AVPlayerItem?,
+    speech: RadioSpeechPlaybackSegment
+  ) -> TimeInterval {
+    if let duration = item?.duration.seconds,
+       duration.isFinite,
+       duration > 0 {
+      return duration
+    }
+    if let duration = speech.audio?.durationSeconds, duration > 0 {
+      return duration
+    }
+    return Self.estimatedSpeechDuration(for: speech.text.isEmpty ? speech.displayText : speech.text)
+  }
+
+  private func notifyTrackTransitionWindowIfNeeded(elapsedSeconds: TimeInterval, duration: TimeInterval) {
+    guard currentTrackPlaybackPolicy == .mixablePreferred else { return }
+    guard !didNotifyTrackTransitionWindow else { return }
+    guard duration > 0, duration - elapsedSeconds <= 3.0 else { return }
+    didNotifyTrackTransitionWindow = true
+    onTrackTransitionWindowReached?()
+  }
+
+  private func notifySpeechAdvancePointIfNeeded(elapsedSeconds: TimeInterval, duration: TimeInterval) {
+    guard currentSpeechPlaybackMode == .transitionOverlay else { return }
+    guard !didNotifySpeechAdvancePoint else { return }
+    guard duration > 0, elapsedSeconds / duration >= currentOverlayTiming.advanceRatio else { return }
+    didNotifySpeechAdvancePoint = true
+    onSpeechAdvancePointReached?()
+  }
+
+  private func updateCurrentSpeechCue(for elapsedSeconds: TimeInterval, speech: RadioSpeechPlaybackSegment) {
+    let cues = speechCues(for: speech, spokenText: speech.text)
+    guard !cues.isEmpty else {
+      currentSpeechCue = nil
+      return
+    }
+
+    let cue = cues.last { cue in
+      elapsedSeconds >= cue.startTime && elapsedSeconds < cue.endTime
+    } ?? cues.last { cue in
+      elapsedSeconds >= cue.startTime
+    } ?? cues.first
+
+    if currentSpeechCue?.id != cue?.id {
+      currentSpeechCue = cue
+    }
+  }
+
+  private func updateSynthesizedSpeechCue(for range: NSRange, spokenText: String) {
+    guard !synthesizedSpeechCueRanges.isEmpty else { return }
+    let cueRange = synthesizedSpeechCueRanges.first { cueRange in
+      NSIntersectionRange(cueRange.range, range).length > 0 || cueRange.range.location <= range.location
+        && range.location < cueRange.range.location + cueRange.range.length
+    }
+    guard let cueRange, currentSpeechCue?.id != cueRange.cue.id else { return }
+    currentSpeechCue = cueRange.cue
+  }
+
+  private func initialSpeechCue(
+    for speech: RadioSpeechPlaybackSegment,
+    spokenText: String
+  ) -> RadioSpeechCue? {
+    speechCues(for: speech, spokenText: spokenText).first
+  }
+
+  private func speechCues(
+    for speech: RadioSpeechPlaybackSegment,
+    spokenText: String
+  ) -> [RadioSpeechCue] {
+    if !speech.timedCues.isEmpty {
+      return speech.timedCues
+    }
+    let fallbackText = spokenText.trimmedNilIfEmpty ?? speech.displayText.trimmedNilIfEmpty ?? speech.text
+    return Self.fallbackSpeechCues(for: fallbackText, speechID: speech.id)
+  }
+
+  private func cueRanges(
+    for speech: RadioSpeechPlaybackSegment,
+    spokenText: String
+  ) -> [SpeechCueRange] {
+    let cues = speechCues(for: speech, spokenText: spokenText)
+    guard !cues.isEmpty else { return [] }
+
+    var cursor = spokenText.startIndex
+    return cues.compactMap { cue in
+      let cueText = cue.text.trimmedNilIfEmpty ?? cue.displayText.trimmedNilIfEmpty
+      guard let cueText else { return nil }
+      let searchRange = cursor..<spokenText.endIndex
+      guard let range = spokenText.range(of: cueText, options: [], range: searchRange)
+        ?? spokenText.range(of: cueText)
+      else { return nil }
+      cursor = range.upperBound
+      return SpeechCueRange(cue: cue, range: NSRange(range, in: spokenText))
+    }
+  }
+
+  private static func fallbackSpeechCues(for text: String, speechID: String) -> [RadioSpeechCue] {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    let spans = sentenceSpans(in: trimmed)
+    return spans.enumerated().map { index, range in
+      let sentence = String(trimmed[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+      return RadioSpeechCue(
+        id: "\(speechID)-fallback-cue-\(index + 1)",
+        text: sentence,
+        displayText: sentence,
+        startTime: 0,
+        endTime: 0,
+        words: []
+      )
+    }
+  }
+
+  private static func sentenceSpans(in text: String) -> [Range<String.Index>] {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return [] }
+
+    var ranges: [Range<String.Index>] = []
+    var start = trimmed.startIndex
+    var index = start
+    while index < trimmed.endIndex {
+      let next = trimmed.index(after: index)
+      if ".!?。！？".contains(trimmed[index]) {
+        ranges.append(start..<next)
+        start = next
+      }
+      index = next
+    }
+    if start < trimmed.endIndex {
+      ranges.append(start..<trimmed.endIndex)
+    }
+    return ranges.isEmpty ? [trimmed.startIndex..<trimmed.endIndex] : ranges
+  }
+
+  private func overlayTiming(for mode: RadioSpeechPlaybackMode) -> RadioTransitionOverlayTiming {
+    guard mode == .transitionOverlay else { return .automatic }
+    return didNotifyTrackTransitionWindow ? .automatic : .manual
+  }
+
+  private func startTrackPreviewVolumeRamp(to targetVolume: Float, duration: TimeInterval) {
+    trackVolumeRampTask?.cancel()
+    guard trackPreviewPlayer.currentItem != nil else { return }
+    let startVolume = trackPreviewPlayer.volume
+    guard duration > 0 else {
+      trackPreviewPlayer.volume = targetVolume
+      return
+    }
+
+    trackVolumeRampTask = Task { [weak self] in
+      let steps = max(1, Int(duration / 0.05))
+      for step in 1...steps {
+        guard !Task.isCancelled else { return }
+        let progress = Float(step) / Float(steps)
+        let volume = startVolume + (targetVolume - startVolume) * progress
+        await MainActor.run {
+          self?.trackPreviewPlayer.volume = volume
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+      }
+      await MainActor.run {
+        self?.trackPreviewPlayer.volume = targetVolume
+      }
     }
   }
 
@@ -862,10 +1333,12 @@ final class PlaybackController: RadioPlaybackControlling {
     lastErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     state = .failed
     activeBackend = .none
-    previewPlayer.pause()
-    previewPlayer.replaceCurrentItem(with: nil)
-    removePlaybackItemObservers()
-    removePeriodicTimeObserver()
+    currentSpeechCue = nil
+    synthesizedSpeechCueRanges = []
+    trackPreviewPlayer.pause()
+    trackPreviewPlayer.replaceCurrentItem(with: nil)
+    removeTrackPlaybackItemObservers()
+    removeTrackPeriodicTimeObserver()
     stopMusicProgressTimer()
     updateNowPlayingPlaybackRate(0)
     diagnostics?.record(
@@ -898,11 +1371,36 @@ final class PlaybackController: RadioPlaybackControlling {
   }
 
   private func finishPlayback(kind: PlaybackCompletionKind) {
-    guard !didNotifyTrackFinished else { return }
-    didNotifyTrackFinished = true
-    state = .idle
-    updateNowPlayingPlaybackRate(0)
-    stopSpeechProgressTimer()
+    switch kind {
+    case .track:
+      guard !didNotifyTrackFinished else { return }
+      didNotifyTrackFinished = true
+      removeTrackPlaybackItemObservers()
+      removeTrackPeriodicTimeObserver()
+      if currentSpeech == nil {
+        state = .idle
+        updateNowPlayingPlaybackRate(0)
+      }
+    case .speech:
+      guard !didNotifySpeechFinished else { return }
+      didNotifySpeechFinished = true
+      speechStartTask?.cancel()
+      removeSpeechPlaybackItemObservers()
+      removeSpeechPeriodicTimeObserver()
+      stopSpeechProgressTimer()
+      currentSpeech = nil
+      currentSpeechCue = nil
+      synthesizedSpeechCueRanges = []
+      if trackPreviewPlayer.currentItem != nil || currentTrack != nil {
+        activeBackend = .localPreview
+        state = .playing
+        startTrackPreviewVolumeRamp(to: 1.0, duration: currentOverlayTiming.restoreDuration)
+        updateNowPlayingPlaybackRate(1)
+      } else {
+        state = .idle
+        updateNowPlayingPlaybackRate(0)
+      }
+    }
     diagnostics?.record(
       .notice,
       chain: activeBackend.diagnosticChain,
@@ -1039,9 +1537,25 @@ private extension PlaybackCompletionKind {
 
 private final class SpeechCompletionDelegate: NSObject, AVSpeechSynthesizerDelegate {
   var onFinish: (() -> Void)?
+  var onSpeakRange: ((NSRange, AVSpeechUtterance) -> Void)?
 
   func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
     onFinish?()
+  }
+
+  func speechSynthesizer(
+    _ synthesizer: AVSpeechSynthesizer,
+    willSpeakRangeOfSpeechString characterRange: NSRange,
+    utterance: AVSpeechUtterance
+  ) {
+    onSpeakRange?(characterRange, utterance)
+  }
+}
+
+private extension String {
+  var trimmedNilIfEmpty: String? {
+    let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 }
 

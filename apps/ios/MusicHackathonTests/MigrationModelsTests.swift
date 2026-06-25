@@ -52,7 +52,7 @@ final class MigrationModelsTests: XCTestCase {
       artist: "Artist B",
       album: "Album B",
       duration: 300,
-      artworkURL: nil
+      artworkURL: URL(string: "https://example.com/artwork-2.jpg")
     )
     let playlist = AppleMusicPlaylistSnapshot(
       id: "playlist-1",
@@ -79,6 +79,44 @@ final class MigrationModelsTests: XCTestCase {
     XCTAssertEqual(profile.bio, "")
   }
 
+  func testArchiveProfileFiltersTracksWithoutRealArtwork() {
+    let visibleTrack = makeTrack(
+      appleMusicID: "song-1",
+      title: "Visible Song",
+      artist: "Artist A",
+      album: "Album A",
+      duration: 240,
+      artworkURL: URL(string: "https://example.com/visible.jpg")
+    )
+    let missingArtworkTrack = makeTrack(
+      appleMusicID: "song-2",
+      title: "Missing Artwork",
+      artist: "Artist B",
+      album: "Album B",
+      duration: 300,
+      artworkURL: nil
+    )
+    let playlist = AppleMusicPlaylistSnapshot(
+      id: "playlist-1",
+      name: "Road Trip",
+      curatorName: "Apple Music",
+      artworkURL: nil,
+      tracks: [visibleTrack, missingArtworkTrack]
+    )
+
+    let profile = ArchiveProfile.appleMusic(
+      base: .empty,
+      playlists: [playlist],
+      tracks: [missingArtworkTrack]
+    )
+
+    XCTAssertEqual(profile.stats.likesCount, 1)
+    XCTAssertEqual(profile.published.first?.tracks.map(\.title), ["Visible Song"])
+    XCTAssertEqual(profile.published.first?.displaySubtitle, "Apple Music • 1 song")
+    XCTAssertEqual(profile.recentlyPlayed.map(\.name), ["Visible Song"])
+    XCTAssertEqual(profile.saved.map(\.name), ["Artist A"])
+  }
+
   func testArchiveProfileKeepsFullSongListForLargeAppleMusicPlaylist() {
     let tracks = (1...30).map { index in
       makeTrack(
@@ -87,14 +125,14 @@ final class MigrationModelsTests: XCTestCase {
         artist: "Artist \(index % 3)",
         album: "Long Playlist",
         duration: 180,
-        artworkURL: nil
+        artworkURL: URL(string: "https://example.com/song-\(index).jpg")
       )
     }
     let playlist = AppleMusicPlaylistSnapshot(
       id: "playlist-30",
       name: "Long Playlist",
       curatorName: "Apple Music",
-      artworkURL: nil,
+      artworkURL: URL(string: "https://example.com/long-playlist.jpg"),
       tracks: tracks
     )
 
@@ -115,7 +153,7 @@ final class MigrationModelsTests: XCTestCase {
       artist: "Artist A",
       album: "Playlist Album",
       duration: 210,
-      artworkURL: nil
+      artworkURL: URL(string: "https://example.com/playlist-song.jpg")
     )
     let looseTrack = makeTrack(
       appleMusicID: "song-2",
@@ -123,7 +161,7 @@ final class MigrationModelsTests: XCTestCase {
       artist: "Artist B",
       album: "Singles",
       duration: 180,
-      artworkURL: nil
+      artworkURL: URL(string: "https://example.com/loose-song.jpg")
     )
     let duplicateTrack = makeTrack(
       appleMusicID: "song-1",
@@ -131,13 +169,13 @@ final class MigrationModelsTests: XCTestCase {
       artist: "Artist A",
       album: "Playlist Album",
       duration: 210,
-      artworkURL: nil
+      artworkURL: URL(string: "https://example.com/playlist-song.jpg")
     )
     let playlist = AppleMusicPlaylistSnapshot(
       id: "playlist-1",
       name: "Road Trip",
       curatorName: "Apple Music",
-      artworkURL: nil,
+      artworkURL: URL(string: "https://example.com/road-trip.jpg"),
       tracks: [playlistTrack]
     )
 
@@ -160,13 +198,13 @@ final class MigrationModelsTests: XCTestCase {
       artist: "Artist A",
       album: "Album A",
       duration: 180,
-      artworkURL: nil
+      artworkURL: URL(string: "https://example.com/personal-song.jpg")
     )
     let playlist = AppleMusicPlaylistSnapshot(
       id: "playlist-1",
       name: "Personal Mix",
       curatorName: "Ada Chen",
-      artworkURL: nil,
+      artworkURL: URL(string: "https://example.com/personal-mix.jpg"),
       tracks: [track]
     )
 
@@ -183,13 +221,13 @@ final class MigrationModelsTests: XCTestCase {
       artist: "Artist A",
       album: "Album A",
       duration: 180,
-      artworkURL: nil
+      artworkURL: URL(string: "https://example.com/editorial-song.jpg")
     )
     let playlist = AppleMusicPlaylistSnapshot(
       id: "playlist-1",
       name: "Editorial Mix",
       curatorName: "Apple Music",
-      artworkURL: nil,
+      artworkURL: URL(string: "https://example.com/editorial-mix.jpg"),
       tracks: [track]
     )
 
@@ -209,13 +247,13 @@ final class MigrationModelsTests: XCTestCase {
       artist: "Artist A",
       album: "Album A",
       duration: 180,
-      artworkURL: nil
+      artworkURL: URL(string: "https://example.com/personal-song.jpg")
     )
     let playlist = AppleMusicPlaylistSnapshot(
       id: "playlist-1",
       name: "Personal Mix",
       curatorName: "Ada Chen",
-      artworkURL: nil,
+      artworkURL: URL(string: "https://example.com/personal-mix.jpg"),
       tracks: [track]
     )
 

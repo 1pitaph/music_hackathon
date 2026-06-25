@@ -617,8 +617,6 @@ private struct DiscoverCardStack: View {
 }
 
 private struct DiscoverStationCard: View {
-  @Environment(ImageAssetStore.self) private var imageStore
-
   let station: DiscoverStation
   let isActive: Bool
   let isPlaying: Bool
@@ -736,7 +734,7 @@ private struct DiscoverStationCard: View {
 
   private var stationArtwork: some View {
     ArtworkImageView(resolution: artworkResolution, showsLoadingIndicator: false) {
-      stationGradient
+      Color.clear
     }
     .overlay {
       LinearGradient(
@@ -752,41 +750,7 @@ private struct DiscoverStationCard: View {
   }
 
   private var artworkResolution: ArtworkResolution {
-    ArtworkResolution(
-      overrideSource: imageStore.coverSource(for: station.id),
-      remoteURLs: station.artworkURLs.map(Optional.some),
-      bundledFallback: BundledCoverCatalog.fallbackSource(
-        forID: station.id,
-        title: station.title,
-        genre: station.genre
-      ),
-      fallbackSeed: station.id,
-      fallbackTitle: station.title,
-      fallbackColorHex: station.colorHex
-    )
-  }
-
-  private var stationGradient: some View {
-    LinearGradient(
-      colors: [
-        station.color,
-        station.color.opacity(0.78),
-        station.color.opacity(0.55)
-      ],
-      startPoint: .topLeading,
-      endPoint: .bottomTrailing
-    )
-    .overlay {
-      RadialGradient(
-        colors: [
-          .white.opacity(0.16),
-          .clear
-        ],
-        center: .top,
-        startRadius: 20,
-        endRadius: 240
-      )
-    }
+    ArtworkResolution(remoteURLs: station.artworkURLs.map(Optional.some))
   }
 }
 

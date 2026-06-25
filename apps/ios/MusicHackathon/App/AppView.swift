@@ -6,7 +6,6 @@ struct AppView: View {
   @Environment(RadioStationController.self) private var radioStation
   @Environment(MusicAuthorizationService.self) private var musicAuthorization
   @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
-  @Environment(ImageAssetStore.self) private var imageAssetStore
   @Environment(\.scenePhase) private var scenePhase
 
   @State private var selectedTab: AppTab = .radio
@@ -98,13 +97,6 @@ struct AppView: View {
     ]
   }
 
-  private var miniPlayerFallbackSeed: String {
-    playbackController.currentTrack?.title
-      ?? playbackController.currentSpeech?.id
-      ?? radioStation.station?.id
-      ?? radioStation.stationTitle
-  }
-
   @ViewBuilder
   private var globalMiniPlayerInset: some View {
     if showsGlobalPlayer {
@@ -121,7 +113,6 @@ struct AppView: View {
       title: miniPlayerTitle,
       subtitle: miniPlayerSubtitle,
       artworkResolution: miniPlayerArtworkResolution,
-      fallbackSeed: miniPlayerFallbackSeed,
       isPlaying: playbackController.state == .playing,
       isLoading: playbackController.state == .loading,
       onOpenPlayer: {
@@ -139,24 +130,7 @@ struct AppView: View {
   }
 
   private var miniPlayerArtworkResolution: ArtworkResolution {
-    let stationID = radioStation.station?.id ?? radioStation.stationTitle
-    let hasRemoteArtwork = miniPlayerArtworkURLs.compactMap { $0 }.isEmpty == false
-    let fallbackSource = BundledCoverCatalog.fallbackSource(
-      forID: stationID,
-      title: radioStation.stationTitle,
-      genre: nil
-    )
-
-    return ArtworkResolution(
-      overrideSource: hasRemoteArtwork
-        ? nil
-        : (radioStation.station.flatMap { imageAssetStore.coverSource(for: $0.id) } ?? imageAssetStore.profileAvatarSource),
-      remoteURLs: miniPlayerArtworkURLs,
-      bundledFallback: fallbackSource,
-      fallbackSeed: miniPlayerFallbackSeed,
-      fallbackTitle: miniPlayerTitle,
-      fallbackColorHex: "#D9523A"
-    )
+    ArtworkResolution(remoteURLs: miniPlayerArtworkURLs)
   }
 }
 
@@ -174,7 +148,6 @@ private struct GlobalMiniPlayer: View {
   let title: String
   let subtitle: String
   let artworkResolution: ArtworkResolution
-  let fallbackSeed: String
   let isPlaying: Bool
   let isLoading: Bool
   let onOpenPlayer: () -> Void
@@ -218,23 +191,7 @@ private struct GlobalMiniPlayer: View {
 
   private var artwork: some View {
     ArtworkImageView(resolution: artworkResolution, showsLoadingIndicator: false) {
-      ZStack {
-        LinearGradient(
-          colors: [
-            accentColor.opacity(0.85),
-            Color(hex: "#3F2630")
-          ],
-          startPoint: .topLeading,
-          endPoint: .bottomTrailing
-        )
-
-        MarbleAvatarView(
-          seed: fallbackSeed,
-          size: 36,
-          palette: ["#F6A46D", "#D9523A", "#7BC9C8", "#40232F"],
-          accessibilityLabel: nil
-        )
-      }
+      Color.clear
     }
     .frame(width: 42, height: 42)
     .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))

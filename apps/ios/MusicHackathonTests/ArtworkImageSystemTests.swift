@@ -29,26 +29,6 @@ final class ArtworkImageSystemTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: imageURL.path))
   }
 
-  func testImageStoreSavesCoverAndSurvivesReload() async throws {
-    let directoryURL = try temporaryDirectory()
-    let store = ImageAssetStore(directoryURL: directoryURL)
-
-    let source = try await store.savePickedImage(
-      data: testImageData(size: CGSize(width: 16, height: 28), color: .blue),
-      purpose: .stationCover,
-      key: "station-1"
-    )
-
-    XCTAssertEqual(store.coverSource(for: "station-1"), source)
-    XCTAssertNotNil(store.image(for: source))
-
-    let reloadedStore = ImageAssetStore(directoryURL: directoryURL)
-    XCTAssertEqual(reloadedStore.coverSource(for: "station-1"), source)
-
-    reloadedStore.clearCover(for: "station-1")
-    XCTAssertNil(reloadedStore.coverSource(for: "station-1"))
-  }
-
   func testCorruptMetadataFallsBackToEmptyState() throws {
     let directoryURL = try temporaryDirectory()
     try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
@@ -57,15 +37,36 @@ final class ArtworkImageSystemTests: XCTestCase {
     let store = ImageAssetStore(directoryURL: directoryURL)
 
     XCTAssertNil(store.profileAvatarSource)
-    XCTAssertNil(store.coverSource(for: "station-1"))
   }
 
-  func testBundledCoverCatalogSelectionIsStable() {
-    let first = BundledCoverCatalog.fallbackSource(forID: "station-1", title: "Night Set", genre: "Jazz")
-    let second = BundledCoverCatalog.fallbackSource(forID: "station-1", title: "Night Set", genre: "Jazz")
+  func testLegacyBundledCoverMetadataIsIgnoredAndScrubbedOnSave() async throws {
+    struct LegacyMetadata: Codable {
+      var profileAvatarSource: ArtworkSource?
+      var coverSources: [String: ArtworkSource]
+    }
 
-    XCTAssertEqual(first, second)
-    XCTAssertEqual(BundledCoverCatalog.covers.count, 10)
+    let directoryURL = try temporaryDirectory()
+    let metadataURL = directoryURL.appendingPathComponent("metadata.json")
+    let profileSource = ArtworkSource.userFile(fileName: "profile-avatar.jpg")
+    let legacyMetadata = LegacyMetadata(
+      profileAvatarSource: profileSource,
+      coverSources: ["station-1": .bundledCover(id: "midnight-blue-note")]
+    )
+    try JSONEncoder().encode(legacyMetadata).write(to: metadataURL)
+
+    let store = ImageAssetStore(directoryURL: directoryURL)
+
+    XCTAssertEqual(store.profileAvatarSource, profileSource)
+    XCTAssertNil(store.imageURL(for: .bundledCover(id: "midnight-blue-note")))
+
+    try await store.savePickedImage(
+      data: testImageData(size: CGSize(width: 24, height: 24), color: .green),
+      purpose: .profileAvatar
+    )
+    let savedMetadata = try String(contentsOf: metadataURL, encoding: .utf8)
+
+    XCTAssertFalse(savedMetadata.contains("coverSources"))
+    XCTAssertFalse(savedMetadata.contains("bundledCover"))
   }
 
   func testArtworkAnalysisChoosesReadableForeground() {
@@ -78,42 +79,21 @@ final class ArtworkImageSystemTests: XCTestCase {
     XCTAssertEqual(lightResult.recommendedForegroundHex, "#121212")
   }
 
-  func testArtworkPriorityHonorsOverrideRemoteBundledFallbackOrder() {
-    let override = ArtworkSource.userFile(fileName: "cover.jpg")
-    let bundled = ArtworkSource.bundledCover(id: "midnight-blue-note")
+  func testArtworkPriorityOnlyUsesFetchableRemoteArtwork() {
     let remote = URL(string: "https://example.com/cover.jpg")!
+    let template = URL(string: "https://example.com/{w}x{h}bb.{f}")!
 
     XCTAssertEqual(
       ArtworkPriorityResolver.preferredSource(
-        overrideSource: override,
-        remoteURLs: [remote],
-        bundledFallback: bundled
-      ),
-      .override(override)
-    )
-    XCTAssertEqual(
-      ArtworkPriorityResolver.preferredSource(
-        overrideSource: nil,
-        remoteURLs: [remote],
-        bundledFallback: bundled
+        remoteURLs: [remote]
       ),
       .remote(remote)
     )
     XCTAssertEqual(
       ArtworkPriorityResolver.preferredSource(
-        overrideSource: nil,
-        remoteURLs: [],
-        bundledFallback: bundled
+        remoteURLs: [template, nil]
       ),
-      .bundled(bundled)
-    )
-    XCTAssertEqual(
-      ArtworkPriorityResolver.preferredSource(
-        overrideSource: nil,
-        remoteURLs: [],
-        bundledFallback: nil
-      ),
-      .generatedFallback
+      .none
     )
   }
 

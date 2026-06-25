@@ -269,7 +269,7 @@ def test_volcengine_speech_synthesis_writes_audio_and_reuses_cache(monkeypatch, 
     "bit_rate": 128000,
     "speech_rate": 0,
     "loudness_rate": 0,
-    "enable_subtitle": False,
+    "enable_subtitle": True,
   }
 
   audio = results[0].audio
@@ -277,6 +277,8 @@ def test_volcengine_speech_synthesis_writes_audio_and_reuses_cache(monkeypatch, 
   assert audio.voice == "zh_female_test"
   assert audio.model == "seed-tts-1.0"
   assert audio.mimeType == "audio/mpeg"
+  assert audio.durationSeconds == 1.2
+  assert audio.cues == []
   assert audio.audioURL == f"https://speech.test/audio/{audio.cacheKey}.mp3"
   assert (tmp_path / f"{audio.cacheKey}.mp3").read_bytes() == audio_bytes
 
@@ -289,6 +291,79 @@ def test_volcengine_speech_synthesis_writes_audio_and_reuses_cache(monkeypatch, 
   assert cached_diagnostics == []
   assert cached_results[0].audio.status == "ready"
   assert cached_results[0].audio.audioURL == audio.audioURL
+  assert cached_results[0].audio.cues == []
+
+
+def test_volcengine_speech_synthesis_returns_cues_and_reuses_metadata(monkeypatch, tmp_path):
+  _configure_volcengine_env(monkeypatch, tmp_path)
+  audio_bytes = b"ID3timed-mp3"
+  calls = []
+
+  def fake_stream(method, url, *, headers, json, timeout):
+    calls.append({"method": method, "url": url, "headers": headers, "json": json, "timeout": timeout})
+    return _FakeVolcengineStream(
+      200,
+      [
+        {"code": 0, "data": base64.b64encode(audio_bytes).decode("ascii")},
+        {
+          "code": 0,
+          "payload": {
+            "words": [
+              {"word": "Hello", "startTime": 0.1, "endTime": 0.35, "confidence": 0.91},
+              {"word": "there", "startTime": 0.36, "endTime": 0.7},
+              {"word": "Next", "startTime": 0.9, "endTime": 1.1},
+              {"word": "up", "startTime": 1.12, "endTime": 1.4},
+            ]
+          },
+        },
+        {"code": 20000000, "message": "finished"},
+      ],
+    )
+
+  monkeypatch.setattr(speech.httpx, "stream", fake_stream)
+  segment = RadioSpeechSegment(
+    id="station-intro",
+    kind="stationIntro",
+    text="Hello there. Next up.",
+    displayText="Hello there.",
+    targetItemId="song-1",
+  )
+
+  results, diagnostics = speech.synthesize_speech_segments(
+    [segment],
+    RadioSpeechAudioConfig(enabled=True, provider="volcengine"),
+  )
+
+  assert diagnostics == []
+  assert len(calls) == 1
+  audio = results[0].audio
+  assert audio.status == "ready"
+  assert audio.durationSeconds == 1.4
+  assert len(audio.cues) == 2
+  assert audio.cues[0].displayText == "Hello there."
+  assert audio.cues[0].startTime == 0.1
+  assert audio.cues[0].endTime == 0.7
+  assert audio.cues[0].words[0].word == "Hello"
+  assert audio.cues[0].words[0].confidence == 0.91
+  assert audio.cues[1].displayText == "Next up."
+  assert audio.cues[1].startTime == 0.9
+  assert audio.cues[1].endTime == 1.4
+  assert (tmp_path / f"{audio.cacheKey}.metadata.json").is_file()
+
+  def fail_if_called(*args, **kwargs):
+    raise AssertionError("cache hit should not call Volcengine")
+
+  monkeypatch.setattr(speech.httpx, "stream", fail_if_called)
+  cached_results, cached_diagnostics = speech.synthesize_speech_segments(
+    [segment],
+    RadioSpeechAudioConfig(enabled=True, provider="volcengine"),
+  )
+
+  assert cached_diagnostics == []
+  assert cached_results[0].audio.status == "ready"
+  assert cached_results[0].audio.audioURL == audio.audioURL
+  assert cached_results[0].audio.durationSeconds == 1.4
+  assert [cue.displayText for cue in cached_results[0].audio.cues] == ["Hello there.", "Next up."]
 
 
 def test_volcengine_speech_synthesis_dedupes_cache_keys_and_preserves_order(monkeypatch, tmp_path):

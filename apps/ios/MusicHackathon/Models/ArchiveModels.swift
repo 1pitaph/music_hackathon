@@ -198,8 +198,10 @@ extension ArchiveProfile {
     playlists: [AppleMusicPlaylistSnapshot],
     tracks libraryTracks: [Track]
   ) -> ArchiveProfile {
-    let allTracks = uniqueTracks(from: playlists.flatMap(\.tracks) + libraryTracks)
-    let playlistItems = playlists.map(archiveItem(from:))
+    let realArtworkPlaylists = playlists.compactMap(playlistWithRealArtwork)
+    let realArtworkLibraryTracks = libraryTracks.filter(\.hasRealArtwork)
+    let allTracks = uniqueTracks(from: realArtworkPlaylists.flatMap(\.tracks) + realArtworkLibraryTracks)
+    let playlistItems = realArtworkPlaylists.map(archiveItem(from:))
     let songItems = allTracks.map(archiveItem(from:))
     let artistItems = archiveArtistItems(from: allTracks)
     let totalDuration = allTracks.reduce(0) { $0 + $1.duration }
@@ -207,7 +209,7 @@ extension ArchiveProfile {
     var profile = base
     profile.stats = ArchiveStats(
       listeningHours: Int(totalDuration / 3_600),
-      stationsCount: playlists.count,
+      stationsCount: realArtworkPlaylists.count,
       likesCount: allTracks.count
     )
     profile.published = playlistItems.isEmpty && !allTracks.isEmpty
@@ -218,11 +220,25 @@ extension ArchiveProfile {
     profile.artists = artistItems.map(\.name)
 
     if profile.nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-       let inferredNickname = inferredNickname(from: playlists) {
+       let inferredNickname = inferredNickname(from: realArtworkPlaylists) {
       profile.nickname = inferredNickname
     }
 
     return profile
+  }
+
+  private static func playlistWithRealArtwork(_ playlist: AppleMusicPlaylistSnapshot) -> AppleMusicPlaylistSnapshot? {
+    let tracks = uniqueTracks(from: playlist.tracks.filter(\.hasRealArtwork))
+    let artworkURL = ArtworkURLCandidates.normalized(playlist.artworkURL) ?? tracks.first?.artworkURL
+    guard !tracks.isEmpty, artworkURL != nil else { return nil }
+
+    return AppleMusicPlaylistSnapshot(
+      id: playlist.id,
+      name: playlist.name,
+      curatorName: playlist.curatorName,
+      artworkURL: artworkURL,
+      tracks: tracks
+    )
   }
 
   private static func station(id: String, name: String, genre: String) -> ArchiveStationItem {

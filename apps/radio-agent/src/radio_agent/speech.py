@@ -16,8 +16,10 @@ import httpx
 from radio_agent.schemas import (
   RadioSpeechAudio,
   RadioSpeechAudioConfig,
+  RadioSpeechCue,
   RadioSpeechSegment,
   RadioSpeechSynthesisResult,
+  RadioSpeechTimingWord,
 )
 from radio_agent.voices import resolve_speech_speaker
 
@@ -31,7 +33,9 @@ DEFAULT_VOLCENGINE_SAMPLE_RATE = 24000
 DEFAULT_VOLCENGINE_BIT_RATE = 128000
 DEFAULT_VOLCENGINE_TIMEOUT_SECONDS = 30.0
 DEFAULT_SPEECH_SYNTHESIS_MAX_WORKERS = 4
+SPEECH_SUBTITLE_CACHE_VERSION = "subtitle-v1"
 VOLCENGINE_FINISH_CODE = 20000000
+SENTENCE_TERMINATORS = set(".!?。！？")
 
 MIME_TYPES = {
   "aac": "audio/aac",
@@ -196,6 +200,7 @@ def cache_key_for(
       str(pitch if pitch is not None else ""),
       explicit_language or "",
       emotion or "",
+      SPEECH_SUBTITLE_CACHE_VERSION,
       text.strip(),
     ]).encode("utf-8")
   ).hexdigest()[:24]
@@ -378,7 +383,15 @@ def _synthesize_volcengine_segment(
 
   if file_path and file_path.exists() and file_path.stat().st_size > 0:
     if audio_url:
-      return _ready_audio(segment, context, cache_key, audio_url), diagnostics
+      metadata = _read_speech_metadata(file_path)
+      return _ready_audio(
+        segment,
+        context,
+        cache_key,
+        audio_url,
+        cues=metadata["cues"],
+        duration_seconds=metadata["durationSeconds"],
+      ), diagnostics
     diagnostics.append("Speech audio cache hit, but SPEECH_PUBLIC_BASE_URL is not configured.")
     return _unavailable_audio(segment, context, cache_key), diagnostics
 
@@ -415,7 +428,7 @@ def _synthesize_volcengine_segment(
         )
         return _unavailable_audio(segment, context, cache_key), diagnostics
 
-      audio_bytes, response_diagnostics = _volcengine_audio_bytes(response, segment.id)
+      audio_bytes, timing_words, response_diagnostics = _volcengine_audio_bytes(response, segment.id)
       diagnostics.extend(response_diagnostics)
   except (httpx.HTTPError, ValueError) as exc:
     diagnostics.append(
@@ -427,8 +440,18 @@ def _synthesize_volcengine_segment(
     diagnostics.append(f"Volcengine TTS response for segment '{segment.id}' included empty audio data.")
     return _unavailable_audio(segment, context, cache_key), diagnostics
 
+  cues = _speech_cues_from_timing_words(segment, timing_words)
+  duration_seconds = _duration_seconds_from_cues(cues) or _estimated_duration(segment.text)
   _write_audio_file(file_path, audio_bytes)
-  return _ready_audio(segment, context, cache_key, audio_url), diagnostics
+  _write_speech_metadata(file_path, duration_seconds, cues)
+  return _ready_audio(
+    segment,
+    context,
+    cache_key,
+    audio_url,
+    cues=cues,
+    duration_seconds=duration_seconds,
+  ), diagnostics
 
 
 def _volcengine_payload(
@@ -441,7 +464,7 @@ def _volcengine_payload(
     "bit_rate": context.bit_rate,
     "speech_rate": context.speech_rate,
     "loudness_rate": context.loudness_rate,
-    "enable_subtitle": False,
+    "enable_subtitle": True,
   }
   req_params: dict[str, object] = {
     "text": segment.text,
@@ -471,12 +494,24 @@ def _volcengine_wire_model(model: str) -> str | None:
   return stripped
 
 
-def _volcengine_audio_bytes(response, segment_id: str) -> tuple[bytes, list[str]]:
+def _volcengine_audio_bytes(
+  response,
+  segment_id: str,
+) -> tuple[bytes, list[RadioSpeechTimingWord], list[str]]:
   diagnostics: list[str] = []
   audio_parts: list[bytes] = []
+  timing_words: list[RadioSpeechTimingWord] = []
+  seen_timing_words: set[tuple[str, float, float]] = set()
 
   for chunk_body in _volcengine_response_bodies(response):
     code = chunk_body.get("code")
+    for timing_word in _extract_timing_words(chunk_body):
+      key = (timing_word.word, timing_word.startTime, timing_word.endTime)
+      if key in seen_timing_words:
+        continue
+      seen_timing_words.add(key)
+      timing_words.append(timing_word)
+
     if _is_volcengine_finish_code(code):
       break
     if not _is_volcengine_success_code(code):
@@ -498,7 +533,7 @@ def _volcengine_audio_bytes(response, segment_id: str) -> tuple[bytes, list[str]
     except (binascii.Error, ValueError):
       diagnostics.append(f"Volcengine TTS response for segment '{segment_id}' included invalid base64 audio.")
 
-  return b"".join(audio_parts), diagnostics
+  return b"".join(audio_parts), timing_words, diagnostics
 
 
 def _volcengine_response_bodies(response) -> list[dict]:
@@ -522,6 +557,244 @@ def _volcengine_response_bodies(response) -> list[dict]:
     if remaining.strip():
       raise ValueError(f"Unexpected Volcengine TTS response chunk: {remaining[:80]}")
   return bodies
+
+
+def _extract_timing_words(body: dict) -> list[RadioSpeechTimingWord]:
+  timing_words: list[RadioSpeechTimingWord] = []
+  for candidate in _walk_json_like(body):
+    timing_word = _timing_word_from_dict(candidate)
+    if timing_word:
+      timing_words.append(timing_word)
+
+    for key in ("words", "Words", "subtitles", "Subtitles", "subtitle", "Subtitle"):
+      value = candidate.get(key)
+      if isinstance(value, list):
+        for item in value:
+          if isinstance(item, dict):
+            timing_word = _timing_word_from_dict(item)
+            if timing_word:
+              timing_words.append(timing_word)
+  return timing_words
+
+
+def _walk_json_like(value: object, depth: int = 0) -> list[dict]:
+  if depth > 6:
+    return []
+  if isinstance(value, dict):
+    matches = [value]
+    for nested_value in value.values():
+      matches.extend(_walk_json_like(nested_value, depth + 1))
+    return matches
+  if isinstance(value, list):
+    matches: list[dict] = []
+    for item in value:
+      matches.extend(_walk_json_like(item, depth + 1))
+    return matches
+  if isinstance(value, str):
+    stripped = value.strip()
+    if not stripped or stripped[0] not in "[{":
+      return []
+    try:
+      return _walk_json_like(json.loads(stripped), depth + 1)
+    except json.JSONDecodeError:
+      return []
+  return []
+
+
+def _timing_word_from_dict(value: dict) -> RadioSpeechTimingWord | None:
+  word = _first_present(value, "word", "Word", "text", "Text", "token", "Token")
+  start_time = _first_present(
+    value,
+    "startTime",
+    "StartTime",
+    "start_time",
+    "beginTime",
+    "BeginTime",
+    "begin_time",
+    "start",
+    "Start",
+  )
+  end_time = _first_present(
+    value,
+    "endTime",
+    "EndTime",
+    "end_time",
+    "finishTime",
+    "FinishTime",
+    "finish_time",
+    "end",
+    "End",
+  )
+  if word is None or start_time is None or end_time is None:
+    return None
+
+  normalized_word = str(word).strip()
+  start_seconds = _normalize_timing_seconds(start_time)
+  end_seconds = _normalize_timing_seconds(end_time)
+  if not normalized_word or start_seconds is None or end_seconds is None or end_seconds < start_seconds:
+    return None
+
+  confidence = _normalize_float(_first_present(value, "confidence", "Confidence", "score", "Score"))
+  return RadioSpeechTimingWord(
+    word=normalized_word,
+    startTime=start_seconds,
+    endTime=end_seconds,
+    confidence=confidence,
+  )
+
+
+def _first_present(value: dict, *keys: str) -> object | None:
+  for key in keys:
+    if key in value and value[key] is not None:
+      return value[key]
+  return None
+
+
+def _normalize_timing_seconds(value: object) -> float | None:
+  normalized = _normalize_float(value)
+  if normalized is None:
+    return None
+  if normalized > 30:
+    normalized = normalized / 1000
+  return round(normalized, 3)
+
+
+def _normalize_float(value: object) -> float | None:
+  if value is None:
+    return None
+  try:
+    return float(value)
+  except (TypeError, ValueError):
+    return None
+
+
+def _speech_cues_from_timing_words(
+  segment: RadioSpeechSegment,
+  timing_words: list[RadioSpeechTimingWord],
+) -> list[RadioSpeechCue]:
+  if not timing_words:
+    return []
+
+  spans = _sentence_spans(segment.text)
+  words_by_span: list[list[RadioSpeechTimingWord]] = [[] for _ in spans]
+  cursor = 0
+  current_span_index = 0
+
+  for timing_word in timing_words:
+    word_index = _find_word_index(segment.text, timing_word.word, cursor)
+    if word_index is not None:
+      cursor = word_index + len(timing_word.word)
+      current_span_index = _span_index(for_index=word_index, spans=spans)
+    else:
+      current_span_index = min(current_span_index, len(spans) - 1)
+    words_by_span[current_span_index].append(timing_word)
+
+  cues: list[RadioSpeechCue] = []
+  non_empty_spans = [
+    (span_index, span_words)
+    for span_index, span_words in enumerate(words_by_span)
+    if span_words
+  ]
+  for cue_index, (span_index, span_words) in enumerate(non_empty_spans):
+    start, end = spans[span_index]
+    text = segment.text[start:end].strip() or " ".join(word.word for word in span_words)
+    display_text = segment.displayText.strip() if len(non_empty_spans) == 1 else text
+    if not display_text:
+      display_text = text
+    cues.append(RadioSpeechCue(
+      id=f"{segment.id}-cue-{cue_index + 1}",
+      text=text,
+      displayText=display_text,
+      startTime=span_words[0].startTime,
+      endTime=span_words[-1].endTime,
+      words=span_words,
+    ))
+  return cues
+
+
+def _sentence_spans(text: str) -> list[tuple[int, int]]:
+  stripped = text.strip()
+  if not stripped:
+    return [(0, 0)]
+
+  spans: list[tuple[int, int]] = []
+  start = 0
+  for index, character in enumerate(text):
+    if character not in SENTENCE_TERMINATORS:
+      continue
+    end = index + 1
+    while end < len(text) and text[end] in "\"'”’）)] ":
+      end += 1
+    spans.append((start, end))
+    start = end
+
+  if start < len(text):
+    spans.append((start, len(text)))
+  return [(start, end) for start, end in spans if text[start:end].strip()] or [(0, len(text))]
+
+
+def _find_word_index(text: str, word: str, cursor: int) -> int | None:
+  stripped = word.strip()
+  if not stripped:
+    return None
+  index = text.find(stripped, cursor)
+  if index >= 0:
+    return index
+  index = text.find(stripped)
+  return index if index >= 0 else None
+
+
+def _span_index(for_index: int, spans: list[tuple[int, int]]) -> int:
+  for index, (start, end) in enumerate(spans):
+    if start <= for_index < end:
+      return index
+  return max(0, len(spans) - 1)
+
+
+def _duration_seconds_from_cues(cues: list[RadioSpeechCue]) -> float | None:
+  if not cues:
+    return None
+  return round(max(cue.endTime for cue in cues), 2)
+
+
+def _read_speech_metadata(file_path: Path) -> dict:
+  metadata_path = _speech_metadata_path(file_path)
+  if not metadata_path.exists():
+    return {"durationSeconds": None, "cues": []}
+  try:
+    raw_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+  except (OSError, json.JSONDecodeError):
+    return {"durationSeconds": None, "cues": []}
+
+  cues = []
+  raw_cues = raw_metadata.get("cues") if isinstance(raw_metadata, dict) else None
+  if isinstance(raw_cues, list):
+    for raw_cue in raw_cues:
+      try:
+        cues.append(RadioSpeechCue.model_validate(raw_cue))
+      except ValueError:
+        continue
+
+  duration_seconds = _normalize_float(raw_metadata.get("durationSeconds")) if isinstance(raw_metadata, dict) else None
+  return {"durationSeconds": duration_seconds, "cues": cues}
+
+
+def _write_speech_metadata(
+  file_path: Path,
+  duration_seconds: float | None,
+  cues: list[RadioSpeechCue],
+) -> None:
+  metadata_path = _speech_metadata_path(file_path)
+  metadata_path.parent.mkdir(parents=True, exist_ok=True)
+  metadata = {
+    "durationSeconds": duration_seconds,
+    "cues": [cue.model_dump() for cue in cues],
+  }
+  metadata_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+
+
+def _speech_metadata_path(file_path: Path) -> Path:
+  return file_path.with_suffix(".metadata.json")
 
 
 def _consume_json_objects(text: str) -> tuple[list[dict], str]:
@@ -556,15 +829,18 @@ def _ready_audio(
   context: SpeechSynthesisContext,
   cache_key: str,
   audio_url: str,
+  cues: list[RadioSpeechCue] | None = None,
+  duration_seconds: float | None = None,
 ) -> RadioSpeechAudio:
   return RadioSpeechAudio(
     audioURL=audio_url,
     mimeType=MIME_TYPES.get(context.audio_format, "audio/mpeg"),
-    durationSeconds=_estimated_duration(segment.text),
+    durationSeconds=duration_seconds or _estimated_duration(segment.text),
     cacheKey=cache_key,
     voice=context.voice,
     model=context.model,
     status="ready",
+    cues=cues or [],
   )
 
 
@@ -582,6 +858,7 @@ def _unavailable_audio(
     voice=context.voice or DEFAULT_OPENAI_SPEECH_VOICE,
     model=context.model,
     status="unavailable",
+    cues=[],
   )
 
 

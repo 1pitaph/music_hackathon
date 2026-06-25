@@ -151,7 +151,7 @@ private struct PlaylistArtworkThumbnail: View {
 
   var body: some View {
     ArtworkImageView(resolution: artworkResolution) {
-      fallback
+      Color.clear
     }
     .frame(width: size, height: size)
     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -159,25 +159,7 @@ private struct PlaylistArtworkThumbnail: View {
   }
 
   private var artworkResolution: ArtworkResolution {
-    ArtworkResolution(
-      remoteURLs: playlist.artworkCandidateURLs,
-      bundledFallback: BundledCoverCatalog.fallbackSource(
-        forID: playlist.id,
-        title: playlist.name,
-        genre: nil
-      ),
-      fallbackSeed: playlist.id,
-      fallbackTitle: playlist.name,
-      fallbackColorHex: ArchiveStationItem.colorHex(for: playlist.id)
-    )
-  }
-
-  private var fallback: some View {
-    ZStack {
-      Color(hex: ArchiveStationItem.colorHex(for: playlist.id))
-      Image(systemName: "music.note.list")
-        .foregroundStyle(.white.opacity(0.7))
-    }
+    ArtworkResolution(remoteURLs: playlist.artworkCandidateURLs)
   }
 }
 
@@ -187,7 +169,7 @@ private struct TrackArtworkThumbnail: View {
 
   var body: some View {
     ArtworkImageView(resolution: artworkResolution) {
-      fallback
+      Color.clear
     }
     .frame(width: size, height: size)
     .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
@@ -195,25 +177,7 @@ private struct TrackArtworkThumbnail: View {
   }
 
   private var artworkResolution: ArtworkResolution {
-    ArtworkResolution(
-      remoteURLs: [track.artworkURL],
-      bundledFallback: BundledCoverCatalog.fallbackSource(
-        forID: track.radioIdentity,
-        title: track.title,
-        genre: track.mood
-      ),
-      fallbackSeed: track.radioIdentity,
-      fallbackTitle: track.title,
-      fallbackColorHex: ArchiveStationItem.colorHex(for: track.radioIdentity)
-    )
-  }
-
-  private var fallback: some View {
-    ZStack {
-      Color(hex: ArchiveStationItem.colorHex(for: track.radioIdentity))
-      Image(systemName: track.artworkSystemName)
-        .foregroundStyle(.white.opacity(0.7))
-    }
+    ArtworkResolution(remoteURLs: [track.artworkURL])
   }
 }
 

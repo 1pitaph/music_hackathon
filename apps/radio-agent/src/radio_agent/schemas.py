@@ -74,6 +74,22 @@ class RadioGeneratedItem(BaseModel):
   source: str
 
 
+class RadioSpeechTimingWord(BaseModel):
+  word: str
+  startTime: float
+  endTime: float
+  confidence: float | None = None
+
+
+class RadioSpeechCue(BaseModel):
+  id: str
+  text: str
+  displayText: str
+  startTime: float
+  endTime: float
+  words: list[RadioSpeechTimingWord] = Field(default_factory=list)
+
+
 class RadioSpeechAudio(BaseModel):
   audioURL: str | None = None
   mimeType: str = "audio/mpeg"
@@ -82,6 +98,7 @@ class RadioSpeechAudio(BaseModel):
   voice: str
   model: str
   status: Literal["ready", "unavailable", "failed"] = "unavailable"
+  cues: list[RadioSpeechCue] = Field(default_factory=list)
 
 
 class RadioSpeechAudioConfig(BaseModel):

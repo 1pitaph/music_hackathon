@@ -66,6 +66,10 @@ struct Track: Identifiable, Hashable, Codable {
     normalizedAppleMusicID != nil || previewURL != nil
   }
 
+  var hasRealArtwork: Bool {
+    ArtworkURLCandidates.normalized(artworkURL) != nil
+  }
+
   var durationText: String {
     let totalSeconds = Int(duration)
     return "\(totalSeconds / 60):\(String(format: "%02d", totalSeconds % 60))"

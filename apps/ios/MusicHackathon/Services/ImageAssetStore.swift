@@ -27,16 +27,12 @@ final class ImageAssetStore {
     profileAvatarSource = metadata.profileAvatarSource
   }
 
-  func coverSource(for stationID: String) -> ArtworkSource? {
-    metadata.coverSources[stationID]
-  }
-
   func imageURL(for source: ArtworkSource) -> URL? {
     switch source {
     case let .userFile(fileName):
       return imagesDirectoryURL.appendingPathComponent(fileName)
-    case let .bundledCover(id):
-      return BundledCoverCatalog.url(for: id)
+    case .bundledCover:
+      return nil
     }
   }
 
@@ -67,31 +63,11 @@ final class ImageAssetStore {
       removeUserFileIfNeeded(metadata.profileAvatarSource, excluding: source)
       metadata.profileAvatarSource = source
       profileAvatarSource = source
-    case .stationCover:
-      let stationID = try normalizedStationID(from: key)
-      removeUserFileIfNeeded(metadata.coverSources[stationID], excluding: source)
-      metadata.coverSources[stationID] = source
     }
 
     try saveMetadata()
     revision += 1
     return source
-  }
-
-  func setBundledCover(id: String, for stationID: String) {
-    guard BundledCoverCatalog.cover(id: id) != nil else { return }
-    let source = ArtworkSource.bundledCover(id: id)
-    removeUserFileIfNeeded(metadata.coverSources[stationID], excluding: source)
-    metadata.coverSources[stationID] = source
-    try? saveMetadata()
-    revision += 1
-  }
-
-  func clearCover(for stationID: String) {
-    removeUserFileIfNeeded(metadata.coverSources[stationID], excluding: nil)
-    metadata.coverSources[stationID] = nil
-    try? saveMetadata()
-    revision += 1
   }
 
   func clearProfileAvatar() {
@@ -113,16 +89,7 @@ final class ImageAssetStore {
     switch purpose {
     case .profileAvatar:
       return "profile-avatar.jpg"
-    case .stationCover:
-      let stationID = (key ?? "station").trimmingCharacters(in: .whitespacesAndNewlines)
-      return "station-\(String(format: "%016llx", BundledCoverCatalog.stableHash(stationID))).jpg"
     }
-  }
-
-  private func normalizedStationID(from key: String?) throws -> String {
-    let stationID = key?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    guard !stationID.isEmpty else { throw ImageAssetStoreError.missingStationID }
-    return stationID
   }
 
   private func removeUserFileIfNeeded(_ source: ArtworkSource?, excluding replacement: ArtworkSource?) {
@@ -195,15 +162,28 @@ final class ImageAssetStore {
 
 private struct ImageAssetMetadata: Codable {
   var profileAvatarSource: ArtworkSource?
-  var coverSources: [String: ArtworkSource]
 
-  init(profileAvatarSource: ArtworkSource? = nil, coverSources: [String: ArtworkSource] = [:]) {
+  init(profileAvatarSource: ArtworkSource? = nil) {
     self.profileAvatarSource = profileAvatarSource
-    self.coverSources = coverSources
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case profileAvatarSource
+    case coverSources
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    profileAvatarSource = try container.decodeIfPresent(ArtworkSource.self, forKey: .profileAvatarSource)
+    _ = try container.decodeIfPresent([String: ArtworkSource].self, forKey: .coverSources)
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encodeIfPresent(profileAvatarSource, forKey: .profileAvatarSource)
   }
 }
 
 enum ImageAssetStoreError: Error {
   case invalidImage
-  case missingStationID
 }
