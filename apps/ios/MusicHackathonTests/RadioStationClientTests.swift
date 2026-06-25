@@ -6,7 +6,7 @@ final class RadioStationClientTests: XCTestCase {
     let session = makeSession { request in
       XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/stations/current")
       XCTAssertEqual(request.httpMethod, "GET")
-      XCTAssertEqual(request.timeoutInterval, 15.0)
+      XCTAssertEqual(request.timeoutInterval, 30.0)
       XCTAssertEqual(request.value(forHTTPHeaderField: "Accept-Language"), AppLanguage.acceptLanguageHeader())
 
       let data = """
@@ -107,6 +107,7 @@ final class RadioStationClientTests: XCTestCase {
       XCTAssertEqual(memoryContext?["tasteSummary"] as? String, "Likes intimate pop.")
       let speechAudio = body?["speechAudio"] as? [String: Any]
       XCTAssertEqual(speechAudio?["enabled"] as? Bool, true)
+      XCTAssertEqual(speechAudio?["delivery"] as? String, "stream")
       XCTAssertEqual(speechAudio?["provider"] as? String, "volcengine")
       XCTAssertEqual(speechAudio?["speaker"] as? String, "zh_female_shuangkuaisisi_moon_bigtts")
       XCTAssertEqual(speechAudio?["resourceId"] as? String, "seed-tts-1.0")
@@ -139,6 +140,7 @@ final class RadioStationClientTests: XCTestCase {
             "agent": "entry_copy_agent",
             "audio": {
               "audioURL": "https://example.com/speech/intro.mp3",
+              "streamURL": "https://example.com/speech/stream/intro.mp3",
               "mimeType": "audio/mpeg",
               "durationSeconds": 3.2,
               "cacheKey": "speech_intro",
@@ -157,6 +159,7 @@ final class RadioStationClientTests: XCTestCase {
               "agent": "transition_copy_agent",
               "audio": {
                 "audioURL": "https://example.com/speech/transition.mp3",
+                "streamUrl": "https://example.com/speech/stream/transition.mp3",
                 "mimeType": "audio/mpeg",
                 "durationSeconds": 2.8,
                 "cacheKey": "speech_transition",
@@ -211,14 +214,79 @@ final class RadioStationClientTests: XCTestCase {
     XCTAssertEqual(result.station.subtitle, "Generated from local memory.")
     XCTAssertEqual(result.station.speech?.stationIntro?.displayText, "Welcome into this generated station.")
     XCTAssertEqual(result.station.speech?.stationIntro?.audio?.audioURL?.absoluteString, "https://example.com/speech/intro.mp3")
+    XCTAssertEqual(result.station.speech?.stationIntro?.audio?.streamURL?.absoluteString, "https://example.com/speech/stream/intro.mp3")
+    XCTAssertEqual(result.station.speech?.stationIntro?.playbackSegment.playableAudioURL?.absoluteString, "https://example.com/speech/stream/intro.mp3")
     XCTAssertEqual(result.station.speech?.stationIntro?.audio?.status, "ready")
     XCTAssertEqual(result.station.speech?.betweenTracks.first?.toItemId, "item-1")
     XCTAssertEqual(result.station.speech?.betweenTracks.first?.audio?.cacheKey, "speech_transition")
+    XCTAssertEqual(result.station.speech?.betweenTracks.first?.audio?.streamURL?.absoluteString, "https://example.com/speech/stream/transition.mp3")
     XCTAssertEqual(result.station.items.first?.handoffText, "Next: Signal by Artist A.")
     XCTAssertEqual(result.diagnostics, ["ok"])
     XCTAssertEqual(result.memoryPatchProposals.first?.type, "taste")
     XCTAssertEqual(result.stationSessionID, "session-1")
     XCTAssertEqual(result.continuationCursor, "cursor-1")
+  }
+
+  func testSpeechPlaybackURLPrefersValidStreamURLAndFallsBackToAudioURL() {
+    let streamAudio = RadioSpeechAudio(
+      audioURL: URL(string: "https://example.com/speech/file.mp3"),
+      streamURL: URL(string: "https://example.com/speech/stream/file.mp3"),
+      cacheKey: "speech-stream",
+      voice: "voice-a",
+      model: "seed-tts-1.0",
+      status: "ready"
+    )
+    let streamSpeech = RadioSpeechPlaybackSegment(
+      id: "station-intro",
+      kind: .stationIntro,
+      text: "Welcome.",
+      displayText: "Welcome.",
+      audio: streamAudio
+    )
+
+    XCTAssertEqual(
+      streamSpeech.playableAudioURL?.absoluteString,
+      "https://example.com/speech/stream/file.mp3"
+    )
+
+    let invalidStreamAudio = RadioSpeechAudio(
+      audioURL: URL(string: "https://example.com/speech/file.mp3"),
+      streamURL: URL(string: "file:///tmp/file.mp3"),
+      cacheKey: "speech-audio",
+      voice: "voice-a",
+      model: "seed-tts-1.0",
+      status: "ready"
+    )
+    let audioFallbackSpeech = RadioSpeechPlaybackSegment(
+      id: "transition-1",
+      kind: .transition,
+      text: "Next.",
+      displayText: "Next.",
+      audio: invalidStreamAudio
+    )
+
+    XCTAssertEqual(
+      audioFallbackSpeech.playableAudioURL?.absoluteString,
+      "https://example.com/speech/file.mp3"
+    )
+
+    let invalidAudio = RadioSpeechAudio(
+      audioURL: URL(string: "ftp://example.com/speech/file.mp3"),
+      streamURL: URL(string: "file:///tmp/file.mp3"),
+      cacheKey: "speech-invalid",
+      voice: "voice-a",
+      model: "seed-tts-1.0",
+      status: "ready"
+    )
+    let unavailableSpeech = RadioSpeechPlaybackSegment(
+      id: "transition-2",
+      kind: .transition,
+      text: "Next.",
+      displayText: "Next.",
+      audio: invalidAudio
+    )
+
+    XCTAssertNil(unavailableSpeech.playableAudioURL)
   }
 
   func testGenerateStationCanEncodeEnglishSpeechLanguage() async throws {
@@ -449,6 +517,11 @@ final class RadioStationClientTests: XCTestCase {
       XCTAssertEqual((body?["seedTracks"] as? [[String: Any]])?.count, 5)
       XCTAssertEqual((body?["items"] as? [[String: Any]])?.count, 5)
       XCTAssertEqual((body?["seedTracks"] as? [[String: Any]])?.first?["appleMusicID"] as? String, "seed-1")
+      let speech = body?["speech"] as? [String: Any]
+      let stationIntro = speech?["stationIntro"] as? [String: Any]
+      let introAudio = stationIntro?["audio"] as? [String: Any]
+      XCTAssertEqual(introAudio?["audioURL"] as? String, "https://example.com/speech/intro.mp3")
+      XCTAssertEqual(introAudio?["streamURL"] as? String, "https://example.com/speech/stream/intro.mp3")
 
       let data = """
       {
@@ -599,7 +672,7 @@ final class RadioStationClientTests: XCTestCase {
     let session = makeSession { request in
       XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/speech/voices")
       XCTAssertEqual(request.httpMethod, "GET")
-      XCTAssertEqual(request.timeoutInterval, 15.0)
+      XCTAssertEqual(request.timeoutInterval, 30.0)
       XCTAssertEqual(request.value(forHTTPHeaderField: "Accept-Language"), AppLanguage.acceptLanguageHeader())
 
       let data = """
@@ -649,7 +722,7 @@ final class RadioStationClientTests: XCTestCase {
     let session = makeSession { request in
       XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/memory/compress")
       XCTAssertEqual(request.httpMethod, "POST")
-      XCTAssertEqual(request.timeoutInterval, 15.0)
+      XCTAssertEqual(request.timeoutInterval, 30.0)
       XCTAssertEqual(request.value(forHTTPHeaderField: "Accept-Language"), AppLanguage.acceptLanguageHeader())
 
       let data = """
@@ -796,6 +869,22 @@ final class RadioStationClientTests: XCTestCase {
       title: "Draft Radio",
       subtitle: "Draft intro.",
       items: items,
+      speech: RadioSpeech(
+        stationIntro: RadioStationIntroCopy(
+          text: "Draft intro.",
+          displayText: "Draft intro.",
+          targetItemId: "item-1",
+          audio: RadioSpeechAudio(
+            audioURL: URL(string: "https://example.com/speech/intro.mp3"),
+            streamURL: URL(string: "https://example.com/speech/stream/intro.mp3"),
+            durationSeconds: 2.4,
+            cacheKey: "speech_intro",
+            voice: "voice-a",
+            model: "seed-tts-1.0",
+            status: "ready"
+          )
+        )
+      ),
       allowsAutoExtension: false
     )
     return DiscoverStationPublicationDraft(

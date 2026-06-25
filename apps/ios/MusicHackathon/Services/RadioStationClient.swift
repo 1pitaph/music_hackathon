@@ -384,6 +384,7 @@ struct RadioStationGenerationContext: Encodable, Equatable {
 
 struct RadioSpeechAudioRequest: Codable, Equatable {
   var enabled = false
+  var delivery = "stream"
   var provider = "volcengine"
   var voice: String?
   var speaker: String?
@@ -614,7 +615,7 @@ struct RadioStationClient: RadioStationFetching, DiscoverStationServing {
   init(
     baseURL: URL? = Self.defaultBaseURL,
     session: URLSession = .shared,
-    timeout: TimeInterval = 15.0,
+    timeout: TimeInterval = 30.0,
     generationTimeout: TimeInterval = 45.0,
     diagnostics: DiagnosticsStore? = nil
   ) {

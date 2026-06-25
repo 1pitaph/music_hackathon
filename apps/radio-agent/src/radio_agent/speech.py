@@ -8,7 +8,8 @@ import os
 import tempfile
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
+from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
@@ -77,25 +78,18 @@ def synthesize_speech_segments(
 ) -> tuple[list[RadioSpeechSynthesisResult], list[str]]:
   diagnostics: list[str] = []
   results: list[RadioSpeechSynthesisResult] = []
-  context = _speech_context(config)
+  context, volcengine_settings, runtime_diagnostics = _configured_speech_runtime(config)
+  diagnostics.extend(runtime_diagnostics)
 
   if not segments:
     return [], diagnostics
 
-  volcengine_settings: VolcengineSettings | None = None
-  if context.provider == "mock":
-    diagnostics.append("Using mock speech synthesis metadata.")
-  elif not _speech_is_configured():
-    diagnostics.append("Speech synthesis is not configured; returning text-only speech metadata.")
-  elif context.provider == "volcengine":
-    speaker, speaker_diagnostics = resolve_speech_speaker(context.voice)
-    context = replace(context, voice=speaker)
-    diagnostics.extend(speaker_diagnostics)
-    volcengine_settings, settings_diagnostics = _volcengine_settings(context)
-    diagnostics.extend(settings_diagnostics)
-  else:
-    diagnostics.append(
-      f"Speech provider '{context.provider}' is not implemented; returning text-only speech metadata."
+  if config.delivery == "stream":
+    return _prepare_streaming_speech_segments(
+      segments,
+      context,
+      volcengine_settings,
+      diagnostics,
     )
 
   if context.provider == "volcengine" and _speech_is_configured() and volcengine_settings:
@@ -121,6 +115,129 @@ def synthesize_speech_segments(
       audio=audio,
     ))
 
+  return results, diagnostics
+
+
+def _configured_speech_runtime(
+  config: RadioSpeechAudioConfig,
+) -> tuple[SpeechSynthesisContext, VolcengineSettings | None, list[str]]:
+  diagnostics: list[str] = []
+  context = _speech_context(config)
+  volcengine_settings: VolcengineSettings | None = None
+
+  if context.provider == "mock":
+    diagnostics.append("Using mock speech synthesis metadata.")
+  elif not _speech_is_configured():
+    diagnostics.append("Speech synthesis is not configured; returning text-only speech metadata.")
+  elif context.provider == "volcengine":
+    speaker, speaker_diagnostics = resolve_speech_speaker(context.voice)
+    context = replace(context, voice=speaker)
+    diagnostics.extend(speaker_diagnostics)
+    volcengine_settings, settings_diagnostics = _volcengine_settings(context)
+    diagnostics.extend(settings_diagnostics)
+  else:
+    diagnostics.append(
+      f"Speech provider '{context.provider}' is not implemented; returning text-only speech metadata."
+    )
+
+  return context, volcengine_settings, diagnostics
+
+
+def _prepare_streaming_speech_segments(
+  segments: list[RadioSpeechSegment],
+  context: SpeechSynthesisContext,
+  volcengine_settings: VolcengineSettings | None,
+  diagnostics: list[str],
+) -> tuple[list[RadioSpeechSynthesisResult], list[str]]:
+  if context.provider == "mock":
+    return _mock_streaming_speech_segments(segments, context, diagnostics)
+
+  if context.provider != "volcengine" or not _speech_is_configured() or not volcengine_settings:
+    results = [
+      RadioSpeechSynthesisResult(
+        **segment.model_dump(),
+        audio=_unavailable_audio(segment, context),
+      )
+      for segment in segments
+    ]
+    return results, diagnostics
+
+  results: list[RadioSpeechSynthesisResult] = []
+  for segment in segments:
+    cache_key = _cache_key_for_context(segment.text, context)
+    file_name = f"{cache_key}.{context.audio_format}"
+    file_path = speech_audio_file_path(file_name)
+    audio_url = _speech_audio_url(file_name)
+    stream_url = _speech_stream_url(file_name)
+
+    if not file_path:
+      diagnostics.append(f"Speech audio cache path is invalid for {file_name}.")
+      audio = _unavailable_audio(segment, context, cache_key)
+    elif not audio_url or not stream_url:
+      diagnostics.append("SPEECH_PUBLIC_BASE_URL is required before returning streamable speech audio.")
+      audio = _unavailable_audio(segment, context, cache_key)
+    elif file_path.exists() and file_path.stat().st_size > 0:
+      metadata = _read_speech_metadata(file_path)
+      audio = _ready_audio(
+        segment,
+        context,
+        cache_key,
+        audio_url,
+        stream_url=stream_url,
+        cues=metadata["cues"],
+        duration_seconds=metadata["durationSeconds"],
+      )
+    else:
+      duration_seconds = _estimated_duration(segment.text)
+      _write_speech_metadata(
+        file_path,
+        duration_seconds,
+        [],
+        segment=segment,
+        context=context,
+      )
+      audio = _ready_audio(
+        segment,
+        context,
+        cache_key,
+        audio_url,
+        stream_url=stream_url,
+        duration_seconds=duration_seconds,
+      )
+
+    results.append(RadioSpeechSynthesisResult(
+      **segment.model_dump(),
+      audio=audio,
+    ))
+
+  return results, diagnostics
+
+
+def _mock_streaming_speech_segments(
+  segments: list[RadioSpeechSegment],
+  context: SpeechSynthesisContext,
+  diagnostics: list[str],
+) -> tuple[list[RadioSpeechSynthesisResult], list[str]]:
+  results: list[RadioSpeechSynthesisResult] = []
+  for segment in segments:
+    cache_key = _cache_key_for_context(segment.text, context)
+    audio_url = _mock_audio_url(cache_key, context.audio_format)
+    stream_url = _mock_stream_url(cache_key, context.audio_format)
+    audio = RadioSpeechAudio(
+      audioURL=audio_url,
+      streamURL=stream_url,
+      mimeType=MIME_TYPES.get(context.audio_format, "audio/mpeg"),
+      durationSeconds=_estimated_duration(segment.text),
+      cacheKey=cache_key,
+      voice=context.voice or DEFAULT_OPENAI_SPEECH_VOICE,
+      model=context.model,
+      status="ready" if audio_url or stream_url else "unavailable",
+      cues=[],
+    )
+    results.append(RadioSpeechSynthesisResult(
+      **segment.model_dump(),
+      audio=audio,
+    ))
   return results, diagnostics
 
 
@@ -228,6 +345,53 @@ def speech_audio_file_path(file_name: str) -> Path | None:
 def speech_audio_mime_type(file_name: str) -> str:
   extension = Path(file_name).suffix.removeprefix(".").lower()
   return MIME_TYPES.get(extension, "application/octet-stream")
+
+
+def ensure_speech_audio_file(file_name: str) -> Path | None:
+  file_path = speech_audio_file_path(file_name)
+  if not file_path:
+    return None
+  if file_path.is_file():
+    return file_path
+
+  prepared = _read_prepared_speech(file_path)
+  if not prepared:
+    return None
+
+  segment, context = prepared
+  settings, _ = _settings_for_prepared_stream(context)
+  if not settings:
+    return None
+
+  audio, _ = _synthesize_volcengine_segment(segment, context, settings)
+  if audio.status != "ready":
+    return None
+  return file_path if file_path.is_file() else None
+
+
+def can_stream_speech_audio(file_name: str) -> bool:
+  file_path = speech_audio_file_path(file_name)
+  if not file_path:
+    return False
+  return file_path.is_file() or _read_prepared_speech(file_path) is not None
+
+
+def stream_speech_audio_file(file_name: str) -> Iterator[bytes]:
+  file_path = speech_audio_file_path(file_name)
+  if not file_path:
+    return iter(())
+  if file_path.is_file():
+    return _iter_file_chunks(file_path)
+
+  prepared = _read_prepared_speech(file_path)
+  if not prepared:
+    return iter(())
+
+  segment, context = prepared
+  settings, diagnostics = _settings_for_prepared_stream(context)
+  if not settings:
+    return _iter_raise(ValueError("; ".join(diagnostics) or "Speech stream is not configured."))
+  return _stream_volcengine_segment_to_cache(segment, context, settings, file_path)
 
 
 def _speech_context(config: RadioSpeechAudioConfig) -> SpeechSynthesisContext:
@@ -443,7 +607,7 @@ def _synthesize_volcengine_segment(
   cues = _speech_cues_from_timing_words(segment, timing_words)
   duration_seconds = _duration_seconds_from_cues(cues) or _estimated_duration(segment.text)
   _write_audio_file(file_path, audio_bytes)
-  _write_speech_metadata(file_path, duration_seconds, cues)
+  _write_speech_metadata(file_path, duration_seconds, cues, segment=segment, context=context)
   return _ready_audio(
     segment,
     context,
@@ -536,8 +700,108 @@ def _volcengine_audio_bytes(
   return b"".join(audio_parts), timing_words, diagnostics
 
 
+def _stream_volcengine_segment_to_cache(
+  segment: RadioSpeechSegment,
+  context: SpeechSynthesisContext,
+  settings: VolcengineSettings,
+  file_path: Path,
+) -> Iterator[bytes]:
+  diagnostics: list[str] = []
+  timing_words: list[RadioSpeechTimingWord] = []
+  seen_timing_words: set[tuple[str, float, float]] = set()
+  completed = False
+  wrote_audio = False
+
+  file_path.parent.mkdir(parents=True, exist_ok=True)
+  temporary_path: Path | None = None
+  try:
+    with tempfile.NamedTemporaryFile(dir=file_path.parent, delete=False) as temporary_file:
+      temporary_path = Path(temporary_file.name)
+      with httpx.stream(
+        "POST",
+        settings.endpoint,
+        headers=_volcengine_headers(settings, _cache_key_for_context(segment.text, context)),
+        json=_volcengine_payload(segment, context),
+        timeout=settings.timeout_seconds,
+      ) as response:
+        if response.status_code != 200:
+          raise ValueError(f"Volcengine TTS request failed for segment '{segment.id}' with HTTP {response.status_code}.")
+
+        for chunk_body in _iter_volcengine_response_bodies(response):
+          code = chunk_body.get("code")
+          for timing_word in _extract_timing_words(chunk_body):
+            key = (timing_word.word, timing_word.startTime, timing_word.endTime)
+            if key in seen_timing_words:
+              continue
+            seen_timing_words.add(key)
+            timing_words.append(timing_word)
+
+          if _is_volcengine_finish_code(code):
+            break
+          if not _is_volcengine_success_code(code):
+            message = str(chunk_body.get("message") or chunk_body.get("Message") or "unknown error")
+            diagnostics.append(
+              f"Volcengine TTS returned code {code} for segment '{segment.id}': {_safe_message(message)}."
+            )
+            continue
+
+          encoded_audio = chunk_body.get("data")
+          if encoded_audio is None:
+            continue
+          if not isinstance(encoded_audio, str) or not encoded_audio:
+            diagnostics.append(f"Volcengine TTS response for segment '{segment.id}' included invalid audio data.")
+            continue
+
+          try:
+            audio_bytes = base64.b64decode(encoded_audio, validate=True)
+          except (binascii.Error, ValueError):
+            diagnostics.append(f"Volcengine TTS response for segment '{segment.id}' included invalid base64 audio.")
+            continue
+          if not audio_bytes:
+            continue
+
+          temporary_file.write(audio_bytes)
+          wrote_audio = True
+          yield audio_bytes
+
+    if not wrote_audio:
+      raise ValueError(
+        "; ".join(diagnostics)
+        or f"Volcengine TTS response for segment '{segment.id}' included empty audio data."
+      )
+
+    cues = _speech_cues_from_timing_words(segment, timing_words)
+    duration_seconds = _duration_seconds_from_cues(cues) or _estimated_duration(segment.text)
+    temporary_path.replace(file_path)
+    temporary_path = None
+    _write_speech_metadata(file_path, duration_seconds, cues, segment=segment, context=context)
+    completed = True
+  finally:
+    if not completed and temporary_path and temporary_path.exists():
+      try:
+        temporary_path.unlink()
+      except OSError:
+        pass
+
+
+def _volcengine_headers(settings: VolcengineSettings, cache_key: str) -> dict[str, str]:
+  request_id = f"{cache_key}_{uuid.uuid4().hex[:8]}"
+  headers = {
+    "Content-Type": "application/json",
+    "X-Api-Key": settings.api_key,
+    "X-Api-Resource-Id": settings.resource_id,
+    "X-Api-Request-Id": request_id,
+  }
+  if settings.require_usage_tokens:
+    headers["X-Control-Require-Usage-Tokens-Return"] = "*"
+  return headers
+
+
 def _volcengine_response_bodies(response) -> list[dict]:
-  bodies: list[dict] = []
+  return list(_iter_volcengine_response_bodies(response))
+
+
+def _iter_volcengine_response_bodies(response) -> Iterator[dict]:
   buffered = ""
   for line in response.iter_lines():
     if isinstance(line, bytes):
@@ -549,14 +813,15 @@ def _volcengine_response_bodies(response) -> list[dict]:
       line = line.removeprefix("data:").strip()
     buffered += line
     parsed, buffered = _consume_json_objects(buffered)
-    bodies.extend(parsed)
+    for body in parsed:
+      yield body
 
   if buffered.strip():
     parsed, remaining = _consume_json_objects(buffered.strip())
-    bodies.extend(parsed)
+    for body in parsed:
+      yield body
     if remaining.strip():
       raise ValueError(f"Unexpected Volcengine TTS response chunk: {remaining[:80]}")
-  return bodies
 
 
 def _extract_timing_words(body: dict) -> list[RadioSpeechTimingWord]:
@@ -779,10 +1044,46 @@ def _read_speech_metadata(file_path: Path) -> dict:
   return {"durationSeconds": duration_seconds, "cues": cues}
 
 
+def _read_prepared_speech(file_path: Path) -> tuple[RadioSpeechSegment, SpeechSynthesisContext] | None:
+  metadata_path = _speech_metadata_path(file_path)
+  if not metadata_path.exists():
+    return None
+  try:
+    raw_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+  except (OSError, json.JSONDecodeError):
+    return None
+  if not isinstance(raw_metadata, dict):
+    return None
+
+  raw_segment = raw_metadata.get("segment")
+  raw_context = raw_metadata.get("context")
+  if not isinstance(raw_segment, dict) or not isinstance(raw_context, dict):
+    return None
+  try:
+    segment = RadioSpeechSegment.model_validate(raw_segment)
+    context = SpeechSynthesisContext(**raw_context)
+  except (TypeError, ValueError):
+    return None
+  return segment, context
+
+
+def _settings_for_prepared_stream(
+  context: SpeechSynthesisContext,
+) -> tuple[VolcengineSettings | None, list[str]]:
+  if context.provider != "volcengine":
+    return None, [f"Speech provider '{context.provider}' is not implemented for streaming."]
+  if not _speech_is_configured():
+    return None, ["Speech synthesis is not configured."]
+  return _volcengine_settings(context)
+
+
 def _write_speech_metadata(
   file_path: Path,
   duration_seconds: float | None,
   cues: list[RadioSpeechCue],
+  *,
+  segment: RadioSpeechSegment | None = None,
+  context: SpeechSynthesisContext | None = None,
 ) -> None:
   metadata_path = _speech_metadata_path(file_path)
   metadata_path.parent.mkdir(parents=True, exist_ok=True)
@@ -790,11 +1091,29 @@ def _write_speech_metadata(
     "durationSeconds": duration_seconds,
     "cues": [cue.model_dump() for cue in cues],
   }
+  if segment:
+    metadata["segment"] = segment.model_dump()
+  if context:
+    metadata["context"] = asdict(context)
   metadata_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
 
 
 def _speech_metadata_path(file_path: Path) -> Path:
   return file_path.with_suffix(".metadata.json")
+
+
+def _iter_file_chunks(path: Path, chunk_size: int = 64 * 1024) -> Iterator[bytes]:
+  with path.open("rb") as audio_file:
+    while True:
+      chunk = audio_file.read(chunk_size)
+      if not chunk:
+        break
+      yield chunk
+
+
+def _iter_raise(error: Exception) -> Iterator[bytes]:
+  raise error
+  yield b""
 
 
 def _consume_json_objects(text: str) -> tuple[list[dict], str]:
@@ -829,11 +1148,13 @@ def _ready_audio(
   context: SpeechSynthesisContext,
   cache_key: str,
   audio_url: str,
+  stream_url: str | None = None,
   cues: list[RadioSpeechCue] | None = None,
   duration_seconds: float | None = None,
 ) -> RadioSpeechAudio:
   return RadioSpeechAudio(
     audioURL=audio_url,
+    streamURL=stream_url,
     mimeType=MIME_TYPES.get(context.audio_format, "audio/mpeg"),
     durationSeconds=duration_seconds or _estimated_duration(segment.text),
     cacheKey=cache_key,
@@ -888,6 +1209,14 @@ def _mock_audio_url(cache_key: str, audio_format: str) -> str | None:
   return f"{public_base_url}/{cache_key}.{audio_format}"
 
 
+def _mock_stream_url(cache_key: str, audio_format: str) -> str | None:
+  public_base_url = _speech_stream_public_base_url()
+  if not public_base_url:
+    return None
+
+  return f"{public_base_url}/{cache_key}.{audio_format}"
+
+
 def _speech_audio_url(file_name: str) -> str | None:
   public_base_url = _speech_public_base_url()
   if not public_base_url:
@@ -895,8 +1224,26 @@ def _speech_audio_url(file_name: str) -> str | None:
   return f"{public_base_url}/{file_name}"
 
 
+def _speech_stream_url(file_name: str) -> str | None:
+  public_base_url = _speech_stream_public_base_url()
+  if not public_base_url:
+    return None
+  return f"{public_base_url}/{file_name}"
+
+
 def _speech_public_base_url() -> str:
   return os.getenv("SPEECH_PUBLIC_BASE_URL", "").rstrip("/")
+
+
+def _speech_stream_public_base_url() -> str:
+  configured = os.getenv("SPEECH_STREAM_PUBLIC_BASE_URL", "").rstrip("/")
+  if configured:
+    return configured
+
+  audio_base_url = _speech_public_base_url()
+  if audio_base_url.endswith("/audio"):
+    return f"{audio_base_url.removesuffix('/audio')}/stream"
+  return f"{audio_base_url}/stream" if audio_base_url else ""
 
 
 def _speech_cache_dir() -> Path:

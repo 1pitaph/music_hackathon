@@ -93,6 +93,7 @@ class RadioSpeechCue(BaseModel):
 
 class RadioSpeechAudio(BaseModel):
   audioURL: str | None = None
+  streamURL: str | None = None
   mimeType: str = "audio/mpeg"
   durationSeconds: float | None = None
   cacheKey: str
@@ -104,6 +105,7 @@ class RadioSpeechAudio(BaseModel):
 
 class RadioSpeechAudioConfig(BaseModel):
   enabled: bool = False
+  delivery: Literal["file", "stream"] = "file"
   provider: str = "openai"
   voice: str | None = None
   speaker: str | None = None

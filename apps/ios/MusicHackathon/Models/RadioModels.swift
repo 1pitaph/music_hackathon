@@ -161,6 +161,7 @@ struct RadioSpeechCue: Codable, Hashable, Identifiable {
 
 struct RadioSpeechAudio: Codable, Hashable {
   let audioURL: URL?
+  let streamURL: URL?
   let mimeType: String
   let durationSeconds: TimeInterval?
   let cacheKey: String
@@ -172,6 +173,8 @@ struct RadioSpeechAudio: Codable, Hashable {
   enum CodingKeys: String, CodingKey {
     case audioURL
     case audioUrl
+    case streamURL
+    case streamUrl
     case mimeType
     case durationSeconds
     case cacheKey
@@ -183,6 +186,7 @@ struct RadioSpeechAudio: Codable, Hashable {
 
   init(
     audioURL: URL? = nil,
+    streamURL: URL? = nil,
     mimeType: String = "audio/mpeg",
     durationSeconds: TimeInterval? = nil,
     cacheKey: String,
@@ -192,6 +196,7 @@ struct RadioSpeechAudio: Codable, Hashable {
     cues: [RadioSpeechCue] = []
   ) {
     self.audioURL = audioURL
+    self.streamURL = streamURL
     self.mimeType = mimeType
     self.durationSeconds = durationSeconds
     self.cacheKey = cacheKey
@@ -205,6 +210,8 @@ struct RadioSpeechAudio: Codable, Hashable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     audioURL = try container.decodeIfPresent(URL.self, forKey: .audioURL)
       ?? container.decodeIfPresent(URL.self, forKey: .audioUrl)
+    streamURL = try container.decodeIfPresent(URL.self, forKey: .streamURL)
+      ?? container.decodeIfPresent(URL.self, forKey: .streamUrl)
     mimeType = try container.decodeIfPresent(String.self, forKey: .mimeType) ?? "audio/mpeg"
     durationSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .durationSeconds)
     cacheKey = try container.decode(String.self, forKey: .cacheKey)
@@ -217,6 +224,7 @@ struct RadioSpeechAudio: Codable, Hashable {
   func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encodeIfPresent(audioURL, forKey: .audioURL)
+    try container.encodeIfPresent(streamURL, forKey: .streamURL)
     try container.encode(mimeType, forKey: .mimeType)
     try container.encodeIfPresent(durationSeconds, forKey: .durationSeconds)
     try container.encode(cacheKey, forKey: .cacheKey)
@@ -241,11 +249,21 @@ struct RadioSpeechPlaybackSegment: Identifiable, Hashable {
 
   var playableAudioURL: URL? {
     guard audio?.status == "ready" else { return nil }
-    return audio?.audioURL
+    return Self.playableRemoteURL(audio?.streamURL) ?? Self.playableRemoteURL(audio?.audioURL)
   }
 
   var timedCues: [RadioSpeechCue] {
     audio?.cues ?? []
+  }
+
+  private static func playableRemoteURL(_ url: URL?) -> URL? {
+    guard let url,
+          let scheme = url.scheme?.lowercased(),
+          ["http", "https"].contains(scheme),
+          url.host?.isEmpty == false else {
+      return nil
+    }
+    return url
   }
 }
 

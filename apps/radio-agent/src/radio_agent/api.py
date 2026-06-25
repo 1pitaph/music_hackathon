@@ -11,7 +11,7 @@ import uuid
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from radio_agent.graph import compress_radio_memory, generate_radio
 from radio_agent.schemas import (
@@ -36,8 +36,10 @@ from radio_agent.schemas import (
 )
 from radio_agent.voices import speech_voice_catalog
 from radio_agent.speech import (
-  speech_audio_file_path,
+  can_stream_speech_audio,
+  ensure_speech_audio_file,
   speech_audio_mime_type,
+  stream_speech_audio_file,
   synthesize_speech_segments,
 )
 
@@ -217,7 +219,7 @@ def speech_voices() -> RadioSpeechVoiceCatalog:
 
 @app.get("/v1/radio/speech/audio/{file_name}")
 def speech_audio_file(file_name: str) -> FileResponse:
-  file_path = speech_audio_file_path(file_name)
+  file_path = ensure_speech_audio_file(file_name)
   if not file_path or not file_path.is_file():
     raise HTTPException(status_code=404, detail="Speech audio not found.")
 
@@ -225,6 +227,17 @@ def speech_audio_file(file_name: str) -> FileResponse:
     file_path,
     media_type=speech_audio_mime_type(file_name),
     filename=file_name,
+  )
+
+
+@app.get("/v1/radio/speech/stream/{file_name}")
+def speech_audio_stream(file_name: str) -> StreamingResponse:
+  if not can_stream_speech_audio(file_name):
+    raise HTTPException(status_code=404, detail="Speech audio stream not found.")
+
+  return StreamingResponse(
+    stream_speech_audio_file(file_name),
+    media_type=speech_audio_mime_type(file_name),
   )
 
 

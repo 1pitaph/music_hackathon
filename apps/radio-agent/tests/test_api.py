@@ -1,6 +1,7 @@
 import base64
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 import radio_agent.api as api
@@ -746,6 +747,128 @@ def test_generate_station_can_attach_volcengine_speech_audio(monkeypatch, tmp_pa
   assert audio_response.status_code == 200
   assert audio_response.content == audio_bytes
   assert audio_response.headers["content-type"].startswith("audio/mpeg")
+
+
+def test_generate_station_stream_delivery_returns_urls_without_synthesizing(monkeypatch, tmp_path):
+  monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+  _configure_volcengine_env(monkeypatch, tmp_path)
+
+  def fail_if_called(*args, **kwargs):
+    raise AssertionError("stream delivery should not synthesize during station generation")
+
+  monkeypatch.setattr(speech.httpx, "stream", fail_if_called)
+  client = TestClient(app)
+  payload = {
+    **_request_payload(),
+    "speechAudio": {
+      "enabled": True,
+      "delivery": "stream",
+      "provider": "volcengine",
+      "format": "mp3",
+    },
+  }
+
+  response = client.post("/v1/radio/stations/generate", json=payload)
+
+  assert response.status_code == 200
+  body = response.json()
+  intro_audio = body["speech"]["stationIntro"]["audio"]
+  transition_audio = body["speech"]["betweenTracks"][0]["audio"]
+  assert intro_audio["status"] == "ready"
+  assert intro_audio["audioURL"].startswith("https://speech.test/audio/speech_")
+  assert intro_audio["streamURL"].startswith("https://speech.test/stream/speech_")
+  assert transition_audio["status"] == "ready"
+  assert not (tmp_path / f"{intro_audio['cacheKey']}.mp3").exists()
+  assert (tmp_path / f"{intro_audio['cacheKey']}.metadata.json").exists()
+
+
+def test_speech_stream_endpoint_generates_cache_and_audio_endpoint_reuses(monkeypatch, tmp_path):
+  _configure_volcengine_env(monkeypatch, tmp_path)
+  audio_bytes = b"ID3stream-mp3"
+  calls = []
+  segment = RadioSpeechSegment(
+    id="station-intro",
+    kind="stationIntro",
+    text="Stream this intro.",
+    displayText="Stream this intro.",
+    targetItemId="song-1",
+  )
+  results, diagnostics = speech.synthesize_speech_segments(
+    [segment],
+    RadioSpeechAudioConfig(enabled=True, delivery="stream", provider="volcengine"),
+  )
+  audio = results[0].audio
+
+  assert diagnostics == []
+  assert audio.status == "ready"
+  assert audio.streamURL == f"https://speech.test/stream/{audio.cacheKey}.mp3"
+  assert audio.audioURL == f"https://speech.test/audio/{audio.cacheKey}.mp3"
+  assert not (tmp_path / f"{audio.cacheKey}.mp3").exists()
+
+  def fake_stream(method, url, *, headers, json, timeout):
+    calls.append(json)
+    return _FakeVolcengineStream(
+      200,
+      [
+        {"code": 0, "data": base64.b64encode(audio_bytes[:5]).decode("ascii")},
+        {"code": 0, "data": base64.b64encode(audio_bytes[5:]).decode("ascii")},
+        {"code": 20000000, "message": "finished"},
+      ],
+    )
+
+  monkeypatch.setattr(speech.httpx, "stream", fake_stream)
+  client = TestClient(app)
+  stream_response = client.get(f"/v1/radio/speech/stream/{audio.cacheKey}.mp3")
+
+  assert stream_response.status_code == 200
+  assert stream_response.content == audio_bytes
+  assert stream_response.headers["content-type"].startswith("audio/mpeg")
+  assert len(calls) == 1
+  assert (tmp_path / f"{audio.cacheKey}.mp3").read_bytes() == audio_bytes
+
+  def fail_if_called(*args, **kwargs):
+    raise AssertionError("cache hit should not call Volcengine")
+
+  monkeypatch.setattr(speech.httpx, "stream", fail_if_called)
+  cached_stream_response = client.get(f"/v1/radio/speech/stream/{audio.cacheKey}.mp3")
+  audio_response = client.get(f"/v1/radio/speech/audio/{audio.cacheKey}.mp3")
+
+  assert cached_stream_response.status_code == 200
+  assert cached_stream_response.content == audio_bytes
+  assert audio_response.status_code == 200
+  assert audio_response.content == audio_bytes
+
+
+def test_speech_stream_failure_does_not_leave_final_cache_or_leak_secret(monkeypatch, tmp_path):
+  _configure_volcengine_env(monkeypatch, tmp_path)
+  segment = RadioSpeechSegment(
+    id="transition-1",
+    kind="transition",
+    text="Fail this stream.",
+    displayText="Fail this stream.",
+    fromItemId="song-1",
+    toItemId="song-2",
+  )
+  results, _ = speech.synthesize_speech_segments(
+    [segment],
+    RadioSpeechAudioConfig(enabled=True, delivery="stream", provider="volcengine"),
+  )
+  audio = results[0].audio
+
+  def fake_stream(method, url, *, headers, json, timeout):
+    return _FakeVolcengineStream(
+      200,
+      [{"code": 5000, "message": "bad key test-api-key"}],
+    )
+
+  monkeypatch.setattr(speech.httpx, "stream", fake_stream)
+
+  with pytest.raises(ValueError) as exc_info:
+    list(speech.stream_speech_audio_file(f"{audio.cacheKey}.mp3"))
+
+  assert "test-api-key" not in str(exc_info.value)
+  assert "[redacted]" in str(exc_info.value)
+  assert not (tmp_path / f"{audio.cacheKey}.mp3").exists()
 
 
 def test_compress_memory_uses_deterministic_fallback(monkeypatch):
