@@ -123,7 +123,7 @@ def station_program_agent(state: RadioAgentState) -> RadioAgentState:
 
   try:
     content = invoke_chat(
-      station_program_system_prompt(),
+      station_program_system_prompt(request.speechLanguage),
       station_program_user_prompt(request, state),
       temperature=0.5,
     )
@@ -158,7 +158,7 @@ def entry_copy_agent(state: RadioAgentState) -> RadioAgentState:
     diagnostics = list(state.get("diagnostics", []))
     try:
       content = invoke_chat(
-        entry_copy_system_prompt(),
+        entry_copy_system_prompt(state["request"].speechLanguage),
         entry_copy_user_prompt(state),
         temperature=0.45,
       )
@@ -175,7 +175,7 @@ def transition_copy_agent(state: RadioAgentState) -> RadioAgentState:
     diagnostics = list(state.get("diagnostics", []))
     try:
       content = invoke_chat(
-        transition_copy_system_prompt(),
+        transition_copy_system_prompt(state["request"].speechLanguage),
         transition_copy_user_prompt(state),
         temperature=0.55,
       )

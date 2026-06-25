@@ -70,11 +70,11 @@ struct DiscoverView: View {
       }
       .buttonStyle(.plain)
       .foregroundStyle(.white.opacity(0.58))
-      .accessibilityLabel("搜索")
+      .accessibilityLabel(L10n.tr("common.search"))
 
       Spacer()
 
-      Text("发现")
+      Text(L10n.tr("tab.discover"))
         .font(.system(size: 30, weight: .bold, design: .rounded))
         .foregroundStyle(.white)
 
@@ -83,7 +83,7 @@ struct DiscoverView: View {
       ShareLink(
         item: currentStation.shareURL,
         subject: Text(currentStation.title),
-        message: Text("正在收听 \(currentStation.hostName) 的 \(currentStation.title)")
+        message: Text(L10n.tr("discover.share.message", currentStation.hostName, currentStation.title))
       ) {
         Image(systemName: "square.and.arrow.up")
           .font(.system(size: 20, weight: .semibold))
@@ -91,7 +91,7 @@ struct DiscoverView: View {
       }
       .buttonStyle(.plain)
       .foregroundStyle(.white.opacity(0.72))
-      .accessibilityLabel("分享当前电台")
+      .accessibilityLabel(L10n.tr("discover.share.accessibilityLabel"))
     }
   }
 
@@ -276,10 +276,10 @@ private struct DiscoverCardStack: View {
     .simultaneousGesture(
       swipeGesture(width: proxySize.width, size: proxySize, activeStation: station)
     )
-    .accessibilityAction(named: Text("上一张")) {
+    .accessibilityAction(named: Text(L10n.tr("discover.card.previous"))) {
       commitSwipe(.right, size: proxySize, activeStation: station)
     }
-    .accessibilityAction(named: Text("下一张")) {
+    .accessibilityAction(named: Text(L10n.tr("discover.card.next"))) {
       commitSwipe(.left, size: proxySize, activeStation: station)
     }
   }
@@ -571,9 +571,9 @@ private struct DiscoverCardStack: View {
     var label: String {
       switch self {
       case .left:
-        return "下一张"
+        return L10n.tr("discover.card.next")
       case .right:
-        return "上一张"
+        return L10n.tr("discover.card.previous")
       }
     }
 
@@ -649,7 +649,7 @@ private struct DiscoverStationCard: View {
                   .stroke(.white.opacity(0.18), lineWidth: 1)
               }
 
-            Text(isPlaying ? "ON AIR" : "TAP TO TUNE")
+            Text(isPlaying ? L10n.tr("discover.card.onAir") : L10n.tr("discover.card.tapToTune"))
               .font(.system(size: 12, weight: .black, design: .rounded))
               .foregroundStyle(.white.opacity(0.7))
           }
@@ -659,7 +659,7 @@ private struct DiscoverStationCard: View {
       }
       .buttonStyle(.plain)
       .disabled(!isActive)
-      .accessibilityLabel(isPlaying ? "暂停 \(station.title)" : "播放 \(station.title)")
+      .accessibilityLabel(isPlaying ? L10n.tr("discover.station.pauseAccessibility", station.title) : L10n.tr("discover.station.playAccessibility", station.title))
 
       VStack(spacing: 12) {
         HStack(spacing: 12) {
@@ -686,7 +686,7 @@ private struct DiscoverStationCard: View {
           }
           .buttonStyle(.plain)
           .disabled(!isActive)
-          .accessibilityLabel(isFavorited ? "取消收藏" : "收藏")
+          .accessibilityLabel(isFavorited ? L10n.tr("common.unfavorite") : L10n.tr("common.favorite"))
         }
 
         Text(station.briefIntro)
@@ -702,7 +702,7 @@ private struct DiscoverStationCard: View {
                 .fill(.white.opacity(0.34))
                 .frame(width: 36, height: 4)
 
-              Text(isExpanded ? "收起详情" : "查看详情")
+              Text(isExpanded ? L10n.tr("common.collapseDetails") : L10n.tr("common.viewDetails"))
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.5))
             }
@@ -710,7 +710,7 @@ private struct DiscoverStationCard: View {
             .frame(height: 44)
           }
           .buttonStyle(.plain)
-          .accessibilityLabel(isExpanded ? "收起详情" : "查看详情")
+          .accessibilityLabel(isExpanded ? L10n.tr("common.collapseDetails") : L10n.tr("common.viewDetails"))
         }
       }
       .padding(.horizontal, 20)
@@ -760,7 +760,7 @@ private struct DiscoverStationDrawer: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       VStack(alignment: .leading, spacing: 8) {
-        Text("关于此电台")
+        Text(L10n.tr("discover.station.about"))
           .font(.system(size: 13, weight: .bold, design: .rounded))
           .foregroundStyle(.white.opacity(0.48))
 

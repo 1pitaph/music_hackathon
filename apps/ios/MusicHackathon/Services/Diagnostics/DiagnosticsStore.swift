@@ -96,7 +96,7 @@ actor DiagnosticsLogWriter {
       privacyNotes: [
         "Track, Apple Music, playlist, speech, and URL identifiers are hashed or reduced to non-secret metadata.",
         "Authorization tokens, account identifiers, full private URLs, audio files, and artwork are not included.",
-        "Radio memory raw events are not included in this diagnostic report."
+        L10n.tr("diagnostics.report.privacy.radioMemoryRawEventsExcluded")
       ],
       storageSummary: DiagnosticsStorageSummaryPayload(
         fileCount: storageSummary.fileCount,
@@ -232,7 +232,7 @@ final class DiagnosticsStore {
   }
 
   var lastEventText: String {
-    guard let event = recentEvents.first else { return "暂无日志" }
+    guard let event = recentEvents.first else { return L10n.tr("diagnostics.noLogs") }
     return event.timestamp.formatted(.dateTime.hour().minute().second())
   }
 
@@ -291,7 +291,7 @@ final class DiagnosticsStore {
           .notice,
           chain: .diagnosticsExport,
           event: "verbose_logging_expired",
-          message: "详细诊断已自动关闭。"
+          message: L10n.tr("diagnostic.message.verboseLoggingExpired")
         )
       }
     }
@@ -300,7 +300,7 @@ final class DiagnosticsStore {
       .notice,
       chain: .diagnosticsExport,
       event: "verbose_logging_enabled",
-      message: "详细诊断已开启，将自动过期。",
+      message: L10n.tr("diagnostic.message.verboseLoggingEnabled"),
       payload: ["duration_seconds": String(Int(duration))]
     )
   }
@@ -314,7 +314,7 @@ final class DiagnosticsStore {
       .notice,
       chain: .diagnosticsExport,
       event: "verbose_logging_disabled",
-      message: "详细诊断已关闭。"
+      message: L10n.tr("diagnostic.message.verboseLoggingDisabled")
     )
   }
 
@@ -350,7 +350,7 @@ final class DiagnosticsStore {
         .notice,
         chain: .diagnosticsExport,
         event: "logs_cleared",
-        message: "本地诊断日志已清空。"
+        message: L10n.tr("diagnostic.message.diagnosticsLogsCleared")
       )
     } catch {
       lastErrorMessage = error.localizedDescription
@@ -372,7 +372,7 @@ final class DiagnosticsStore {
         .notice,
         chain: .diagnosticsExport,
         event: "issue_report_exported",
-        message: "诊断报告已生成。",
+        message: L10n.tr("diagnostic.message.diagnosticsReportGenerated"),
         payload: [
           "event_count": String(events.count),
           "file_size_bytes": String((try? exportURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
@@ -385,7 +385,7 @@ final class DiagnosticsStore {
         .error,
         chain: .diagnosticsExport,
         event: "issue_report_export_failed",
-        message: "诊断报告生成失败。",
+        message: L10n.tr("diagnostic.message.diagnosticsReportFailed"),
         payload: DiagnosticsPayload.error(error)
       )
       return nil
@@ -441,7 +441,7 @@ extension DiagnosticsStore {
       .warning,
       chain: .playbackAppleMusic,
       event: "fallback_preview",
-      message: "完整歌曲暂时不可用，已切换到试听片段。",
+      message: L10n.tr("playback.error.fallbackPreview"),
       correlationID: "preview-attempt-123456",
       payload: ["failed_phase": "prepare_to_play"]
     )
@@ -449,7 +449,7 @@ extension DiagnosticsStore {
       .notice,
       chain: .musicAuthorization,
       event: "subscription_ready",
-      message: "Apple Music 完整播放资格已确认。",
+      message: L10n.tr("diagnostic.message.catalogPlaybackReady"),
       payload: ["can_play_catalog_content": "true"]
     )
     return store

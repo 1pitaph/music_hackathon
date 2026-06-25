@@ -52,7 +52,8 @@ struct RadioStationGenerationContext: Encodable, Equatable {
   var currentTrackKey: String?
   var queuedTrackKeys: [String] = []
   var recentlyPlayedTrackKeys: [String] = []
-  var title = "Airset Radio"
+  var title = L10n.tr("radio.defaultTitle")
+  var speechLanguage = RadioSpeechLanguage.chinese.speechLanguageCode
   var speechAudio = RadioSpeechAudioRequest(enabled: true)
 
   init(
@@ -67,7 +68,8 @@ struct RadioStationGenerationContext: Encodable, Equatable {
     currentTrackKey: String? = nil,
     queuedTrackKeys: [String] = [],
     recentlyPlayedTrackKeys: [String] = [],
-    hostSpeakerID: String? = nil
+    hostSpeakerID: String? = nil,
+    speechLanguage: RadioSpeechLanguage = .chinese
   ) {
     self.action = action
     self.seedTracks = seedTracks.map {
@@ -88,9 +90,11 @@ struct RadioStationGenerationContext: Encodable, Equatable {
     self.currentTrackKey = currentTrackKey
     self.queuedTrackKeys = queuedTrackKeys
     self.recentlyPlayedTrackKeys = recentlyPlayedTrackKeys
+    self.speechLanguage = speechLanguage.speechLanguageCode
     if let hostSpeakerID = hostSpeakerID?.trimmedNilIfEmpty {
       speechAudio.speaker = hostSpeakerID
     }
+    speechAudio.explicitLanguage = speechLanguage.speechLanguageCode
     memory = RadioMemoryRequest(
       recentlyPlayedTrackKeys: memoryContext.recentlyPlayedTrackKeys,
       likedTrackKeys: [],
@@ -128,10 +132,10 @@ struct RadioSpeechVoiceCatalog: Codable, Equatable {
     voices: [
       RadioSpeechVoice(
         id: "zh_female_shuangkuaisisi_moon_bigtts",
-        name: "爽快思思",
+        name: L10n.tr("radio.speechVoice.fallbackName"),
         language: "zh-cn",
         gender: "female",
-        style: "通用主持",
+        style: L10n.tr("radio.speechVoice.fallbackStyle"),
         resourceId: "seed-tts-1.0",
         model: "seed-tts-1.0"
       )
@@ -252,12 +256,13 @@ struct RadioStationClient: RadioStationFetching {
     let endpoint = baseURL.appending(path: "v1/radio/stations/current")
     var request = URLRequest(url: endpoint, timeoutInterval: timeout)
     request.httpMethod = "GET"
+    applyLocalizationHeaders(to: &request)
 
     let startedAt = Date()
     recordNetwork(
       .info,
       event: "request_start",
-      message: "后端电台请求开始。",
+      message: L10n.tr("diagnostic.message.backendStationRequestStarted"),
       request: request
     )
 
@@ -269,7 +274,7 @@ struct RadioStationClient: RadioStationFetching {
       recordNetwork(
         .error,
         event: "request_failed",
-        message: "后端电台请求失败。",
+        message: L10n.tr("diagnostic.message.backendStationRequestFailed"),
         request: request,
         payload: DiagnosticsPayload.error(error)
       )
@@ -280,7 +285,7 @@ struct RadioStationClient: RadioStationFetching {
       recordNetwork(
         .error,
         event: "invalid_response",
-        message: "后端电台返回了无效响应。",
+        message: L10n.tr("diagnostic.message.backendStationInvalidResponse"),
         request: request,
         payload: ["duration_ms": DiagnosticsPayload.durationMilliseconds(Date().timeIntervalSince(startedAt))]
       )
@@ -291,7 +296,7 @@ struct RadioStationClient: RadioStationFetching {
       recordNetwork(
         .error,
         event: "server_status",
-        message: "后端电台返回非 2xx 状态。",
+        message: L10n.tr("diagnostic.message.backendStationServerStatus"),
         request: request,
         payload: [
           "status_code": String(httpResponse.statusCode),
@@ -308,7 +313,7 @@ struct RadioStationClient: RadioStationFetching {
       recordNetwork(
         .error,
         event: "decode_failed",
-        message: "后端电台响应解码失败。",
+        message: L10n.tr("diagnostic.message.backendStationDecodeFailed"),
         request: request,
         payload: DiagnosticsPayload.error(error)
       )
@@ -317,7 +322,7 @@ struct RadioStationClient: RadioStationFetching {
     recordNetwork(
       .notice,
       event: "request_success",
-      message: "后端电台请求完成。",
+      message: L10n.tr("diagnostic.message.backendStationRequestSucceeded"),
       request: request,
       payload: [
         "status_code": String(httpResponse.statusCode),
@@ -336,6 +341,7 @@ struct RadioStationClient: RadioStationFetching {
     var request = URLRequest(url: endpoint, timeoutInterval: generationTimeout)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    applyLocalizationHeaders(to: &request)
     request.httpBody = try encoder.encode(context)
 
     do {
@@ -345,13 +351,13 @@ struct RadioStationClient: RadioStationFetching {
       recordNetwork(
         .warning,
         event: "generate_fallback_current",
-        message: "电台生成接口未部署，回退到当前电台接口。",
+        message: L10n.tr("diagnostic.message.radioGenerateEndpointFallback"),
         request: request,
         payload: ["status_code": "404"]
       )
       return RadioStationResult(
         station: try await fetchCurrentStation(),
-        diagnostics: ["Station generation endpoint is not deployed yet; used current station fallback."]
+        diagnostics: [L10n.tr("radio.diagnostic.generateEndpointFallback")]
       )
     }
   }
@@ -364,6 +370,7 @@ struct RadioStationClient: RadioStationFetching {
     let endpoint = baseURL.appending(path: "v1/radio/speech/voices")
     var request = URLRequest(url: endpoint, timeoutInterval: timeout)
     request.httpMethod = "GET"
+    applyLocalizationHeaders(to: &request)
 
     do {
       return try await decodedPayload(for: request)
@@ -381,6 +388,7 @@ struct RadioStationClient: RadioStationFetching {
     var request = URLRequest(url: endpoint, timeoutInterval: timeout)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    applyLocalizationHeaders(to: &request)
     request.httpBody = try encoder.encode(requestPayload)
 
     let response: RadioMemoryCompressionPayload = try await decodedPayload(for: request)
@@ -392,7 +400,7 @@ struct RadioStationClient: RadioStationFetching {
     recordNetwork(
       .info,
       event: "request_start",
-      message: "后端请求开始。",
+      message: L10n.tr("diagnostic.message.backendRequestStarted"),
       request: request
     )
 
@@ -404,7 +412,7 @@ struct RadioStationClient: RadioStationFetching {
       recordNetwork(
         .error,
         event: "request_failed",
-        message: "后端请求失败。",
+        message: L10n.tr("diagnostic.message.backendRequestFailed"),
         request: request,
         payload: DiagnosticsPayload.error(error)
       )
@@ -415,7 +423,7 @@ struct RadioStationClient: RadioStationFetching {
       recordNetwork(
         .error,
         event: "invalid_response",
-        message: "后端返回了无效响应。",
+        message: L10n.tr("diagnostic.message.backendInvalidResponse"),
         request: request,
         payload: ["duration_ms": DiagnosticsPayload.durationMilliseconds(Date().timeIntervalSince(startedAt))]
       )
@@ -426,7 +434,7 @@ struct RadioStationClient: RadioStationFetching {
       recordNetwork(
         .error,
         event: "server_status",
-        message: "后端返回非 2xx 状态。",
+        message: L10n.tr("diagnostic.message.backendServerStatus"),
         request: request,
         payload: [
           "status_code": String(httpResponse.statusCode),
@@ -441,7 +449,7 @@ struct RadioStationClient: RadioStationFetching {
       recordNetwork(
         .notice,
         event: "request_success",
-        message: "后端请求完成。",
+        message: L10n.tr("diagnostic.message.backendRequestSucceeded"),
         request: request,
         payload: [
           "status_code": String(httpResponse.statusCode),
@@ -453,7 +461,7 @@ struct RadioStationClient: RadioStationFetching {
       recordNetwork(
         .error,
         event: "decode_failed",
-        message: "后端响应解码失败。",
+        message: L10n.tr("diagnostic.message.backendDecodeFailed"),
         request: request,
         payload: DiagnosticsPayload.error(error)
       )
@@ -489,6 +497,10 @@ struct RadioStationClient: RadioStationFetching {
       )
     }
   }
+
+  private func applyLocalizationHeaders(to request: inout URLRequest) {
+    request.setValue(AppLanguage.acceptLanguageHeader(), forHTTPHeaderField: "Accept-Language")
+  }
 }
 
 enum RadioStationClientError: LocalizedError, Equatable {
@@ -501,15 +513,15 @@ enum RadioStationClientError: LocalizedError, Equatable {
   var errorDescription: String? {
     switch self {
     case .disabled:
-      "Radio station API is disabled for this build."
+      L10n.tr("radioClient.error.disabled")
     case .invalidResponse:
-      "Radio station API returned an invalid response."
+      L10n.tr("radioClient.error.invalidResponse")
     case let .serverStatus(statusCode):
-      "Radio station API returned HTTP \(statusCode)."
+      L10n.tr("radioClient.error.serverStatus", statusCode)
     case .emptyStation:
-      "Radio station API returned an empty station."
+      L10n.tr("radioClient.error.emptyStation")
     case let .unplayableItem(title):
-      "Radio station item is missing a playable Apple Music ID or preview URL: \(title)."
+      L10n.tr("radioClient.error.unplayableItem", title)
     }
   }
 }
@@ -556,10 +568,10 @@ private struct RadioStationPayload: Decodable {
       ?? container.decodeIfPresent(String.self, forKey: .sessionId)
     continuationCursor = try container.decodeIfPresent(String.self, forKey: .continuationCursor)
       ?? container.decodeIfPresent(String.self, forKey: .cursor)
-    title = try container.decodeIfPresent(String.self, forKey: .title) ?? "Airset Radio"
+    title = try container.decodeIfPresent(String.self, forKey: .title) ?? L10n.tr("radio.defaultTitle")
     subtitle = try container.decodeIfPresent(String.self, forKey: .subtitle)
       ?? container.decodeIfPresent(String.self, forKey: .intro)
-      ?? "Streaming from the backend station queue."
+      ?? L10n.tr("radio.streamingBackendQueue")
     items = try container.decode([RadioStationItemPayload].self, forKey: .items)
     speech = try container.decodeIfPresent(RadioSpeech.self, forKey: .speech)
     diagnostics = try container.decodeIfPresent([String].self, forKey: .diagnostics) ?? []
@@ -670,7 +682,7 @@ private struct RadioStationItemPayload: Decodable {
     let track = Track(
       title: title,
       artist: artist,
-      album: album ?? "Backend Radio",
+      album: album ?? L10n.tr("radio.backendRadio"),
       mood: mood ?? "Radio",
       duration: duration ?? 0,
       artworkSystemName: artworkSystemName ?? "dot.radiowaves.left.and.right",
@@ -689,7 +701,7 @@ private struct RadioStationItemPayload: Decodable {
     return RadioQueueItem(
       id: id?.trimmedNilIfEmpty ?? track.radioIdentity,
       track: track,
-      sourceTitle: sourceTitle ?? sourceLane ?? source ?? "Backend station",
+      sourceTitle: sourceTitle ?? sourceLane ?? source ?? L10n.tr("radio.backendStation"),
       reason: reason ?? "Queued by the backend station.",
       handoffText: handoffText
     )

@@ -75,6 +75,22 @@ def test_generate_station_returns_ios_playable_payload(monkeypatch):
   assert body["memoryPatchProposals"]
 
 
+def test_generate_station_honors_english_speech_language(monkeypatch):
+  monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+  client = TestClient(app)
+  payload = {**_request_payload(), "speechLanguage": "en-US"}
+
+  response = client.post("/v1/radio/stations/generate", json=payload)
+
+  assert response.status_code == 200
+  body = response.json()
+  assert body["subtitle"].startswith("Opening with A")
+  assert body["speech"]["stationIntro"]["text"].startswith("Welcome to Airset")
+  assert body["speech"]["betweenTracks"][0]["displayText"].startswith("Another side of the album")
+  assert body["items"][1]["handoffText"] == body["speech"]["betweenTracks"][0]["displayText"]
+  assert "《" not in body["subtitle"]
+
+
 def test_playable_filter_rejects_blank_ids_and_invalid_preview_urls():
   assert not _is_playable(_track(appleMusicID="   "))
   assert not _is_playable(_track(previewURL="ftp://example.com/a.m4a"))
@@ -592,7 +608,10 @@ def test_generate_station_can_attach_volcengine_speech_audio(monkeypatch, tmp_pa
   _configure_volcengine_env(monkeypatch, tmp_path)
   audio_bytes = b"ID3station-mp3"
 
+  calls = []
+
   def fake_stream(method, url, *, headers, json, timeout):
+    calls.append(json)
     return _FakeVolcengineStream(
       200,
       [
@@ -605,6 +624,7 @@ def test_generate_station_can_attach_volcengine_speech_audio(monkeypatch, tmp_pa
   client = TestClient(app)
   payload = {
     **_request_payload(),
+    "speechLanguage": "en-US",
     "speechAudio": {
       "enabled": True,
       "provider": "openai",
@@ -624,6 +644,8 @@ def test_generate_station_can_attach_volcengine_speech_audio(monkeypatch, tmp_pa
   assert transition_audio["status"] == "ready"
   assert intro_audio["voice"] == "zh_female_test"
   assert intro_audio["audioURL"].startswith("https://speech.test/audio/speech_")
+  assert calls
+  assert all(call["req_params"]["explicit_language"] == "en-US" for call in calls)
 
   audio_response = client.get(f"/v1/radio/speech/audio/{intro_audio['cacheKey']}.mp3")
 

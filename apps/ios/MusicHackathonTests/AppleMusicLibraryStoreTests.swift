@@ -62,7 +62,7 @@ final class AppleMusicLibraryStoreTests: XCTestCase {
     let stations = DiscoverStation.stations(from: [], libraryTracks: [track])
 
     XCTAssertEqual(stations.count, 1)
-    XCTAssertEqual(stations[0].title, "我的 Apple Music")
+    XCTAssertEqual(stations[0].title, L10n.tr("discover.libraryStation.title"))
     XCTAssertEqual(stations[0].items.first?.track.title, "Fallback Song")
     XCTAssertEqual(stations[0].heroArtworkURL?.absoluteString, "https://example.com/fallback-song.jpg")
   }

@@ -6,7 +6,7 @@ struct LibraryView: View {
 
   var body: some View {
     List {
-      Section("Playlists") {
+      Section(L10n.tr("archive.tab.playlists")) {
         if appleMusicLibrary.playlists.isEmpty {
           libraryStateRow
         } else {
@@ -19,7 +19,7 @@ struct LibraryView: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                   Text(playlist.name)
-                  Text(playlist.curatorName ?? "\(playlist.tracks.count) songs")
+                  Text(playlist.curatorName ?? L10n.count("count.songs", playlist.tracks.count))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 }
@@ -31,7 +31,7 @@ struct LibraryView: View {
 
       Section("Apple Music") {
         HStack {
-          Label("Library access", systemImage: "person.badge.key")
+          Label(L10n.tr("library.access"), systemImage: "person.badge.key")
           Spacer()
           Text(musicAuthorization.statusText)
             .foregroundStyle(.secondary)
@@ -44,7 +44,7 @@ struct LibraryView: View {
           }
         } label: {
           Label(
-            musicAuthorization.isRequestingAccess ? "Requesting" : "Request Access",
+            musicAuthorization.isRequestingAccess ? L10n.tr("appleMusic.requesting") : L10n.tr("appleMusic.requestAccess"),
             systemImage: "music.note.house"
           )
         }
@@ -55,7 +55,7 @@ struct LibraryView: View {
             await refreshLibrary()
           }
         } label: {
-          Label(appleMusicLibrary.state.isLoading ? "Loading" : "Refresh Playlists", systemImage: "arrow.clockwise")
+          Label(appleMusicLibrary.state.isLoading ? L10n.tr("playback.loading") : L10n.tr("library.refreshPlaylists"), systemImage: "arrow.clockwise")
         }
         .disabled(appleMusicLibrary.state.isLoading)
 
@@ -77,15 +77,15 @@ struct LibraryView: View {
   private var libraryStateRow: some View {
     switch appleMusicLibrary.state {
     case .idle, .loading:
-      ProgressView("Loading Apple Music")
+      ProgressView(L10n.tr("library.loadingAppleMusic"))
     case .needsAuthorization:
-      Label("Connect Apple Music to load playlists", systemImage: "person.badge.key")
+      Label(L10n.tr("library.connectAppleMusic"), systemImage: "person.badge.key")
     case .empty:
-      Label("No Apple Music playlists found", systemImage: "music.note.list")
+      Label(L10n.tr("archive.empty.playlists"), systemImage: "music.note.list")
     case let .failed(message):
       Label(message, systemImage: "exclamationmark.triangle")
     case .loaded:
-      Label("No playlists with playable songs found", systemImage: "music.note.list")
+      Label(L10n.tr("library.emptyPlayablePlaylists"), systemImage: "music.note.list")
     }
   }
 
@@ -107,10 +107,10 @@ private struct PlaylistDetailView: View {
           VStack(alignment: .leading, spacing: 5) {
             Text(playlist.name)
               .font(.headline)
-            Text(playlist.curatorName ?? "Apple Music library")
+            Text(playlist.curatorName ?? L10n.tr("archive.appleMusicLibrary"))
               .font(.subheadline)
               .foregroundStyle(.secondary)
-            Text("\(playlist.tracks.count) songs")
+            Text(L10n.count("count.songs", playlist.tracks.count))
               .font(.footnote)
               .foregroundStyle(.secondary)
           }
@@ -118,12 +118,12 @@ private struct PlaylistDetailView: View {
         .padding(.vertical, 8)
       }
 
-      Section("Songs") {
+      Section(L10n.tr("archive.tab.songs")) {
         if playlist.tracks.isEmpty {
           ContentUnavailableView(
-            "No songs loaded",
+            L10n.tr("library.noSongsLoaded"),
             systemImage: "music.note",
-            description: Text("Refresh Apple Music to load playable tracks.")
+            description: Text(L10n.tr("library.refreshToLoadTracks"))
           )
         } else {
           ForEach(playlist.tracks) { track in
@@ -184,7 +184,7 @@ private struct TrackArtworkThumbnail: View {
 #Preview {
   NavigationStack {
     LibraryView()
-      .navigationTitle("Library")
+      .navigationTitle(L10n.tr("library.title"))
   }
   .environment(MusicAuthorizationService())
   .environment(AppleMusicLibraryStore())

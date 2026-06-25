@@ -48,10 +48,10 @@ enum MockCatalog {
   ]
 
   static let playlists: [String] = [
-    "Morning queue",
-    "Tracks to revisit",
-    "Practice room",
-    "Weekend discoveries"
+    L10n.tr("mockCatalog.playlist.morningQueue"),
+    L10n.tr("mockCatalog.playlist.tracksToRevisit"),
+    L10n.tr("mockCatalog.playlist.practiceRoom"),
+    L10n.tr("mockCatalog.playlist.weekendDiscoveries")
   ]
 
   private static var featuredPreviewURL: URL? {

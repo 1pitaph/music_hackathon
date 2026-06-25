@@ -332,10 +332,10 @@ struct PlayerView: View {
 
   private var playButtonAccessibilityLabel: String {
     if playbackController.state == .loading {
-      return "正在加载"
+      return L10n.tr("playback.loading")
     }
 
-    return playbackController.state == .playing ? "暂停" : "播放"
+    return playbackController.state == .playing ? L10n.tr("common.pause") : L10n.tr("common.play")
   }
 
   private var playbackStatusText: String {
@@ -344,22 +344,22 @@ struct PlayerView: View {
     }
 
     if playbackController.state == .loading {
-      return "正在加载"
+      return L10n.tr("playback.loading")
     }
 
     if let currentTrack = playbackController.currentTrack, !currentTrack.isPlayable {
-      return "这首歌暂时不可播放"
+      return L10n.tr("playback.trackUnavailable")
     }
 
     switch playbackController.activeBackend {
     case .appleMusic:
       return "Apple Music"
     case .localPreview:
-      return "本地预览"
+      return L10n.tr("playback.backend.localPreview")
     case .speechAudio, .speechSynthesis:
-      return "电台主持"
+      return L10n.tr("playback.backend.radioHost")
     case .none:
-      return playbackController.state == .idle ? "准备播放" : playbackController.state.rawValue.capitalized
+      return playbackController.state == .idle ? L10n.tr("playback.readyToPlay") : playbackController.state.rawValue.capitalized
     }
   }
 
@@ -368,13 +368,13 @@ struct PlayerView: View {
     case .appleMusic:
       return "Apple Music"
     case .localPreview:
-      return "本地预览"
+      return L10n.tr("playback.backend.localPreview")
     case .speechAudio:
-      return "电台主持音频"
+      return L10n.tr("playback.backend.speechAudio")
     case .speechSynthesis:
-      return "系统语音合成"
+      return L10n.tr("playback.backend.speechSynthesis")
     case .none:
-      return "未连接"
+      return L10n.tr("playback.backend.none")
     }
   }
 
@@ -506,7 +506,7 @@ private struct PlayerTrackIdentity: View {
               .padding(.horizontal, 5)
               .padding(.vertical, 2)
               .background(.white.opacity(0.7), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-              .accessibilityLabel("Explicit")
+              .accessibilityLabel(L10n.tr("player.explicit"))
           }
         }
 
@@ -523,7 +523,7 @@ private struct PlayerTrackIdentity: View {
       HStack(spacing: 12) {
         CircleIconButton(
           systemImage: "star.fill",
-          accessibilityLabel: "收藏暂不可用",
+          accessibilityLabel: L10n.tr("player.favoriteUnavailable"),
           size: 21,
           frameSize: 48,
           isEnabled: false,
@@ -532,7 +532,7 @@ private struct PlayerTrackIdentity: View {
 
         CircleIconButton(
           systemImage: "ellipsis",
-          accessibilityLabel: "更多",
+          accessibilityLabel: L10n.tr("common.more"),
           size: 20,
           frameSize: 48,
           action: moreAction
@@ -564,7 +564,7 @@ private struct PlayerScrubber: View {
       }
       .frame(height: 6)
       .accessibilityElement(children: .ignore)
-      .accessibilityLabel("播放进度")
+      .accessibilityLabel(L10n.tr("player.progress"))
       .accessibilityValue("\(Int(progress * 100))%")
 
       HStack(alignment: .center) {
@@ -609,7 +609,7 @@ private struct PlayerTransportControls: View {
           .frame(width: 76, height: 62)
       }
       .disabled(true)
-      .accessibilityLabel("上一首暂不可用")
+      .accessibilityLabel(L10n.tr("player.previousUnavailable"))
 
       Spacer(minLength: 14)
 
@@ -634,7 +634,7 @@ private struct PlayerTransportControls: View {
           .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
-      .accessibilityLabel("下一首")
+      .accessibilityLabel(L10n.tr("player.next"))
     }
     .frame(maxWidth: .infinity)
   }
@@ -649,7 +649,7 @@ private struct PlayerSecondaryActions: View {
     HStack {
       SecondaryActionButton(
         systemImage: "quote.bubble",
-        accessibilityLabel: "歌词",
+        accessibilityLabel: L10n.tr("player.lyrics"),
         action: lyricsAction
       )
 
@@ -657,7 +657,7 @@ private struct PlayerSecondaryActions: View {
 
       SecondaryActionButton(
         systemImage: "airpodspro",
-        accessibilityLabel: "播放详情",
+        accessibilityLabel: L10n.tr("player.details"),
         action: routeAction
       )
 
@@ -665,7 +665,7 @@ private struct PlayerSecondaryActions: View {
 
       SecondaryActionButton(
         systemImage: "list.bullet",
-        accessibilityLabel: "播放队列",
+        accessibilityLabel: L10n.tr("player.queue"),
         action: queueAction
       )
     }
@@ -685,7 +685,7 @@ private struct VolumeControlRow: View {
       SystemVolumeSlider()
         .frame(maxWidth: .infinity)
         .frame(height: 34)
-        .accessibilityLabel("音量")
+        .accessibilityLabel(L10n.tr("player.volume"))
 
       Image(systemName: "speaker.wave.3.fill")
         .font(.system(size: 18, weight: .bold))
@@ -780,17 +780,17 @@ private struct QueueSheet: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 22) {
           if let visibleCurrentTrack {
-            SheetSectionTitle("正在播放")
-            QueueTrackRow(track: visibleCurrentTrack, detail: "Now playing")
+            SheetSectionTitle(L10n.tr("player.nowPlaying"))
+            QueueTrackRow(track: visibleCurrentTrack, detail: L10n.tr("player.nowPlaying"))
           }
 
-          SheetSectionTitle("接下来")
+          SheetSectionTitle(L10n.tr("player.upNext"))
 
           if upNextItems.isEmpty {
             EmptySheetMessage(
               systemImage: "music.note.list",
-              title: "队列为空",
-              message: "电台会在需要时继续请求新的播放内容。"
+              title: L10n.tr("player.queueEmpty.title"),
+              message: L10n.tr("player.queueEmpty.message")
             )
           } else {
             VStack(spacing: 12) {
@@ -804,7 +804,7 @@ private struct QueueSheet: View {
         .padding(.top, 22)
         .padding(.bottom, 34)
       }
-      .navigationTitle("播放队列")
+      .navigationTitle(L10n.tr("player.queue"))
       .navigationBarTitleDisplayMode(.inline)
       .scrollContentBackground(.hidden)
       .background(Color.clear)
@@ -832,8 +832,8 @@ private struct LyricsSheet: View {
           } else {
             EmptySheetMessage(
               systemImage: "quote.bubble",
-              title: "歌词暂不可用",
-              message: "\(currentTrack?.title ?? stationTitle) 目前没有同步歌词；电台主持内容会在这里显示。"
+              title: L10n.tr("player.lyricsUnavailable.title"),
+              message: L10n.tr("player.lyricsUnavailable.message", currentTrack?.title ?? stationTitle)
             )
           }
         }
@@ -841,7 +841,7 @@ private struct LyricsSheet: View {
         .padding(.top, 26)
         .padding(.bottom, 34)
       }
-      .navigationTitle("歌词")
+      .navigationTitle(L10n.tr("player.lyrics"))
       .navigationBarTitleDisplayMode(.inline)
       .scrollContentBackground(.hidden)
       .background(Color.clear)
@@ -851,9 +851,9 @@ private struct LyricsSheet: View {
   private func speechTitle(for speech: RadioSpeechPlaybackSegment) -> String {
     switch speech.kind {
     case .stationIntro:
-      "电台开场"
+      L10n.tr("radio.subtitle.stationIntro")
     case .transition:
-      "电台串场"
+      L10n.tr("radio.subtitle.transitionActive")
     }
   }
 }
@@ -882,19 +882,19 @@ private struct DetailsSheet: View {
           }
 
           VStack(spacing: 12) {
-            DetailRow(title: "播放状态", value: statusText)
-            DetailRow(title: "播放后端", value: backendText)
-            DetailRow(title: "专辑", value: track?.album ?? "未知")
-            DetailRow(title: "来源", value: sourceText)
-            DetailRow(title: "时长", value: track?.durationText ?? "--:--")
-            DetailRow(title: "可播放", value: track?.isPlayable == true ? "是" : "否")
+            DetailRow(title: L10n.tr("player.detail.status"), value: statusText)
+            DetailRow(title: L10n.tr("player.detail.backend"), value: backendText)
+            DetailRow(title: L10n.tr("player.detail.album"), value: track?.album ?? L10n.tr("common.unknown"))
+            DetailRow(title: L10n.tr("player.detail.source"), value: sourceText)
+            DetailRow(title: L10n.tr("player.detail.duration"), value: track?.durationText ?? "--:--")
+            DetailRow(title: L10n.tr("player.detail.playable"), value: track?.isPlayable == true ? L10n.tr("common.yes") : L10n.tr("common.no"))
           }
         }
         .padding(.horizontal, 22)
         .padding(.top, 26)
         .padding(.bottom, 34)
       }
-      .navigationTitle("播放详情")
+      .navigationTitle(L10n.tr("player.details"))
       .navigationBarTitleDisplayMode(.inline)
       .scrollContentBackground(.hidden)
       .background(Color.clear)
@@ -905,7 +905,7 @@ private struct DetailsSheet: View {
     track?.playlistName
       ?? track?.source
       ?? track?.sourceLane
-      ?? "Airset Radio"
+      ?? L10n.tr("radio.defaultTitle")
   }
 }
 
@@ -1038,8 +1038,8 @@ private struct EmptySheetMessage: View {
   playbackController.currentSpeech = RadioSpeechPlaybackSegment(
     id: "preview-speech",
     kind: .transition,
-    text: "接下来这首歌会把夜色往前推一步，留一点空气给旋律。",
-    displayText: "接下来这首歌会把夜色往前推一步。",
+    text: L10n.tr("player.preview.speechText"),
+    displayText: L10n.tr("player.preview.speechDisplayText"),
     audio: nil
   )
   playbackController.state = .playing

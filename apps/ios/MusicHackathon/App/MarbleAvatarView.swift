@@ -51,7 +51,7 @@ struct MarbleAvatarView: View {
       Circle()
         .stroke(.white.opacity(0.18), lineWidth: 2)
     }
-    .accessibilityLabel(accessibilityLabel ?? "头像")
+    .accessibilityLabel(accessibilityLabel ?? L10n.tr("profile.avatar"))
   }
 
   private func transform(for layer: MarbleAvatarLayer, scaleLayer: MarbleAvatarLayer) -> CGAffineTransform {

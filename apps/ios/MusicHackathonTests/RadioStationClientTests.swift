@@ -7,6 +7,7 @@ final class RadioStationClientTests: XCTestCase {
       XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/stations/current")
       XCTAssertEqual(request.httpMethod, "GET")
       XCTAssertEqual(request.timeoutInterval, 15.0)
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Accept-Language"), AppLanguage.acceptLanguageHeader())
 
       let data = """
       {
@@ -95,11 +96,13 @@ final class RadioStationClientTests: XCTestCase {
       XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/stations/generate")
       XCTAssertEqual(request.httpMethod, "POST")
       XCTAssertEqual(request.timeoutInterval, 45.0)
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Accept-Language"), AppLanguage.acceptLanguageHeader())
 
       let body = try JSONSerialization.jsonObject(with: self.bodyData(from: request)) as? [String: Any]
       XCTAssertEqual(body?["stationID"] as? String, "airset-personal")
       XCTAssertEqual(body?["action"] as? String, "start")
       XCTAssertEqual(body?["limit"] as? Int, 6)
+      XCTAssertEqual(body?["speechLanguage"] as? String, "zh-CN")
       let memoryContext = body?["memoryContext"] as? [String: Any]
       XCTAssertEqual(memoryContext?["tasteSummary"] as? String, "Likes intimate pop.")
       let speechAudio = body?["speechAudio"] as? [String: Any]
@@ -111,7 +114,7 @@ final class RadioStationClientTests: XCTestCase {
       XCTAssertEqual(speechAudio?["format"] as? String, "mp3")
       XCTAssertEqual(speechAudio?["speechRate"] as? Int, -6)
       XCTAssertNil(speechAudio?["loudnessRate"])
-      XCTAssertNil(speechAudio?["explicitLanguage"])
+      XCTAssertEqual(speechAudio?["explicitLanguage"] as? String, "zh-CN")
       let catalogCandidates = body?["catalogCandidates"] as? [[String: Any]]
       XCTAssertEqual(catalogCandidates?.first?["playlistName"] as? String, "Virtual Library: Warm Starts")
       XCTAssertEqual(catalogCandidates?.first?["source"] as? String, "virtual_music_library_json")
@@ -218,6 +221,44 @@ final class RadioStationClientTests: XCTestCase {
     XCTAssertEqual(result.continuationCursor, "cursor-1")
   }
 
+  func testGenerateStationCanEncodeEnglishSpeechLanguage() async throws {
+    let session = makeSession { request in
+      let body = try JSONSerialization.jsonObject(with: self.bodyData(from: request)) as? [String: Any]
+      XCTAssertEqual(body?["speechLanguage"] as? String, "en-US")
+      let speechAudio = body?["speechAudio"] as? [String: Any]
+      XCTAssertEqual(speechAudio?["explicitLanguage"] as? String, "en-US")
+
+      let data = """
+      {
+        "stationID": "airset-personal",
+        "title": "Airset Radio",
+        "subtitle": "English station intro.",
+        "mode": "mock",
+        "items": [
+          {
+            "id": "item-1",
+            "title": "Signal",
+            "artist": "Artist A",
+            "previewURL": "https://example.com/preview.m4a"
+          }
+        ]
+      }
+      """.data(using: .utf8)!
+      return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+    }
+    let client = RadioStationClient(baseURL: URL(string: "http://station.test")!, session: session)
+    let context = RadioStationGenerationContext(
+      seedTracks: [makeTrack(title: "Seed")],
+      catalogCandidates: [],
+      memoryContext: RadioMemoryContext(),
+      speechLanguage: .english
+    )
+
+    let result = try await client.generateStation(context: context)
+
+    XCTAssertEqual(result.station.subtitle, "English station intro.")
+  }
+
   func testContinueStationPostsRollingQueueContextAndDecodesAliases() async throws {
     let session = makeSession { request in
       XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/stations/generate")
@@ -310,7 +351,7 @@ final class RadioStationClientTests: XCTestCase {
     XCTAssertEqual(result.station.title, "Fallback Radio")
     XCTAssertEqual(
       result.diagnostics,
-      ["Station generation endpoint is not deployed yet; used current station fallback."]
+      [L10n.tr("radio.diagnostic.generateEndpointFallback")]
     )
   }
 
@@ -319,6 +360,7 @@ final class RadioStationClientTests: XCTestCase {
       XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/speech/voices")
       XCTAssertEqual(request.httpMethod, "GET")
       XCTAssertEqual(request.timeoutInterval, 15.0)
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Accept-Language"), AppLanguage.acceptLanguageHeader())
 
       let data = """
       {
@@ -368,6 +410,7 @@ final class RadioStationClientTests: XCTestCase {
       XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/memory/compress")
       XCTAssertEqual(request.httpMethod, "POST")
       XCTAssertEqual(request.timeoutInterval, 15.0)
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Accept-Language"), AppLanguage.acceptLanguageHeader())
 
       let data = """
       {

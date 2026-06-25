@@ -1,0 +1,5 @@
+"CFBundleDisplayName" = "Airset";
+"CFBundleName" = "Airset";
+"NSAppleMusicUsageDescription" = "Airset uses Apple Music access to play full songs and read playlists and songs you authorize.";
+"NSMediaLibraryUsageDescription" = "Airset uses your media library access to load playlists and songs you choose for radio playback.";
+"NSMicrophoneUsageDescription" = "Airset may use microphone access for future recording and music creation features.";

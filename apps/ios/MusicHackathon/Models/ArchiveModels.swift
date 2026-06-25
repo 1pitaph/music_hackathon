@@ -22,21 +22,21 @@ struct ArchiveStationItem: Identifiable, Hashable {
 
     let days = max(0, Int(Date().timeIntervalSince(createdAt) / 86_400))
     if days < 1 {
-      return "Today"
+      return L10n.tr("archive.relative.today")
     }
     if days == 1 {
-      return "1 day ago"
+      return L10n.count("archive.relative.dayAgo", 1)
     }
     if days < 7 {
-      return "\(days) days ago"
+      return L10n.count("archive.relative.dayAgo", days)
     }
     if days < 14 {
-      return "1 week ago"
+      return L10n.count("archive.relative.weekAgo", 1)
     }
     if days < 30 {
-      return "\(days / 7) weeks ago"
+      return L10n.count("archive.relative.weekAgo", days / 7)
     }
-    return "\(days / 30) months ago"
+    return L10n.count("archive.relative.monthAgo", days / 30)
   }
 
   var displaySubtitle: String {
@@ -120,14 +120,14 @@ extension ArchiveProfile {
   )
 
   static let mock = ArchiveProfile(
-    nickname: "Mine Radio",
+    nickname: L10n.tr("archive.mock.nickname"),
     avatarColorHex: "#2A2A2A",
-    bio: "Your sound. Your story.",
+    bio: L10n.tr("archive.mock.bio"),
     stats: ArchiveStats(listeningHours: 342, stationsCount: 28, likesCount: 1247),
     published: [
       ArchiveStationItem(
         id: "p1",
-        name: "Late Night Lo-fi",
+        name: L10n.tr("archive.mock.lateNightLoFi"),
         createdAt: Date(timeIntervalSinceNow: -2 * 86_400),
         isFeatured: true,
         genre: "Lo-fi",
@@ -135,53 +135,53 @@ extension ArchiveProfile {
       ),
       ArchiveStationItem(
         id: "p2",
-        name: "Morning Coffee",
+        name: L10n.tr("archive.mock.morningCoffee"),
         createdAt: Date(timeIntervalSinceNow: -5 * 86_400),
         isFeatured: false,
-        genre: "Jazz",
+        genre: L10n.tr("genre.jazz"),
         colorHex: ArchiveStationItem.colorHex(for: "p2")
       ),
       ArchiveStationItem(
         id: "p3",
-        name: "Weekend Vinyl",
+        name: L10n.tr("archive.mock.weekendVinyl"),
         createdAt: Date(timeIntervalSinceNow: -8 * 86_400),
         isFeatured: true,
-        genre: "Rock",
+        genre: L10n.tr("genre.rock"),
         colorHex: ArchiveStationItem.colorHex(for: "p3")
       ),
       ArchiveStationItem(
         id: "p4",
-        name: "Indie Discovery",
+        name: L10n.tr("archive.mock.indieDiscovery"),
         createdAt: Date(timeIntervalSinceNow: -12 * 86_400),
         isFeatured: true,
-        genre: "Indie",
+        genre: L10n.tr("genre.indie"),
         colorHex: ArchiveStationItem.colorHex(for: "p4")
       ),
       ArchiveStationItem(
         id: "p5",
-        name: "Electronic Hour",
+        name: L10n.tr("archive.mock.electronicHour"),
         createdAt: Date(timeIntervalSinceNow: -20 * 86_400),
         isFeatured: false,
-        genre: "Electronic",
+        genre: L10n.tr("genre.electronic"),
         colorHex: ArchiveStationItem.colorHex(for: "p5")
       )
     ],
     saved: [
-      station(id: "s1", name: "Jazz Standard", genre: "Jazz"),
-      station(id: "s2", name: "Classic Rock Radio", genre: "Rock"),
-      station(id: "s3", name: "Ambient Waves", genre: "Ambient"),
-      station(id: "s4", name: "Hip Hop Daily", genre: "Hip Hop"),
-      station(id: "s5", name: "Acoustic Sessions", genre: "Acoustic"),
-      station(id: "s6", name: "Soul Kitchen", genre: "Soul")
+      station(id: "s1", name: L10n.tr("archive.mock.jazzStandard"), genre: L10n.tr("genre.jazz")),
+      station(id: "s2", name: L10n.tr("archive.mock.classicRockRadio"), genre: L10n.tr("genre.rock")),
+      station(id: "s3", name: L10n.tr("archive.mock.ambientWaves"), genre: L10n.tr("genre.ambient")),
+      station(id: "s4", name: L10n.tr("archive.mock.hipHopDaily"), genre: L10n.tr("genre.hipHop")),
+      station(id: "s5", name: L10n.tr("archive.mock.acousticSessions"), genre: L10n.tr("genre.acoustic")),
+      station(id: "s6", name: L10n.tr("archive.mock.soulKitchen"), genre: L10n.tr("genre.soul"))
     ],
     recentlyPlayed: [
-      station(id: "r1", name: "Late Night Lo-fi", genre: "Lo-fi"),
-      station(id: "r2", name: "Jazz Standard", genre: "Jazz"),
-      station(id: "r3", name: "Morning Coffee", genre: "Jazz"),
-      station(id: "r4", name: "Ambient Waves", genre: "Ambient"),
-      station(id: "r5", name: "Electronic Hour", genre: "Electronic"),
-      station(id: "r6", name: "Classic Rock Radio", genre: "Rock"),
-      station(id: "r7", name: "Weekend Vinyl", genre: "Rock")
+      station(id: "r1", name: L10n.tr("archive.mock.lateNightLoFi"), genre: "Lo-fi"),
+      station(id: "r2", name: L10n.tr("archive.mock.jazzStandard"), genre: L10n.tr("genre.jazz")),
+      station(id: "r3", name: L10n.tr("archive.mock.morningCoffee"), genre: L10n.tr("genre.jazz")),
+      station(id: "r4", name: L10n.tr("archive.mock.ambientWaves"), genre: L10n.tr("genre.ambient")),
+      station(id: "r5", name: L10n.tr("archive.mock.electronicHour"), genre: L10n.tr("genre.electronic")),
+      station(id: "r6", name: L10n.tr("archive.mock.classicRockRadio"), genre: L10n.tr("genre.rock")),
+      station(id: "r7", name: L10n.tr("archive.mock.weekendVinyl"), genre: L10n.tr("genre.rock"))
     ],
     artists: [
       "Billie Eilish",
@@ -256,7 +256,7 @@ extension ArchiveProfile {
     let trackCount = playlist.tracks.count
     let subtitle = [
       playlist.curatorName,
-      "\(trackCount) \(trackCount == 1 ? "song" : "songs")"
+      L10n.count("count.songs", trackCount)
     ]
       .compactMap { $0 }
       .joined(separator: " • ")
@@ -266,7 +266,7 @@ extension ArchiveProfile {
       name: playlist.name,
       createdAt: nil,
       isFeatured: trackCount > 0,
-      genre: "Playlist",
+      genre: L10n.tr("archive.genre.playlist"),
       colorHex: ArchiveStationItem.colorHex(for: playlist.id),
       artworkURL: playlist.artworkURL ?? playlist.tracks.first?.artworkURL,
       subtitle: subtitle,
@@ -291,13 +291,13 @@ extension ArchiveProfile {
   private static func archiveLibraryItem(from tracks: [Track]) -> ArchiveStationItem {
     ArchiveStationItem(
       id: "library-all-songs",
-      name: "Apple Music Library",
+      name: L10n.tr("archive.appleMusicLibrary"),
       createdAt: nil,
       isFeatured: true,
-      genre: "Library",
+      genre: L10n.tr("archive.genre.library"),
       colorHex: ArchiveStationItem.colorHex(for: "library-all-songs"),
       artworkURL: tracks.first?.artworkURL,
-      subtitle: "\(tracks.count) \(tracks.count == 1 ? "song" : "songs")",
+      subtitle: L10n.count("count.songs", tracks.count),
       tracks: tracks
     )
   }
@@ -322,10 +322,10 @@ extension ArchiveProfile {
           name: artist,
           createdAt: nil,
           isFeatured: false,
-          genre: "Artist",
+          genre: L10n.tr("archive.genre.artist"),
           colorHex: ArchiveStationItem.colorHex(for: artist),
           artworkURL: artistTracks.first?.artworkURL,
-          subtitle: "\(artistTracks.count) \(artistTracks.count == 1 ? "song" : "songs")",
+          subtitle: L10n.count("count.songs", artistTracks.count),
           tracks: artistTracks
         )
       }

@@ -207,15 +207,15 @@ private struct RadioHeaderCard: View {
   private var statusText: String {
     switch state {
     case .playing:
-      "On air"
+      L10n.tr("radio.status.onAir")
     case .loading:
-      "Loading"
+      L10n.tr("playback.loading")
     case .failed:
-      "Playback error"
+      L10n.tr("playback.error.short")
     case .paused:
-      "Paused"
+      L10n.tr("playback.paused")
     case .idle:
-      "Ready to play"
+      L10n.tr("playback.readyToPlay")
     }
   }
 }
@@ -237,15 +237,15 @@ private struct NowPlayingSetCard: View {
   }
 
   private var queueMetaTitle: String {
-    nextItem?.track.durationText ?? "Radio set"
+    nextItem?.track.durationText ?? L10n.tr("radio.queue.radioSet")
   }
 
   private var queueMetaDetail: String {
-    nextItem == nil ? "Awaiting queue" : "Next up"
+    nextItem == nil ? L10n.tr("radio.queue.awaitingQueue") : L10n.tr("radio.queue.nextUp")
   }
 
   private var sourceText: String {
-    currentItem?.sourceTitle ?? queueItems.first?.sourceTitle ?? "Backend station"
+    currentItem?.sourceTitle ?? queueItems.first?.sourceTitle ?? L10n.tr("radio.backendStation")
   }
 
   var body: some View {
@@ -315,7 +315,7 @@ private struct NowPlayingSetCard: View {
       }
 
       if isExtending {
-        Label("正在丰富下一段", systemImage: "sparkles")
+        Label(L10n.tr("radio.extendingNextSegment"), systemImage: "sparkles")
           .font(.system(size: 14, weight: .heavy, design: .rounded))
           .foregroundStyle(.black.opacity(0.5))
           .lineLimit(1)
@@ -378,16 +378,16 @@ private struct NowPlayingSetCard: View {
 
   private var playButtonAccessibilityLabel: String {
     if isLoading {
-      return "Loading"
+      return L10n.tr("playback.loading")
     }
 
     switch status {
     case .loading:
-      return "Loading station"
+      return L10n.tr("radio.loadingStation")
     case .ready:
-      return "Start radio"
+      return L10n.tr("radio.start")
     case .onAir:
-      return isPlaying ? "Pause" : "Play"
+      return isPlaying ? L10n.tr("common.pause") : L10n.tr("common.play")
     }
   }
 }
@@ -447,14 +447,14 @@ private struct RadioSpeechSubtitleCard: View {
 
   private var subtitleTitle: String {
     guard let speech else {
-      return isLoading ? "串词字幕" : "字幕待命"
+      return isLoading ? L10n.tr("radio.subtitle.loadingTitle") : L10n.tr("radio.subtitle.idleTitle")
     }
 
     switch speech.kind {
     case .stationIntro:
-      return "电台开场"
+      return L10n.tr("radio.subtitle.stationIntro")
     case .transition:
-      return isActive ? "电台串场" : "下一段串场"
+      return isActive ? L10n.tr("radio.subtitle.transitionActive") : L10n.tr("radio.subtitle.transitionNext")
     }
   }
 
@@ -463,14 +463,14 @@ private struct RadioSpeechSubtitleCard: View {
       return elapsedTimeText
     }
 
-    return isLoading ? "加载中" : "待播放"
+    return isLoading ? L10n.tr("playback.loading") : L10n.tr("radio.subtitle.readyToPlay")
   }
 
   private var captionText: String {
     guard let speech else {
       return isLoading
-        ? "正在加载串词字幕。"
-        : "串词字幕会在电台开场或串场时显示。"
+        ? L10n.tr("radio.subtitle.loadingCaption")
+        : L10n.tr("radio.subtitle.idleCaption")
     }
 
     if let cue = displayCue {

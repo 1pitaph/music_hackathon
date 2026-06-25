@@ -112,7 +112,7 @@ final class MigrationModelsTests: XCTestCase {
 
     XCTAssertEqual(profile.stats.likesCount, 1)
     XCTAssertEqual(profile.published.first?.tracks.map(\.title), ["Visible Song"])
-    XCTAssertEqual(profile.published.first?.displaySubtitle, "Apple Music • 1 song")
+    XCTAssertEqual(profile.published.first?.displaySubtitle, "Apple Music • \(L10n.count("count.songs", 1))")
     XCTAssertEqual(profile.recentlyPlayed.map(\.name), ["Visible Song"])
     XCTAssertEqual(profile.saved.map(\.name), ["Artist A"])
   }
@@ -140,7 +140,7 @@ final class MigrationModelsTests: XCTestCase {
 
     XCTAssertEqual(profile.stats.likesCount, 30)
     XCTAssertEqual(profile.published.first?.tracks.count, 30)
-    XCTAssertEqual(profile.published.first?.displaySubtitle, "Apple Music • 30 songs")
+    XCTAssertEqual(profile.published.first?.displaySubtitle, "Apple Music • \(L10n.count("count.songs", 30))")
     XCTAssertEqual(profile.recentlyPlayed.count, 30)
     XCTAssertEqual(profile.recentlyPlayed.first?.name, "Song 1")
     XCTAssertEqual(profile.recentlyPlayed.last?.name, "Song 30")
@@ -277,7 +277,7 @@ final class MigrationModelsTests: XCTestCase {
 
     XCTAssertEqual(profile.stats.stationsCount, 0)
     XCTAssertEqual(profile.stats.likesCount, 1)
-    XCTAssertEqual(profile.published.first?.name, "Apple Music Library")
+    XCTAssertEqual(profile.published.first?.name, L10n.tr("archive.appleMusicLibrary"))
     XCTAssertEqual(profile.published.first?.artworkURL, track.artworkURL)
     XCTAssertEqual(profile.recentlyPlayed.first?.name, "Loose Song")
   }

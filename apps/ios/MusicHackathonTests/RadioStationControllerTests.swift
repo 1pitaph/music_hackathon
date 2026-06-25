@@ -59,8 +59,8 @@ final class RadioStationControllerTests: XCTestCase {
 
     XCTAssertNil(controller.station)
     XCTAssertTrue(controller.queue.isEmpty)
-    XCTAssertEqual(controller.stationIntro, "The backend station is not available right now.")
-    XCTAssertEqual(controller.errorMessage, "No tracks with real Apple Music artwork are ready from this station.")
+    XCTAssertEqual(controller.stationIntro, L10n.tr("radio.backendUnavailable"))
+    XCTAssertEqual(controller.errorMessage, L10n.tr("radio.error.noArtworkTracks"))
   }
 
   func testLoadCurrentStationSendsSelectedHostSpeaker() async {
@@ -80,6 +80,28 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertEqual(stationClient.capturedContext?.speechAudio.provider, "volcengine")
     XCTAssertEqual(stationClient.capturedContext?.speechAudio.speaker, "zh_female_shuangkuaisisi_moon_bigtts")
     XCTAssertEqual(stationClient.capturedContext?.speechAudio.resourceId, "seed-tts-1.0")
+    XCTAssertEqual(stationClient.capturedContext?.speechLanguage, "zh-CN")
+    XCTAssertEqual(stationClient.capturedContext?.speechAudio.explicitLanguage, "zh-CN")
+  }
+
+  func testLoadAndContinueStationSendSelectedSpeechLanguage() async {
+    let stationClient = SequencedStationClient(results: [
+      .success(makeResult(titles: ["One", "Two"])),
+      .success(makeResult(titles: ["Three", "Four"]))
+    ])
+    let controller = RadioStationController(
+      playbackController: MockPlaybackController(),
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore(),
+      speechLanguageProvider: { .english }
+    )
+
+    await controller.loadCurrentStation()
+    _ = await controller.extendCurrentStation()
+
+    XCTAssertEqual(stationClient.contexts.map(\.action), ["start", "continue"])
+    XCTAssertEqual(stationClient.contexts.map(\.speechLanguage), ["en-US", "en-US"])
+    XCTAssertEqual(stationClient.contexts.map(\.speechAudio.explicitLanguage), ["en-US", "en-US"])
   }
 
   func testChineseSpeechDurationEstimateUsesCharactersAndPauses() {
@@ -197,7 +219,7 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertNil(controller.station)
     XCTAssertNil(controller.currentItem)
     XCTAssertTrue(controller.queue.isEmpty)
-    XCTAssertEqual(controller.stationIntro, "The backend station is not available right now.")
+    XCTAssertEqual(controller.stationIntro, L10n.tr("radio.backendUnavailable"))
     XCTAssertNotNil(controller.errorMessage)
   }
 

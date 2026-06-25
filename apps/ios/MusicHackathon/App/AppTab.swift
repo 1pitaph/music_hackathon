@@ -10,11 +10,11 @@ enum AppTab: String, CaseIterable, Identifiable {
   var title: String {
     switch self {
     case .radio:
-      "电台"
+      L10n.tr("tab.radio")
     case .discover:
-      "发现"
+      L10n.tr("tab.discover")
     case .mine:
-      "我的"
+      L10n.tr("tab.mine")
     }
   }
 
@@ -52,11 +52,11 @@ enum AppTab: String, CaseIterable, Identifiable {
   var label: some View {
     switch self {
     case .radio:
-      Label("电台", systemImage: "dot.radiowaves.left.and.right")
+      Label(L10n.tr("tab.radio"), systemImage: "dot.radiowaves.left.and.right")
     case .discover:
-      Label("发现", systemImage: "music.note.list")
+      Label(L10n.tr("tab.discover"), systemImage: "music.note.list")
     case .mine:
-      Label("我的", systemImage: "person.crop.circle")
+      Label(L10n.tr("tab.mine"), systemImage: "person.crop.circle")
     }
   }
 }

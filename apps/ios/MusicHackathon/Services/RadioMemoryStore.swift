@@ -201,31 +201,31 @@ actor RadioMemoryStore: RadioMemoryStoring {
 
   private func renderMarkdown(_ memory: RadioStoredMemory) -> String {
     var lines: [String] = [
-      "# Airset Memory",
+      L10n.tr("radioMemory.markdown.title"),
       "",
-      "This local file is generated from memory.json. Airset sends only a small relevant summary to the backend.",
+      L10n.tr("radioMemory.markdown.description"),
       "",
-      "## Taste Summary",
-      memory.summary.taste.isEmpty ? "- No stable taste summary yet." : "- \(memory.summary.taste)",
+      L10n.tr("radioMemory.markdown.tasteSummary"),
+      memory.summary.taste.isEmpty ? L10n.tr("radioMemory.markdown.noStableTaste") : "- \(memory.summary.taste)",
       "",
-      "## Avoid",
-      memory.summary.avoid.isEmpty ? "- No avoid summary yet." : "- \(memory.summary.avoid)",
+      L10n.tr("radioMemory.markdown.avoidSummary"),
+      memory.summary.avoid.isEmpty ? L10n.tr("radioMemory.markdown.noAvoidSummary") : "- \(memory.summary.avoid)",
       "",
-      "## Top Liked Artists",
+      L10n.tr("radioMemory.markdown.topLikedArtists"),
     ]
 
     lines.append(contentsOf: markdownList(rankedValues(memory.counters.likedArtists, limit: 8)))
     lines.append("")
-    lines.append("## Recently Skipped Moods")
+    lines.append(L10n.tr("radioMemory.markdown.recentlySkippedMoods"))
     lines.append(contentsOf: markdownList(rankedValues(memory.counters.skippedMoods, limit: 8)))
     lines.append("")
-    lines.append("## Pinned Notes")
+    lines.append(L10n.tr("radioMemory.markdown.pinnedNotes"))
     lines.append(contentsOf: markdownList(memory.pinnedNotes))
     lines.append("")
-    lines.append("## Recent Events")
+    lines.append(L10n.tr("radioMemory.markdown.recentEvents"))
     lines.append(contentsOf: memory.recentEvents.suffix(20).map { event in
-      let title = event.title ?? event.trackKey ?? "unknown track"
-      let artist = event.artist.map { " by \($0)" } ?? ""
+      let title = event.title ?? event.trackKey ?? L10n.tr("radioMemory.markdown.unknownTrack")
+      let artist = event.artist.map { L10n.tr("radioMemory.markdown.byArtist", $0) } ?? ""
       return "- \(event.at) \(event.type): \(title)\(artist)"
     })
 
@@ -233,7 +233,7 @@ actor RadioMemoryStore: RadioMemoryStoring {
   }
 
   private func markdownList(_ values: [String]) -> [String] {
-    values.isEmpty ? ["- None yet."] : values.map { "- \($0)" }
+    values.isEmpty ? [L10n.tr("radioMemory.markdown.noneYet")] : values.map { "- \($0)" }
   }
 
   private func increment(_ value: String?, in dictionary: inout [String: Int]) {

@@ -117,7 +117,10 @@ def generate_station(request: RadioStationGenerateRequest) -> RadioStationGenera
   diagnostics = list(generation.diagnostics)
   speech = generation.speech
   if speech and request.speechAudio.enabled:
-    speech, speech_diagnostics = _speech_with_audio(speech, request.speechAudio)
+    speech, speech_diagnostics = _speech_with_audio(
+      speech,
+      _speech_audio_config_for_request(request),
+    )
     diagnostics.extend(speech_diagnostics)
 
   if len(items) < request.limit:
@@ -289,6 +292,14 @@ def _speech_with_audio(
     "stationIntro": station_intro,
     "betweenTracks": between_tracks,
   }), diagnostics
+
+
+def _speech_audio_config_for_request(
+  request: RadioStationGenerateRequest,
+) -> RadioSpeechAudioConfig:
+  if request.speechAudio.explicitLanguage:
+    return request.speechAudio
+  return request.speechAudio.model_copy(update={"explicitLanguage": request.speechLanguage})
 
 
 def _speech_segments(speech: RadioSpeech) -> list[RadioSpeechSegment]:

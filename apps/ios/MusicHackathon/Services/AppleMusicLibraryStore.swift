@@ -78,7 +78,7 @@ final class AppleMusicLibraryStore {
         .info,
         chain: .libraryAppleMusic,
         event: "refresh_skipped",
-        message: "未授权时跳过 Apple Music 资料库刷新。",
+        message: L10n.tr("diagnostic.message.libraryRefreshSkippedUnauthorized"),
         payload: ["authorization_status": authorizationStatus.diagnosticValue]
       )
       apply(.empty, state: .needsAuthorization)
@@ -91,7 +91,7 @@ final class AppleMusicLibraryStore {
       .info,
       chain: .libraryAppleMusic,
       event: "refresh_start",
-      message: "开始刷新 Apple Music 资料库。"
+      message: L10n.tr("diagnostic.message.libraryRefreshStarted")
     )
 
     do {
@@ -104,7 +104,7 @@ final class AppleMusicLibraryStore {
         nextState == .loaded ? .notice : .warning,
         chain: .libraryAppleMusic,
         event: "refresh_success",
-        message: "Apple Music 资料库刷新完成。",
+        message: L10n.tr("diagnostic.message.libraryRefreshSucceeded"),
         payload: [
           "playlist_count": String(snapshot.playlists.count),
           "track_count": String(snapshot.tracks.count),
@@ -116,14 +116,14 @@ final class AppleMusicLibraryStore {
     } catch {
       let rawMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
       let message = rawMessage == "Unknown error"
-        ? "无法读取 Apple Music 资料库，请确认已登录并授权后重试。"
+        ? L10n.tr("appleMusicLibrary.error.unableToRead")
         : rawMessage
       apply(.empty, state: .failed(message))
       diagnostics?.record(
         .error,
         chain: .libraryAppleMusic,
         event: "refresh_failed",
-        message: "Apple Music 资料库刷新失败。",
+        message: L10n.tr("diagnostic.message.libraryRefreshFailed"),
         payload: DiagnosticsPayload.error(error)
       )
     }

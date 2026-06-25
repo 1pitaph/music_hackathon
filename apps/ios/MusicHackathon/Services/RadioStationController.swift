@@ -5,7 +5,7 @@ private enum RadioStationArtworkError: LocalizedError {
   case emptyQueue
 
   var errorDescription: String? {
-    "No tracks with real Apple Music artwork are ready from this station."
+    L10n.tr("radio.error.noArtworkTracks")
   }
 }
 
@@ -39,13 +39,13 @@ final class RadioStationController {
   var station: RadioStation?
   var queue: [RadioQueueItem] = []
   var currentItem: RadioQueueItem?
-  var stationTitle = "Airset Radio"
-  var stationIntro = "Ready to stream the backend radio queue."
+  var stationTitle = L10n.tr("radio.defaultTitle")
+  var stationIntro = L10n.tr("radio.defaultIntro")
   var isLoadingStation = false
   var isExtendingStation = false
   var errorMessage: String?
   var extensionErrorMessage: String?
-  var memorySummaryText = "Local memory is ready."
+  var memorySummaryText = L10n.tr("radio.memory.ready")
   var memoryEventCount = 0
   var speechVoiceCatalog: RadioSpeechVoiceCatalog?
   var isLoadingSpeechVoices = false
@@ -59,6 +59,7 @@ final class RadioStationController {
   @ObservationIgnored private let artworkEnricher: any TrackArtworkEnriching
   @ObservationIgnored private let diagnostics: DiagnosticsStore?
   @ObservationIgnored private let hostSpeakerIDProvider: () -> String?
+  @ObservationIgnored private let speechLanguageProvider: () -> RadioSpeechLanguage
   @ObservationIgnored private let libraryTrackProvider: @MainActor () -> [Track]
   @ObservationIgnored private var history: [RadioQueueItem] = []
   @ObservationIgnored private var hasPlayedStationIntro = false
@@ -76,6 +77,7 @@ final class RadioStationController {
     artworkEnricher: any TrackArtworkEnriching = AppleMusicCatalogService(),
     diagnostics: DiagnosticsStore? = nil,
     hostSpeakerIDProvider: @escaping () -> String? = { RadioHostVoiceSettings.selectedSpeakerID() },
+    speechLanguageProvider: @escaping () -> RadioSpeechLanguage = { RadioSpeechLanguage.stored() },
     libraryTrackProvider: @escaping @MainActor () -> [Track] = { [] }
   ) {
     self.playbackController = playbackController
@@ -84,6 +86,7 @@ final class RadioStationController {
     self.artworkEnricher = artworkEnricher
     self.diagnostics = diagnostics
     self.hostSpeakerIDProvider = hostSpeakerIDProvider
+    self.speechLanguageProvider = speechLanguageProvider
     self.libraryTrackProvider = libraryTrackProvider
 
     playbackController.onPlaybackFinished = { [weak self] kind in
@@ -151,7 +154,7 @@ final class RadioStationController {
       .notice,
       chain: .radioStation,
       event: "start_station",
-      message: "开始播放电台。",
+      message: L10n.tr("diagnostic.message.radioStartPlayback"),
       payload: ["has_station_content": DiagnosticsPayload.bool(hasStationContent)]
     )
 
@@ -171,7 +174,7 @@ final class RadioStationController {
         .notice,
         chain: .playbackSpeech,
         event: "station_intro_selected",
-        message: "开始播放电台开场语音。",
+        message: L10n.tr("diagnostic.message.radioIntroPlaybackStarted"),
         payload: [
           "station_id_hash": (station?.id).map(DiagnosticsRedactor.hash) ?? "unknown",
           "speech_id_hash": DiagnosticsRedactor.hash(intro.id)
@@ -225,13 +228,13 @@ final class RadioStationController {
 
     guard !queue.isEmpty else {
       if errorMessage == nil {
-        errorMessage = extensionErrorMessage ?? "No tracks are ready from the backend station."
+        errorMessage = extensionErrorMessage ?? L10n.tr("radio.error.noBackendTracks")
       }
       diagnostics?.record(
         .warning,
         chain: .radioStation,
         event: "queue_empty",
-        message: "电台队列为空，无法继续播放。",
+        message: L10n.tr("diagnostic.message.radioQueueEmpty"),
         payload: [
           "station_loaded": DiagnosticsPayload.bool(station != nil),
           "extension_error_hash": extensionErrorMessage.map(DiagnosticsRedactor.hash) ?? "none"
@@ -248,7 +251,7 @@ final class RadioStationController {
       .notice,
       chain: .radioStation,
       event: "track_selected",
-      message: "电台选择下一首曲目。",
+      message: L10n.tr("diagnostic.message.radioTrackSelected"),
       payload: DiagnosticsPayload.merge(
         [
           "advance_reason": reason.diagnosticValue,
@@ -275,7 +278,7 @@ final class RadioStationController {
       .notice,
       chain: .radioStation,
       event: "play_previous",
-      message: "回放上一首电台曲目。",
+      message: L10n.tr("diagnostic.message.radioPlayPrevious"),
       payload: DiagnosticsPayload.track(previousItem.track)
     )
     Task {
@@ -310,7 +313,7 @@ final class RadioStationController {
       .notice,
       chain: .radioStation,
       event: "local_station_loaded",
-      message: "本地电台队列已加载。",
+      message: L10n.tr("diagnostic.message.localStationLoaded"),
       payload: [
         "station_id_hash": DiagnosticsRedactor.hash(station.id),
         "item_count": String(station.items.count),
@@ -337,7 +340,7 @@ final class RadioStationController {
       .notice,
       chain: .radioBackend,
       event: "generate_start",
-      message: "开始生成后端电台队列。",
+      message: L10n.tr("diagnostic.message.radioGenerateStarted"),
       payload: ["play_immediately": DiagnosticsPayload.bool(playImmediately)]
     )
 
@@ -351,7 +354,8 @@ final class RadioStationController {
         memoryContext: memoryContext,
         limit: batchSize,
         stationID: "airset-personal",
-        hostSpeakerID: hostSpeakerIDProvider()
+        hostSpeakerID: hostSpeakerIDProvider(),
+        speechLanguage: speechLanguageProvider()
       )
       let result = try await stationClient.generateStation(context: generationContext)
       let station = await stationWithRealArtwork(result.station)
@@ -371,7 +375,7 @@ final class RadioStationController {
         .notice,
         chain: .radioBackend,
         event: "generate_success",
-        message: "后端电台队列生成完成。",
+        message: L10n.tr("diagnostic.message.radioGenerateSucceeded"),
         payload: [
           "station_id_hash": DiagnosticsRedactor.hash(station.id),
           "station_session_id_hash": stationSessionID.map(DiagnosticsRedactor.hash) ?? "none",
@@ -395,14 +399,14 @@ final class RadioStationController {
       hasPlayedStationIntro = false
       stationSessionID = nil
       continuationCursor = nil
-      stationTitle = "Airset Radio"
-      stationIntro = "The backend station is not available right now."
+      stationTitle = L10n.tr("radio.defaultTitle")
+      stationIntro = L10n.tr("radio.backendUnavailable")
       errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
       diagnostics?.record(
         .error,
         chain: .radioBackend,
         event: "generate_failed",
-        message: "后端电台队列生成失败。",
+        message: L10n.tr("diagnostic.message.radioGenerateFailed"),
         payload: DiagnosticsPayload.error(error)
       )
     }
@@ -434,7 +438,7 @@ final class RadioStationController {
       .info,
       chain: .radioBackend,
       event: "speech_voices_refresh_start",
-      message: "开始刷新主持人声音列表。"
+      message: L10n.tr("diagnostic.message.speechVoicesRefreshStarted")
     )
 
     do {
@@ -443,7 +447,7 @@ final class RadioStationController {
         .notice,
         chain: .radioBackend,
         event: "speech_voices_refresh_success",
-        message: "主持人声音列表刷新完成。",
+        message: L10n.tr("diagnostic.message.speechVoicesRefreshSucceeded"),
         payload: [
           "voice_count": String(speechVoiceCatalog?.voices.count ?? 0),
           "default_speaker_hash": (speechVoiceCatalog?.defaultSpeaker).map(DiagnosticsRedactor.hash) ?? "none"
@@ -455,7 +459,7 @@ final class RadioStationController {
         .error,
         chain: .radioBackend,
         event: "speech_voices_refresh_failed",
-        message: "主持人声音列表刷新失败。",
+        message: L10n.tr("diagnostic.message.speechVoicesRefreshFailed"),
         payload: DiagnosticsPayload.error(error)
       )
     }
@@ -472,7 +476,7 @@ final class RadioStationController {
       memorySummaryText = snapshot.avoidSummary
     } else {
       memorySummaryText = snapshot.eventCount == 0
-        ? "Local memory is ready."
+        ? L10n.tr("radio.memory.ready")
         : "Learning from \(snapshot.eventCount) recent radio events."
     }
   }
@@ -484,14 +488,14 @@ final class RadioStationController {
         .notice,
         chain: .radioMemory,
         event: "cleared",
-        message: "本地声音档案已清空。"
+        message: L10n.tr("diagnostic.message.radioMemoryCleared")
       )
     } catch {
       diagnostics?.record(
         .error,
         chain: .radioMemory,
         event: "clear_failed",
-        message: "本地声音档案清空失败。",
+        message: L10n.tr("diagnostic.message.radioMemoryClearFailed"),
         payload: DiagnosticsPayload.error(error)
       )
     }
@@ -528,7 +532,7 @@ final class RadioStationController {
       .info,
       chain: .radioBackend,
       event: "extend_start",
-      message: "开始续播后端电台队列。",
+      message: L10n.tr("diagnostic.message.radioExtendStarted"),
       payload: [
         "station_id_hash": (station?.id).map(DiagnosticsRedactor.hash) ?? "none",
         "queue_count": String(queue.count)
@@ -550,7 +554,8 @@ final class RadioStationController {
         currentTrackKey: currentItem?.track.radioIdentity,
         queuedTrackKeys: queue.map(\.track.radioIdentity),
         recentlyPlayedTrackKeys: recentPlaybackTrackKeys(),
-        hostSpeakerID: hostSpeakerIDProvider()
+        hostSpeakerID: hostSpeakerIDProvider(),
+        speechLanguage: speechLanguageProvider()
       )
       let result = try await stationClient.generateStation(context: generationContext)
 
@@ -565,12 +570,12 @@ final class RadioStationController {
       isExtendingStation = false
 
       guard let firstNewItem = newItems.first else {
-        extensionErrorMessage = "The backend station did not return any new tracks."
+        extensionErrorMessage = L10n.tr("radio.error.noNewBackendTracks")
         diagnostics?.record(
           .warning,
           chain: .radioBackend,
           event: "extend_empty",
-          message: "后端续播没有返回新曲目。",
+          message: L10n.tr("diagnostic.message.radioExtendEmpty"),
           payload: ["known_queue_count": String(queue.count)]
         )
         return false
@@ -583,7 +588,7 @@ final class RadioStationController {
         .notice,
         chain: .radioBackend,
         event: "extend_success",
-        message: "后端电台队列续播完成。",
+        message: L10n.tr("diagnostic.message.radioExtendSucceeded"),
         payload: [
           "new_item_count": String(newItems.count),
           "queue_count": String(queue.count),
@@ -602,7 +607,7 @@ final class RadioStationController {
         .error,
         chain: .radioBackend,
         event: "extend_failed",
-        message: "后端电台队列续播失败。",
+        message: L10n.tr("diagnostic.message.radioExtendFailed"),
         payload: DiagnosticsPayload.error(error)
       )
       return false
@@ -747,7 +752,7 @@ final class RadioStationController {
         .info,
         chain: .radioMemory,
         event: "event_recorded",
-        message: "本地声音档案事件已记录。",
+        message: L10n.tr("diagnostic.message.radioMemoryEventRecorded"),
         payload: DiagnosticsPayload.merge(
           ["memory_event_type": type],
           track.map(DiagnosticsPayload.track) ?? [:]
@@ -758,7 +763,7 @@ final class RadioStationController {
         .error,
         chain: .radioMemory,
         event: "event_record_failed",
-        message: "本地声音档案事件记录失败。",
+        message: L10n.tr("diagnostic.message.radioMemoryEventRecordFailed"),
         payload: DiagnosticsPayload.merge(
           ["memory_event_type": type],
           DiagnosticsPayload.error(error)
@@ -808,7 +813,7 @@ final class RadioStationController {
       .notice,
       chain: .radioStation,
       event: "transition_next_track_selected",
-      message: "串词进入推进点，开始播放下一首曲目。",
+      message: L10n.tr("diagnostic.message.radioTransitionAdvanceReached"),
       payload: DiagnosticsPayload.merge(
         [
           "advance_reason": transition.reason.diagnosticValue,
@@ -865,7 +870,7 @@ final class RadioStationController {
       .warning,
       chain: .radioStation,
       event: "playback_failed_auto_skip",
-      message: "当前电台曲目播放失败，自动跳到下一首。",
+      message: L10n.tr("diagnostic.message.radioTrackFailedSkipNext"),
       payload: DiagnosticsPayload.merge(
         [
           "failed_phase": context.phase,
@@ -926,7 +931,7 @@ final class RadioStationController {
       .notice,
       chain: .playbackSpeech,
       event: "transition_selected",
-      message: "开始播放曲目间过渡语音。",
+      message: L10n.tr("diagnostic.message.radioTransitionPlaybackStarted"),
       payload: [
         "advance_reason": reason.diagnosticValue,
         "from_item_hash": DiagnosticsRedactor.hash(finishedItem.id),
@@ -953,7 +958,7 @@ final class RadioStationController {
       .info,
       chain: .radioMemory,
       event: "compression_requested",
-      message: "本地声音档案达到压缩阈值。",
+      message: L10n.tr("diagnostic.message.radioMemoryCompressionThreshold"),
       payload: ["new_event_count": String(request.newEvents.count)]
     )
 
@@ -963,7 +968,7 @@ final class RadioStationController {
           .info,
           chain: .radioMemory,
           event: "compression_skipped",
-          message: "后端未返回声音档案压缩建议。"
+          message: L10n.tr("diagnostic.message.radioMemoryCompressionEmpty")
         )
         return
       }
@@ -972,14 +977,14 @@ final class RadioStationController {
         .notice,
         chain: .radioMemory,
         event: "compression_applied",
-        message: "本地声音档案压缩建议已应用。"
+        message: L10n.tr("diagnostic.message.radioMemoryCompressionApplied")
       )
     } catch {
       diagnostics?.record(
         .error,
         chain: .radioMemory,
         event: "compression_failed",
-        message: "本地声音档案压缩失败。",
+        message: L10n.tr("diagnostic.message.radioMemoryCompressionFailed"),
         payload: DiagnosticsPayload.error(error)
       )
     }

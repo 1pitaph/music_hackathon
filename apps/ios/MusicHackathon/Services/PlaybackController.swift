@@ -238,7 +238,7 @@ final class PlaybackController: RadioPlaybackControlling {
       .info,
       chain: activeBackend.diagnosticChain,
       event: "pause",
-      message: "暂停当前播放。",
+      message: L10n.tr("diagnostic.message.playbackPaused"),
       correlationID: currentPlaybackAttemptID,
       payload: ["backend": activeBackend.rawValue]
     )
@@ -325,7 +325,7 @@ final class PlaybackController: RadioPlaybackControlling {
       .notice,
       chain: shouldPreferPreview || track.normalizedAppleMusicID == nil ? .playbackPreview : .playbackAppleMusic,
       event: "attempt_start",
-      message: "开始播放曲目。",
+      message: L10n.tr("diagnostic.message.trackPlaybackStarted"),
       correlationID: attemptID,
       payload: DiagnosticsPayload.track(track)
     )
@@ -356,7 +356,7 @@ final class PlaybackController: RadioPlaybackControlling {
           .warning,
           chain: .playbackPreview,
           event: "fallback_preview",
-          message: "完整歌曲启动失败，切换到试听片段。",
+          message: L10n.tr("diagnostic.message.fullSongStartupFallback"),
           correlationID: attemptID,
           payload: DiagnosticsPayload.merge(
             ["failed_phase": "apple_music_start"],
@@ -389,7 +389,7 @@ final class PlaybackController: RadioPlaybackControlling {
       .info,
       chain: .musicSubscription,
       event: "access_check_start",
-      message: "检查 Apple Music 完整播放资格。",
+      message: L10n.tr("diagnostic.message.fullPlaybackReadinessCheck"),
       correlationID: attemptID
     )
 
@@ -399,7 +399,7 @@ final class PlaybackController: RadioPlaybackControlling {
         .notice,
         chain: .musicSubscription,
         event: "access_check_success",
-        message: "Apple Music 完整播放资格检查通过。",
+        message: L10n.tr("diagnostic.message.fullPlaybackReadinessSucceeded"),
         correlationID: attemptID
       )
     } catch {
@@ -407,7 +407,7 @@ final class PlaybackController: RadioPlaybackControlling {
         .error,
         chain: .musicSubscription,
         event: "access_check_failed",
-        message: "Apple Music 完整播放资格检查失败。",
+        message: L10n.tr("diagnostic.message.fullPlaybackReadinessFailed"),
         correlationID: attemptID,
         payload: DiagnosticsPayload.error(error)
       )
@@ -418,7 +418,7 @@ final class PlaybackController: RadioPlaybackControlling {
       .info,
       chain: .musicCatalog,
       event: "resolve_start",
-      message: "开始解析 Apple Music 目录歌曲。",
+      message: L10n.tr("diagnostic.message.catalogSongResolveStarted"),
       correlationID: attemptID,
       payload: DiagnosticsPayload.track(track)
     )
@@ -430,7 +430,7 @@ final class PlaybackController: RadioPlaybackControlling {
           .warning,
           chain: .musicCatalog,
           event: "resolve_id_failed_search_fallback",
-          message: "Apple Music ID 直查失败，已用标题和艺人搜索兜底。",
+          message: L10n.tr("diagnostic.message.catalogSongIDFallback"),
           correlationID: attemptID,
           payload: DiagnosticsPayload.merge(
             ["resolution_method": resolution.method.rawValue],
@@ -444,7 +444,7 @@ final class PlaybackController: RadioPlaybackControlling {
         .error,
         chain: .musicCatalog,
         event: "resolve_failed",
-        message: "Apple Music 目录歌曲解析失败。",
+        message: L10n.tr("diagnostic.message.catalogSongResolveFailed"),
         correlationID: attemptID,
         payload: DiagnosticsPayload.merge(
           DiagnosticsPayload.track(track),
@@ -460,7 +460,7 @@ final class PlaybackController: RadioPlaybackControlling {
       .notice,
       chain: .musicCatalog,
       event: "resolve_success",
-      message: "Apple Music 目录歌曲解析完成。",
+      message: L10n.tr("diagnostic.message.catalogSongResolveSucceeded"),
       correlationID: attemptID,
       payload: DiagnosticsPayload.merge(
         ["resolution_method": resolution.method.rawValue],
@@ -472,7 +472,7 @@ final class PlaybackController: RadioPlaybackControlling {
       .info,
       chain: .playbackAppleMusic,
       event: "queue_set",
-      message: "ApplicationMusicPlayer 队列已设置。",
+      message: L10n.tr("diagnostic.message.applicationMusicQueuePrepared"),
       correlationID: attemptID,
       payload: DiagnosticsPayload.track(resolvedTrack)
     )
@@ -483,7 +483,7 @@ final class PlaybackController: RadioPlaybackControlling {
         .info,
         chain: .playbackAppleMusic,
         event: "prepare_start",
-        message: "开始准备完整歌曲播放。",
+        message: L10n.tr("diagnostic.message.fullSongPrepareStarted"),
         correlationID: attemptID
       )
       try await musicPlayer.prepareToPlay()
@@ -491,7 +491,7 @@ final class PlaybackController: RadioPlaybackControlling {
         .notice,
         chain: .playbackAppleMusic,
         event: "prepare_success",
-        message: "完整歌曲播放准备完成。",
+        message: L10n.tr("diagnostic.message.fullSongPrepareSucceeded"),
         correlationID: attemptID,
         payload: ["duration_ms": DiagnosticsPayload.durationMilliseconds(Date().timeIntervalSince(prepareStart))]
       )
@@ -515,7 +515,7 @@ final class PlaybackController: RadioPlaybackControlling {
         .info,
         chain: .playbackAppleMusic,
         event: "play_start",
-        message: "开始请求完整歌曲播放。",
+        message: L10n.tr("diagnostic.message.fullSongPlayRequestStarted"),
         correlationID: attemptID
       )
       try await musicPlayer.play()
@@ -523,7 +523,7 @@ final class PlaybackController: RadioPlaybackControlling {
         .notice,
         chain: .playbackAppleMusic,
         event: "play_success",
-        message: "完整歌曲播放已启动。",
+        message: L10n.tr("diagnostic.message.fullSongPlaybackStarted"),
         correlationID: attemptID,
         payload: ["duration_ms": DiagnosticsPayload.durationMilliseconds(Date().timeIntervalSince(playStart))]
       )
@@ -562,7 +562,7 @@ final class PlaybackController: RadioPlaybackControlling {
         .error,
         chain: .playbackAppleMusic,
         event: "apple_music_failed",
-        message: "完整歌曲播放失败，且没有可用试听片段。",
+        message: L10n.tr("diagnostic.message.fullSongFailedNoPreview"),
         correlationID: attemptID,
         payload: DiagnosticsPayload.merge(
           ["failed_phase": failedPhase],
@@ -574,12 +574,12 @@ final class PlaybackController: RadioPlaybackControlling {
     }
 
     currentTrack = resolvedTrack
-    lastErrorMessage = "完整歌曲暂时不可用，已切换到试听片段。"
+    lastErrorMessage = L10n.tr("playback.error.fallbackPreview")
     diagnostics?.record(
       .warning,
       chain: .playbackPreview,
       event: "fallback_preview",
-      message: "完整歌曲暂时不可用，已切换到试听片段。",
+      message: L10n.tr("playback.error.fallbackPreview"),
       correlationID: attemptID,
       payload: DiagnosticsPayload.merge(
         ["failed_phase": failedPhase],
@@ -623,7 +623,7 @@ final class PlaybackController: RadioPlaybackControlling {
       .notice,
       chain: .playbackPreview,
       event: "preview_play_start",
-      message: "试听片段播放已启动。",
+      message: L10n.tr("diagnostic.message.previewPlaybackStarted"),
       correlationID: correlationID,
       payload: DiagnosticsPayload.merge(
         ["reason": reason],
@@ -696,7 +696,7 @@ final class PlaybackController: RadioPlaybackControlling {
       .notice,
       chain: .playbackSpeech,
       event: "speech_audio_start",
-      message: "主持人语音音频播放已启动。",
+      message: L10n.tr("diagnostic.message.speechAudioPlaybackStarted"),
       payload: [
         "speech_id_hash": DiagnosticsRedactor.hash(speech.id),
         "duration_seconds": String(Int((speech.audio?.durationSeconds ?? 0).rounded()))
@@ -731,7 +731,7 @@ final class PlaybackController: RadioPlaybackControlling {
       .notice,
       chain: .playbackSpeech,
       event: "speech_synthesis_start",
-      message: "主持人语音合成播放已启动。",
+      message: L10n.tr("diagnostic.message.speechSynthesisPlaybackStarted"),
       payload: [
         "speech_id_hash": DiagnosticsRedactor.hash(speech.id),
         "text_length": String(spokenText.count)
@@ -796,7 +796,7 @@ final class PlaybackController: RadioPlaybackControlling {
         .notice,
         chain: .playbackAppleMusic,
         event: "resume_success",
-        message: "完整歌曲播放已恢复。",
+        message: L10n.tr("diagnostic.message.fullSongPlaybackResumed"),
         correlationID: currentPlaybackAttemptID
       )
     } catch {
@@ -997,7 +997,7 @@ final class PlaybackController: RadioPlaybackControlling {
         .warning,
         chain: .playbackSpeech,
         event: "speech_audio_failed",
-        message: "主持人语音音频播放失败，切换到系统语音合成。",
+        message: L10n.tr("diagnostic.message.speechAudioFallbackSynthesis"),
         payload: DiagnosticsPayload.merge(
           ["speech_id_hash": DiagnosticsRedactor.hash(speech.id)],
           DiagnosticsPayload.error(error)
@@ -1368,7 +1368,7 @@ final class PlaybackController: RadioPlaybackControlling {
       .error,
       chain: failureChain,
       event: "attempt_failed",
-      message: "播放失败。",
+      message: L10n.tr("diagnostic.message.playbackFailed"),
       correlationID: correlationID,
       payload: DiagnosticsPayload.merge(
         ["failed_phase": failedPhase],
@@ -1383,7 +1383,7 @@ final class PlaybackController: RadioPlaybackControlling {
       PlaybackFailureContext(
         track: currentTrack,
         phase: failedPhase,
-        message: lastErrorMessage ?? "Playback failed."
+        message: lastErrorMessage ?? L10n.tr("playback.error.generic")
       )
     )
   }
@@ -1438,7 +1438,7 @@ final class PlaybackController: RadioPlaybackControlling {
       .notice,
       chain: activeBackend.diagnosticChain,
       event: "playback_complete",
-      message: kind == .track ? "曲目播放完成。" : "主持人语音播放完成。",
+      message: kind == .track ? L10n.tr("diagnostic.message.trackPlaybackFinished") : L10n.tr("diagnostic.message.speechPlaybackFinished"),
       correlationID: currentPlaybackAttemptID,
       payload: [
         "completion_kind": kind.diagnosticValue,
@@ -1461,7 +1461,7 @@ final class PlaybackController: RadioPlaybackControlling {
         .info,
         chain: .audioSession,
         event: "configure_success",
-        message: "音频会话配置完成。",
+        message: L10n.tr("diagnostic.message.audioSessionConfigured"),
         payload: ["category": "playback", "active": "true"]
       )
     } catch {
@@ -1471,7 +1471,7 @@ final class PlaybackController: RadioPlaybackControlling {
         .error,
         chain: .audioSession,
         event: "configure_failed",
-        message: "音频会话配置失败。",
+        message: L10n.tr("diagnostic.message.audioSessionConfigurationFailed"),
         payload: DiagnosticsPayload.error(error)
       )
     }
@@ -1493,7 +1493,7 @@ final class PlaybackController: RadioPlaybackControlling {
         .warning,
         chain: .audioSession,
         event: "background_continuation_unavailable",
-        message: "无法申请后台播放交接时间。",
+        message: L10n.tr("diagnostic.message.backgroundTaskRequestFailed"),
         payload: ["reason": reason]
       )
       return
@@ -1503,7 +1503,7 @@ final class PlaybackController: RadioPlaybackControlling {
       .info,
       chain: .audioSession,
       event: "background_continuation_begin",
-      message: "已申请后台播放交接时间。",
+      message: L10n.tr("diagnostic.message.backgroundTaskRequested"),
       payload: ["reason": reason]
     )
   }
@@ -1520,7 +1520,7 @@ final class PlaybackController: RadioPlaybackControlling {
       .info,
       chain: .audioSession,
       event: "background_continuation_end",
-      message: "后台播放交接时间已结束。",
+      message: L10n.tr("diagnostic.message.backgroundTaskEnded"),
       payload: [
         "reason": reason,
         "start_reason": startReason
@@ -1686,9 +1686,9 @@ private enum PlaybackError: LocalizedError {
   var errorDescription: String? {
     switch self {
     case .appleMusicAccessDenied:
-      "Apple Music access is required to play this track."
+      L10n.tr("playback.error.appleMusicAccessRequired")
     case .appleMusicSubscriptionRequired:
-      "An active Apple Music subscription is required to play catalog tracks."
+      L10n.tr("playback.error.appleMusicSubscriptionRequired")
     }
   }
 }

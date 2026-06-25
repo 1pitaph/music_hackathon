@@ -64,6 +64,7 @@ class RadioGenerateRequest(BaseModel):
   memoryContext: RadioMemoryContext = Field(default_factory=RadioMemoryContext)
   memoryMarkdown: str = Field(default="", max_length=12000)
   limit: int = Field(default=14, ge=1, le=40)
+  speechLanguage: Literal["zh-CN", "en-US"] = "zh-CN"
 
 
 class RadioGeneratedItem(BaseModel):

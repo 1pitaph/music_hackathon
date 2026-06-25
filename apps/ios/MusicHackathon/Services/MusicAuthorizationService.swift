@@ -48,9 +48,9 @@ enum AppleMusicSubscriptionIssue: Equatable {
   var message: String {
     switch self {
     case .privacyAcknowledgementRequired:
-      "需要先在 Apple Music 中确认最新隐私政策或服务条款。"
+      L10n.tr("appleMusic.error.privacyAcknowledgementRequired")
     case .permissionDenied:
-      "Apple Music 无法读取当前账号的订阅状态，请检查媒体与 Apple Music 权限。"
+      L10n.tr("appleMusic.error.subscriptionPermissionDenied")
     case .unknown(let message):
       message
     }
@@ -69,17 +69,17 @@ enum AppleMusicAccessError: LocalizedError {
   var errorDescription: String? {
     switch self {
     case .authorizationDenied:
-      "Airset 的 Apple Music 权限已关闭。"
+      L10n.tr("appleMusic.error.authorizationDenied")
     case .authorizationRestricted:
-      "此设备的 Apple Music 访问受限制。"
+      L10n.tr("appleMusic.error.authorizationRestricted")
     case .authorizationRequired:
-      "需要连接 Apple Music 才能播放这首歌。"
+      L10n.tr("appleMusic.error.authorizationRequired")
     case .subscriptionRequired:
-      "需要有效的 Apple Music 订阅才能播放完整歌曲。"
+      L10n.tr("appleMusic.error.subscriptionRequired")
     case .catalogPlaybackUnavailable:
-      "当前账号或地区暂不支持 Apple Music 目录播放。"
+      L10n.tr("appleMusic.error.catalogPlaybackUnavailable")
     case .privacyAcknowledgementRequired:
-      "请先打开 Apple Music 并确认最新隐私政策或服务条款。"
+      L10n.tr("appleMusic.error.openMusicForPrivacy")
     case .subscriptionCheckFailed(let message):
       message
     }
@@ -114,7 +114,7 @@ final class MusicAuthorizationService {
       .info,
       chain: .musicAuthorization,
       event: "status_refresh",
-      message: "Apple Music 授权状态已刷新。",
+      message: L10n.tr("diagnostic.message.musicAuthorizationStatusRefreshed"),
       payload: ["authorization_status": statusDiagnosticValue]
     )
   }
@@ -132,7 +132,7 @@ final class MusicAuthorizationService {
       .notice,
       chain: .musicAuthorization,
       event: "request_start",
-      message: "开始请求 Apple Music 访问权限。"
+      message: L10n.tr("diagnostic.message.musicAuthorizationRequestStarted")
     )
     status = await MusicAuthorization.request()
     isRequestingAccess = false
@@ -140,7 +140,7 @@ final class MusicAuthorizationService {
       status == .authorized ? .notice : .warning,
       chain: .musicAuthorization,
       event: "request_result",
-      message: "Apple Music 访问权限请求已结束。",
+      message: L10n.tr("diagnostic.message.musicAuthorizationRequestFinished"),
       payload: ["authorization_status": statusDiagnosticValue]
     )
     await refreshSubscription()
@@ -154,7 +154,7 @@ final class MusicAuthorizationService {
         .info,
         chain: .musicSubscription,
         event: "subscription_refresh_skipped",
-        message: "未授权时跳过 Apple Music 订阅检查。",
+        message: L10n.tr("diagnostic.message.musicSubscriptionSkipUnauthorized"),
         payload: ["authorization_status": statusDiagnosticValue]
       )
       return
@@ -167,7 +167,7 @@ final class MusicAuthorizationService {
       .info,
       chain: .musicSubscription,
       event: "subscription_refresh_start",
-      message: "开始检查 Apple Music 订阅状态。"
+      message: L10n.tr("diagnostic.message.musicSubscriptionRefreshStarted")
     )
 
     do {
@@ -176,7 +176,7 @@ final class MusicAuthorizationService {
         subscription?.canPlayCatalogContent == true ? .notice : .warning,
         chain: .musicSubscription,
         event: "subscription_refresh_success",
-        message: "Apple Music 订阅状态检查完成。",
+        message: L10n.tr("diagnostic.message.musicSubscriptionRefreshSucceeded"),
         payload: subscriptionDiagnosticPayload
       )
     } catch {
@@ -188,7 +188,7 @@ final class MusicAuthorizationService {
         .error,
         chain: .musicSubscription,
         event: "subscription_refresh_failed",
-        message: "Apple Music 订阅状态检查失败。",
+        message: L10n.tr("diagnostic.message.musicSubscriptionRefreshFailed"),
         payload: DiagnosticsPayload.merge(
           ["subscription_issue": issue.diagnosticValue],
           DiagnosticsPayload.error(error)
@@ -258,7 +258,7 @@ final class MusicAuthorizationService {
       .notice,
       chain: .musicSubscription,
       event: "catalog_playback_ready",
-      message: "Apple Music 目录完整播放资格已确认。",
+      message: L10n.tr("diagnostic.message.catalogPlaybackReady"),
       payload: subscriptionDiagnosticPayload
     )
     return subscription
@@ -323,40 +323,40 @@ final class MusicAuthorizationService {
   var statusText: String {
     switch status {
     case .authorized:
-      "已授权"
+      L10n.tr("appleMusic.status.authorized")
     case .denied:
-      "已拒绝"
+      L10n.tr("appleMusic.status.denied")
     case .notDetermined:
-      "未决定"
+      L10n.tr("appleMusic.status.notDetermined")
     case .restricted:
-      "受限制"
+      L10n.tr("appleMusic.status.restricted")
     @unknown default:
-      "未知"
+      L10n.tr("common.unknown")
     }
   }
 
   var subscriptionText: String {
     switch readiness {
     case .notDetermined, .requestingAuthorization:
-      "需要授权"
+      L10n.tr("appleMusic.subscription.needsAuthorization")
     case .denied:
-      "系统权限已关闭"
+      L10n.tr("appleMusic.subscription.permissionOff")
     case .restricted:
-      "设备限制"
+      L10n.tr("appleMusic.subscription.restricted")
     case .checkingSubscription:
-      "正在检查"
+      L10n.tr("appleMusic.subscription.checking")
     case .subscriptionStatusUnknown:
-      "等待刷新"
+      L10n.tr("appleMusic.subscription.waitingRefresh")
     case .ready:
-      "可播放完整歌曲"
+      L10n.tr("appleMusic.subscription.ready")
     case .needsSubscription:
-      "需要 Apple Music 订阅"
+      L10n.tr("appleMusic.subscription.needsSubscription")
     case .catalogPlaybackUnavailable:
-      "目录播放不可用"
+      L10n.tr("appleMusic.subscription.catalogUnavailable")
     case .privacyAcknowledgementRequired:
-      "需要确认隐私政策"
+      L10n.tr("appleMusic.subscription.needsPrivacyAcknowledgement")
     case .subscriptionCheckFailed:
-      "检查失败"
+      L10n.tr("appleMusic.subscription.checkFailed")
     }
   }
 
@@ -373,7 +373,7 @@ final class MusicAuthorizationService {
             subscription.canPlayCatalogContent ? .notice : .warning,
             chain: .musicSubscription,
             event: "subscription_update",
-            message: "收到 Apple Music 订阅状态更新。",
+            message: L10n.tr("diagnostic.message.musicSubscriptionUpdated"),
             payload: [
               "can_play_catalog_content": DiagnosticsPayload.bool(subscription.canPlayCatalogContent),
               "can_become_subscriber": DiagnosticsPayload.bool(subscription.canBecomeSubscriber),
@@ -422,7 +422,7 @@ final class MusicAuthorizationService {
       .warning,
       chain: .musicSubscription,
       event: "catalog_playback_not_ready",
-      message: "Apple Music 目录完整播放资格未就绪。",
+      message: L10n.tr("diagnostic.message.catalogPlaybackNotReady"),
       payload: DiagnosticsPayload.merge(
         [
           "reason": reason,

@@ -6,6 +6,7 @@ from radio_agent.graph import (
   validate_entry_copy,
   validate_transition_copy,
 )
+from radio_agent.prompts import station_program_system_prompt, station_program_user_prompt
 from radio_agent.schemas import RadioGenerateRequest, RadioGeneratedItem, RadioTrack
 
 
@@ -64,6 +65,36 @@ def test_mock_multi_agent_response_contains_speech(monkeypatch):
   assert response.speech.stationIntro is not None
   assert response.speech.stationIntro.displayText == response.stationIntro
   assert len(response.speech.betweenTracks) == 0
+
+
+def test_english_speech_language_shapes_station_program_prompt():
+  request = _request_with_two_tracks().model_copy(update={"speechLanguage": "en-US"})
+  state = {
+    "request": request,
+    "candidates": request.seedTracks,
+    "sharedMemory": {},
+  }
+
+  system_prompt = station_program_system_prompt(request.speechLanguage)
+  payload = json.loads(station_program_user_prompt(request, state))
+
+  assert "English radio host" in system_prompt
+  assert payload["hostStyle"]["language"] == "en-US"
+  assert payload["copyBudget"]["stationIntroText"].startswith("18-35 English words")
+  assert "natural English host intro" in payload["requiredShape"]["speech"]["stationIntro"]["text"]
+
+
+def test_mock_english_response_contains_english_speech(monkeypatch):
+  monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+  response = generate_radio(_request_with_two_tracks().model_copy(update={"speechLanguage": "en-US"}))
+
+  assert response.mode == "mock"
+  assert response.speech is not None
+  assert response.speech.stationIntro is not None
+  assert response.stationIntro.startswith("Opening with A")
+  assert response.speech.betweenTracks[0].displayText.startswith("Another side of the album")
+  assert "《" not in response.stationIntro
 
 
 def test_single_call_llm_generates_station_program(monkeypatch):
@@ -220,7 +251,7 @@ def test_entry_copy_invalid_json_uses_default_intro():
 
   result = validate_entry_copy(state)
 
-  assert result["entryCopy"].displayText == "Tuned from Morning, with a little room for discovery."
+  assert result["entryCopy"].displayText == "从 Morning 调出这一段，留一点发现新歌的空间"
   assert "Entry copy payload was not valid JSON; using deterministic intro." in result["diagnostics"]
 
 

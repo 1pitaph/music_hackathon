@@ -12,17 +12,17 @@ enum DiagnosticLogLevel: String, CaseIterable, Codable, Hashable {
   var title: String {
     switch self {
     case .debug:
-      "调试"
+      L10n.tr("diagnostics.level.debug")
     case .info:
-      "信息"
+      L10n.tr("diagnostics.level.info")
     case .notice:
-      "关键"
+      L10n.tr("diagnostics.level.notice")
     case .warning:
-      "警告"
+      L10n.tr("diagnostics.level.warning")
     case .error:
-      "错误"
+      L10n.tr("diagnostics.level.error")
     case .fault:
-      "故障"
+      L10n.tr("diagnostics.level.fault")
     }
   }
 
@@ -82,37 +82,37 @@ enum DiagnosticLogChain: String, CaseIterable, Codable, Hashable {
   var title: String {
     switch self {
     case .appLifecycle:
-      "App 生命周期"
+      L10n.tr("diagnostics.chain.appLifecycle")
     case .uiState:
-      "界面状态"
+      L10n.tr("diagnostics.chain.uiState")
     case .musicAuthorization:
-      "Apple Music 授权"
+      L10n.tr("diagnostics.chain.musicAuthorization")
     case .musicSubscription:
-      "Apple Music 订阅"
+      L10n.tr("diagnostics.chain.musicSubscription")
     case .musicCatalog:
-      "Apple Music 目录"
+      L10n.tr("diagnostics.chain.musicCatalog")
     case .playbackAppleMusic:
-      "完整歌曲播放"
+      L10n.tr("diagnostics.chain.playbackAppleMusic")
     case .playbackPreview:
-      "试听播放"
+      L10n.tr("diagnostics.chain.playbackPreview")
     case .playbackSpeech:
-      "主持人语音"
+      L10n.tr("diagnostics.chain.playbackSpeech")
     case .audioSession:
-      "音频会话"
+      L10n.tr("diagnostics.chain.audioSession")
     case .radioBackend:
-      "后端电台"
+      L10n.tr("diagnostics.chain.radioBackend")
     case .radioStation:
-      "电台队列"
+      L10n.tr("diagnostics.chain.radioStation")
     case .radioMemory:
-      "本地声音档案"
+      L10n.tr("diagnostics.chain.radioMemory")
     case .libraryAppleMusic:
-      "Apple Music 资料库"
+      L10n.tr("diagnostics.chain.libraryAppleMusic")
     case .diagnosticsExport:
-      "诊断导出"
+      L10n.tr("diagnostics.chain.diagnosticsExport")
     case .network:
-      "网络请求"
+      L10n.tr("diagnostics.chain.network")
     case .cache:
-      "缓存"
+      L10n.tr("diagnostics.chain.cache")
     }
   }
 

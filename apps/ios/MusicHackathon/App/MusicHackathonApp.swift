@@ -11,6 +11,8 @@ struct MusicHackathonApp: App {
   @State private var artworkAnalysisStore: ArtworkAnalysisStore
 
   init() {
+    AppLanguage.applyStoredPreference()
+
     let diagnostics = DiagnosticsStore()
     let musicAuthorization = MusicAuthorizationService(diagnostics: diagnostics)
     let playbackController = PlaybackController(musicAuthorization: musicAuthorization, diagnostics: diagnostics)

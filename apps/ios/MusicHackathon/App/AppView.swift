@@ -224,7 +224,7 @@ private struct GlobalMiniPlayer: View {
     HStack(spacing: 6) {
       controlButton(
         systemImage: isLoading ? "hourglass" : (isPlaying ? "pause.fill" : "play.fill"),
-        accessibilityLabel: isLoading ? "正在加载" : (isPlaying ? "暂停" : "播放"),
+        accessibilityLabel: isLoading ? L10n.tr("playback.loading") : (isPlaying ? L10n.tr("common.pause") : L10n.tr("common.play")),
         prominent: true,
         action: onTogglePlay
       )
@@ -232,7 +232,7 @@ private struct GlobalMiniPlayer: View {
 
       controlButton(
         systemImage: "forward.fill",
-        accessibilityLabel: "下一首",
+        accessibilityLabel: L10n.tr("player.next"),
         prominent: false,
         action: onNext
       )

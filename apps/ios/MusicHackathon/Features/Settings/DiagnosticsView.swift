@@ -41,9 +41,9 @@ struct DiagnosticsView: View {
       eventsSection
     }
     .listStyle(.insetGrouped)
-    .navigationTitle("日志与诊断")
+    .navigationTitle(L10n.tr("diagnostics.title"))
     .navigationBarTitleDisplayMode(.inline)
-    .searchable(text: $searchText, prompt: "搜索日志、链路或字段")
+    .searchable(text: $searchText, prompt: L10n.tr("diagnostics.searchPrompt"))
     .toolbar {
       ToolbarItemGroup(placement: .topBarTrailing) {
         exportButton
@@ -53,33 +53,33 @@ struct DiagnosticsView: View {
               await diagnostics.refreshRecentEvents()
             }
           } label: {
-            Label("刷新", systemImage: "arrow.clockwise")
+            Label(L10n.tr("common.refresh"), systemImage: "arrow.clockwise")
           }
 
           Button(role: .destructive) {
             isShowingClearConfirmation = true
           } label: {
-            Label("清空日志", systemImage: "trash")
+            Label(L10n.tr("diagnostics.clearLogs"), systemImage: "trash")
           }
         } label: {
           Image(systemName: "ellipsis.circle")
         }
-        .accessibilityLabel("更多诊断操作")
+        .accessibilityLabel(L10n.tr("diagnostics.moreActions"))
       }
     }
     .confirmationDialog(
-      "清空本地诊断日志？",
+      L10n.tr("diagnostics.clearConfirmation.title"),
       isPresented: $isShowingClearConfirmation,
       titleVisibility: .visible
     ) {
-      Button("清空日志", role: .destructive) {
+      Button(L10n.tr("diagnostics.clearLogs"), role: .destructive) {
         Task {
           await diagnostics.clearLogs()
         }
       }
-      Button("取消", role: .cancel) {}
+      Button(L10n.tr("common.cancel"), role: .cancel) {}
     } message: {
-      Text("这只会清空诊断日志，不会删除本地声音档案或 Apple Music 资料库。")
+      Text(L10n.tr("diagnostics.clearConfirmation.message"))
     }
     .task {
       await diagnostics.refreshRecentEvents()
@@ -87,29 +87,29 @@ struct DiagnosticsView: View {
   }
 
   private var statusSection: some View {
-    Section("状态") {
-      LabeledContent("已记录", value: "\(diagnostics.recentEvents.count)")
-      LabeledContent("错误与警告", value: "\(diagnostics.errorCount)")
-      LabeledContent("占用空间", value: diagnostics.storageSummary.totalSizeText)
-      LabeledContent("最近事件", value: diagnostics.lastEventText)
+    Section(L10n.tr("diagnostics.status.section")) {
+      LabeledContent(L10n.tr("diagnostics.status.recorded"), value: "\(diagnostics.recentEvents.count)")
+      LabeledContent(L10n.tr("diagnostics.status.errorsAndWarnings"), value: "\(diagnostics.errorCount)")
+      LabeledContent(L10n.tr("diagnostics.status.storage"), value: diagnostics.storageSummary.totalSizeText)
+      LabeledContent(L10n.tr("diagnostics.status.lastEvent"), value: diagnostics.lastEventText)
 
       if diagnostics.isVerboseLoggingEnabled {
         if let expiresAt = diagnostics.verboseLoggingExpiresAt {
-          LabeledContent("详细诊断", value: "到 \(expiresAt.formatted(.dateTime.hour().minute()))")
+          LabeledContent(L10n.tr("diagnostics.status.verbose"), value: L10n.tr("diagnostics.verbose.until", expiresAt.formatted(.dateTime.hour().minute())))
         } else {
-          LabeledContent("详细诊断", value: "已开启")
+          LabeledContent(L10n.tr("diagnostics.status.verbose"), value: L10n.tr("common.enabled"))
         }
 
         Button {
           diagnostics.disableVerboseLogging()
         } label: {
-          Label("关闭详细诊断", systemImage: "stop.circle")
+          Label(L10n.tr("diagnostics.verbose.disable"), systemImage: "stop.circle")
         }
       } else {
         Button {
           diagnostics.enableVerboseLogging()
         } label: {
-          Label("开启详细诊断 15 分钟", systemImage: "stethoscope")
+          Label(L10n.tr("diagnostics.verbose.enable15Minutes"), systemImage: "stethoscope")
         }
       }
 
@@ -122,25 +122,25 @@ struct DiagnosticsView: View {
   }
 
   private var privacySection: some View {
-    Section("隐私") {
-      Text("诊断日志用于排查播放、授权、后端电台和本地档案问题。导出报告不包含 Apple Music token、完整私人 URL、音频文件、封面图片或完整资料库历史。")
+    Section(L10n.tr("settings.privacy.section")) {
+      Text(L10n.tr("diagnostics.privacy.description"))
         .font(.footnote)
         .foregroundStyle(.secondary)
     }
   }
 
   private var filtersSection: some View {
-    Section("筛选") {
-      Picker("级别", selection: $selectedLevel) {
-        Text("全部").tag(Optional<DiagnosticLogLevel>.none)
+    Section(L10n.tr("diagnostics.filters.section")) {
+      Picker(L10n.tr("diagnostics.filters.level"), selection: $selectedLevel) {
+        Text(L10n.tr("common.all")).tag(Optional<DiagnosticLogLevel>.none)
         ForEach(DiagnosticLogLevel.allCases, id: \.self) { level in
           Label(level.title, systemImage: level.systemImage)
             .tag(Optional(level))
         }
       }
 
-      Picker("链路", selection: $selectedChain) {
-        Text("全部").tag(Optional<DiagnosticLogChain>.none)
+      Picker(L10n.tr("diagnostics.filters.chain"), selection: $selectedChain) {
+        Text(L10n.tr("common.all")).tag(Optional<DiagnosticLogChain>.none)
         ForEach(DiagnosticLogChain.allCases, id: \.self) { chain in
           Label(chain.title, systemImage: chain.systemImage)
             .tag(Optional(chain))
@@ -150,12 +150,12 @@ struct DiagnosticsView: View {
   }
 
   private var eventsSection: some View {
-    Section("日志") {
+    Section(L10n.tr("diagnostics.logs.section")) {
       if filteredEvents.isEmpty {
         ContentUnavailableView(
-          searchText.isEmpty ? "暂无诊断日志" : "没有匹配的日志",
+          searchText.isEmpty ? L10n.tr("diagnostics.empty.title") : L10n.tr("diagnostics.empty.noMatchesTitle"),
           systemImage: searchText.isEmpty ? "doc.text.magnifyingglass" : "line.3.horizontal.decrease.circle",
-          description: Text(searchText.isEmpty ? "播放、授权或电台操作发生后会在这里显示。" : "调整搜索词或筛选条件后再试。")
+          description: Text(searchText.isEmpty ? L10n.tr("diagnostics.empty.message") : L10n.tr("diagnostics.empty.noMatchesMessage"))
         )
       } else {
         ForEach(filteredEvents) { event in
@@ -175,7 +175,7 @@ struct DiagnosticsView: View {
       ShareLink(item: exportURL) {
         Image(systemName: "square.and.arrow.up")
       }
-      .accessibilityLabel("分享诊断报告")
+      .accessibilityLabel(L10n.tr("diagnostics.shareReport"))
     } else {
       Button {
         Task {
@@ -190,7 +190,7 @@ struct DiagnosticsView: View {
           Image(systemName: "square.and.arrow.up")
         }
       }
-      .accessibilityLabel("导出诊断报告")
+      .accessibilityLabel(L10n.tr("diagnostics.exportReport"))
       .disabled(isExporting)
     }
   }
@@ -260,22 +260,22 @@ private struct DiagnosticsLogDetailView: View {
 
   var body: some View {
     List {
-      Section("概览") {
-        LabeledContent("时间", value: event.timestamp.formatted(.dateTime.year().month().day().hour().minute().second()))
-        LabeledContent("级别", value: event.level.title)
-        LabeledContent("链路", value: event.chain.title)
-        LabeledContent("事件", value: event.event)
+      Section(L10n.tr("diagnostics.detail.overview")) {
+        LabeledContent(L10n.tr("diagnostics.detail.time"), value: event.timestamp.formatted(.dateTime.year().month().day().hour().minute().second()))
+        LabeledContent(L10n.tr("diagnostics.detail.level"), value: event.level.title)
+        LabeledContent(L10n.tr("diagnostics.detail.chain"), value: event.chain.title)
+        LabeledContent(L10n.tr("diagnostics.detail.event"), value: event.event)
         if let correlationID = event.correlationID {
-          LabeledContent("关联 ID", value: correlationID)
+          LabeledContent(L10n.tr("diagnostics.detail.correlationID"), value: correlationID)
         }
       }
 
-      Section("消息") {
+      Section(L10n.tr("diagnostics.detail.message")) {
         Text(event.message)
       }
 
       if !event.payload.isEmpty {
-        Section("上下文") {
+        Section(L10n.tr("diagnostics.detail.context")) {
           ForEach(event.payload.keys.sorted(), id: \.self) { key in
             LabeledContent(key, value: event.payload[key] ?? "")
           }
@@ -283,7 +283,7 @@ private struct DiagnosticsLogDetailView: View {
       }
 
       if !relatedEvents.isEmpty {
-        Section("同一链路事件") {
+        Section(L10n.tr("diagnostics.detail.relatedEvents")) {
           ForEach(relatedEvents) { relatedEvent in
             DiagnosticsLogRow(event: relatedEvent)
           }
@@ -291,7 +291,7 @@ private struct DiagnosticsLogDetailView: View {
       }
     }
     .listStyle(.insetGrouped)
-    .navigationTitle("日志详情")
+    .navigationTitle(L10n.tr("diagnostics.detail.title"))
     .navigationBarTitleDisplayMode(.inline)
   }
 }

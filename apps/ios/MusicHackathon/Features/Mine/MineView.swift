@@ -26,12 +26,12 @@ struct MineView: View {
         if hasLibraryContent {
           recentArchiveSection(profile: currentProfile)
           stationPanel(
-            title: "Songs",
+            title: L10n.tr("archive.tab.songs"),
             items: Array(currentProfile.recentlyPlayed.prefix(24)),
             isExpanded: $recentlyPlayedExpanded,
             seeAllDestination: .archive(initialTab: .curated)
           )
-          stationPanel(title: "Artists", items: currentProfile.saved, isExpanded: $savedExpanded)
+          stationPanel(title: L10n.tr("archive.tab.artists"), items: currentProfile.saved, isExpanded: $savedExpanded)
         }
       }
       .padding(.horizontal, 20)
@@ -44,14 +44,14 @@ struct MineView: View {
           Image(systemName: "gearshape")
             .foregroundStyle(.white.opacity(0.7))
         }
-        .accessibilityLabel("设置")
+        .accessibilityLabel(L10n.tr("settings.title"))
       }
     }
     .navigationDestination(for: MineRoute.self) { route in
       switch route {
       case .settings:
         SettingsView()
-          .navigationTitle("设置")
+          .navigationTitle(L10n.tr("settings.title"))
       case let .archive(initialTab):
         ArchiveGridPage(profile: currentProfile, initialTab: initialTab)
           .navigationTitle("Apple Music")
@@ -65,7 +65,7 @@ struct MineView: View {
           bio: $profileBio,
           avatarSeed: avatarSeedBinding
         )
-          .navigationTitle("个人电台")
+          .navigationTitle(L10n.tr("mine.profile.title"))
       }
     }
     .task {
@@ -110,7 +110,7 @@ struct MineView: View {
   private func identityHeader(profile: ArchiveProfile) -> some View {
     let nickname = profile.nickname.trimmingCharacters(in: .whitespacesAndNewlines)
     let bio = profile.bio.trimmingCharacters(in: .whitespacesAndNewlines)
-    let avatarAccessibilityLabel = nickname.isEmpty ? "个人资料头像" : "\(nickname) 的头像"
+    let avatarAccessibilityLabel = nickname.isEmpty ? L10n.tr("profile.avatar.accessibility") : L10n.tr("profile.namedAvatar.accessibility", nickname)
 
     return VStack(spacing: 16) {
       NavigationLink(value: MineRoute.profile) {
@@ -119,7 +119,7 @@ struct MineView: View {
         }
       }
       .buttonStyle(.plain)
-      .accessibilityLabel("编辑个人资料")
+      .accessibilityLabel(L10n.tr("mine.editProfile"))
 
       if !nickname.isEmpty || !bio.isEmpty {
         VStack(spacing: 8) {
@@ -140,9 +140,9 @@ struct MineView: View {
       }
 
       HStack(spacing: 0) {
-        statItem(value: "\(profile.stats.listeningHours)", label: "Hours")
-        statItem(value: "\(profile.stats.stationsCount)", label: "Playlists")
-        statItem(value: profile.stats.likesCount.formatted(), label: "Songs")
+        statItem(value: "\(profile.stats.listeningHours)", label: L10n.tr("mine.stat.hours"))
+        statItem(value: "\(profile.stats.stationsCount)", label: L10n.tr("archive.tab.playlists"))
+        statItem(value: profile.stats.likesCount.formatted(), label: L10n.tr("archive.tab.songs"))
       }
       .padding(.top, 4)
     }
@@ -161,8 +161,8 @@ struct MineView: View {
       if !hasLibraryContent {
         MineLibraryStatusPanel(
           iconSystemName: "music.note.list",
-          title: "正在读取 Apple Music",
-          message: "资料库加载完成后，这里会显示你的真实歌单、歌曲和封面。",
+          title: L10n.tr("mine.library.loading.title"),
+          message: L10n.tr("mine.library.loading.message"),
           isLoading: true,
           actionTitle: nil,
           action: nil
@@ -171,10 +171,10 @@ struct MineView: View {
     case .needsAuthorization:
       MineLibraryStatusPanel(
         iconSystemName: "person.badge.key",
-        title: "连接 Apple Music",
-        message: "授权后会读取你的资料库歌单和歌曲，不再显示占位内容。",
+        title: L10n.tr("appleMusic.connect.title"),
+        message: L10n.tr("mine.library.connect.message"),
         isLoading: musicAuthorization.isRequestingAccess,
-        actionTitle: musicAuthorization.isRequestingAccess ? "连接中" : "连接 Apple Music"
+        actionTitle: musicAuthorization.isRequestingAccess ? L10n.tr("appleMusic.connecting") : L10n.tr("appleMusic.connect.title")
       ) {
         Task {
           await connectAppleMusic()
@@ -183,10 +183,10 @@ struct MineView: View {
     case .empty:
       MineLibraryStatusPanel(
         iconSystemName: "music.note",
-        title: "没有找到资料库歌曲",
-        message: "确认 Apple Music 资料库中已有歌曲或歌单后，可以重新刷新。",
+        title: L10n.tr("mine.library.empty.title"),
+        message: L10n.tr("mine.library.empty.message"),
         isLoading: false,
-        actionTitle: "刷新"
+        actionTitle: L10n.tr("common.refresh")
       ) {
         Task {
           await refreshLibrary()
@@ -195,10 +195,10 @@ struct MineView: View {
     case let .failed(message):
       MineLibraryStatusPanel(
         iconSystemName: "exclamationmark.triangle",
-        title: "无法读取 Apple Music",
+        title: L10n.tr("mine.library.failed.title"),
         message: message,
         isLoading: false,
-        actionTitle: "重试"
+        actionTitle: L10n.tr("common.retry")
       ) {
         Task {
           await refreshLibrary()
@@ -212,14 +212,14 @@ struct MineView: View {
   private func recentArchiveSection(profile: ArchiveProfile) -> some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack {
-        Label("Playlists", systemImage: "music.note.list")
+        Label(L10n.tr("archive.tab.playlists"), systemImage: "music.note.list")
           .font(.system(size: 15, weight: .bold, design: .rounded))
           .foregroundStyle(.white)
 
         Spacer()
 
         NavigationLink(value: MineRoute.archive(initialTab: .history)) {
-          Text("See All")
+          Text(L10n.tr("common.seeAll"))
             .font(.system(size: 13, weight: .semibold, design: .rounded))
             .foregroundStyle(.white.opacity(0.42))
         }
@@ -298,7 +298,7 @@ struct MineView: View {
 
         if let seeAllDestination {
           NavigationLink(value: seeAllDestination) {
-            Text("See All")
+            Text(L10n.tr("common.seeAll"))
               .font(.system(size: 13, weight: .semibold, design: .rounded))
               .foregroundStyle(.white.opacity(0.42))
           }
@@ -309,7 +309,7 @@ struct MineView: View {
       if isExpanded.wrappedValue {
         LazyVStack(spacing: 0) {
           if items.isEmpty {
-            Text("Nothing here yet.")
+            Text(L10n.tr("common.emptyHere"))
               .font(.system(size: 14, weight: .medium, design: .rounded))
               .foregroundStyle(.white.opacity(0.36))
               .frame(maxWidth: .infinity, alignment: .leading)
@@ -457,19 +457,19 @@ private struct ArchiveGridPage: View {
         switch selectedTab {
         case .history:
           if sortedPublished.isEmpty {
-            emptyText("No Apple Music playlists found")
+            emptyText(L10n.tr("archive.empty.playlists"))
           } else {
             stationGrid(stations: sortedPublished, showsGenres: false)
           }
         case .curated:
           if profile.recentlyPlayed.isEmpty {
-            emptyText("No songs found")
+            emptyText(L10n.tr("archive.empty.songs"))
           } else {
             songList(stations: profile.recentlyPlayed)
           }
         case .artists:
           if profile.saved.isEmpty {
-            emptyText("No artists found")
+            emptyText(L10n.tr("archive.empty.artists"))
           } else {
             artistGrid
           }
@@ -653,11 +653,11 @@ private enum ArchiveGridTab: CaseIterable, Identifiable, Hashable {
   var title: String {
     switch self {
     case .history:
-      "Playlists"
+      L10n.tr("archive.tab.playlists")
     case .curated:
-      "Songs"
+      L10n.tr("archive.tab.songs")
     case .artists:
-      "Artists"
+      L10n.tr("archive.tab.artists")
     }
   }
 }
@@ -684,7 +684,7 @@ private struct ArchiveStationDetailPage: View {
 
         if !station.tracks.isEmpty {
           VStack(alignment: .leading, spacing: 12) {
-            Text("Songs")
+            Text(L10n.tr("archive.tab.songs"))
               .font(.system(size: 16, weight: .semibold, design: .rounded))
               .foregroundStyle(.white)
 
@@ -760,31 +760,31 @@ private struct ProfileEditorPage: View {
   var body: some View {
     ScrollView(.vertical, showsIndicators: false) {
       VStack(alignment: .leading, spacing: 30) {
-        field(title: "昵称") {
-          TextField("输入昵称", text: $draftNickname)
+        field(title: L10n.tr("profile.nickname")) {
+          TextField(L10n.tr("profile.nickname.placeholder"), text: $draftNickname)
             .textInputAutocapitalization(.never)
             .foregroundStyle(.white)
         }
 
-        field(title: "电台简介") {
-          TextField("输入电台简介", text: $draftBio)
+        field(title: L10n.tr("profile.bio")) {
+          TextField(L10n.tr("profile.bio.placeholder"), text: $draftBio)
             .foregroundStyle(.white)
         }
 
         VStack(alignment: .leading, spacing: 12) {
-          Text("头像")
+          Text(L10n.tr("profile.avatar"))
             .font(.system(size: 14, weight: .semibold, design: .rounded))
             .foregroundStyle(.white.opacity(0.62))
 
           VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 18) {
               ProfileAvatarImageView(size: 96) {
-                MarbleAvatarView(seed: draftAvatarSeed, size: 96, accessibilityLabel: "当前头像")
+                MarbleAvatarView(seed: draftAvatarSeed, size: 96, accessibilityLabel: L10n.tr("profile.currentAvatar"))
               }
 
               VStack(alignment: .leading, spacing: 10) {
                 PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
-                  Label("选择照片", systemImage: "photo")
+                  Label(L10n.tr("profile.choosePhoto"), systemImage: "photo")
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color(hex: "#121212"))
                     .padding(.horizontal, 16)
@@ -793,7 +793,7 @@ private struct ProfileEditorPage: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isSavingAvatar)
-                .accessibilityLabel("选择头像照片")
+                .accessibilityLabel(L10n.tr("profile.chooseAvatarPhoto"))
 
                 Button {
                   withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
@@ -801,23 +801,23 @@ private struct ProfileEditorPage: View {
                     draftAvatarSeed = MineAvatarSeed.make()
                   }
                 } label: {
-                  Label("随机头像", systemImage: "shuffle")
+                  Label(L10n.tr("profile.randomAvatar"), systemImage: "shuffle")
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.76))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("重新生成随机头像")
+                .accessibilityLabel(L10n.tr("profile.regenerateRandomAvatar"))
 
                 if imageAssetStore.profileAvatarSource != nil {
                   Button {
                     imageAssetStore.clearProfileAvatar()
                   } label: {
-                    Label("移除照片", systemImage: "trash")
+                    Label(L10n.tr("profile.removePhoto"), systemImage: "trash")
                       .font(.system(size: 14, weight: .semibold, design: .rounded))
                       .foregroundStyle(Color(hex: "#FFD5C8"))
                   }
                   .buttonStyle(.plain)
-                  .accessibilityLabel("移除头像照片")
+                  .accessibilityLabel(L10n.tr("profile.removeAvatarPhoto"))
                 }
               }
 
@@ -825,7 +825,7 @@ private struct ProfileEditorPage: View {
             }
 
             if isSavingAvatar {
-              ProgressView("正在保存头像")
+              ProgressView(L10n.tr("profile.savingAvatar"))
                 .font(.footnote)
                 .foregroundStyle(.white.opacity(0.62))
             }
@@ -839,7 +839,7 @@ private struct ProfileEditorPage: View {
         }
 
         Button(action: save) {
-          Text("保存")
+          Text(L10n.tr("common.save"))
             .font(.system(size: 16, weight: .semibold, design: .rounded))
             .foregroundStyle(Color(hex: "#121212"))
             .frame(maxWidth: .infinity)
@@ -897,12 +897,12 @@ private struct ProfileEditorPage: View {
 
     do {
       guard let data = try await item.loadTransferable(type: Data.self) else {
-        avatarErrorMessage = "无法读取这张照片。"
+        avatarErrorMessage = L10n.tr("profile.error.unableToReadPhoto")
         return
       }
       try await imageAssetStore.savePickedImage(data: data, purpose: .profileAvatar)
     } catch {
-      avatarErrorMessage = "头像保存失败，请换一张照片重试。"
+      avatarErrorMessage = L10n.tr("profile.error.avatarSaveFailed")
     }
   }
 }
@@ -969,7 +969,7 @@ private struct MineTrackArtwork: View {
   let playbackController = PlaybackController()
   NavigationStack {
     MineView()
-      .navigationTitle("我的")
+      .navigationTitle(L10n.tr("tab.mine"))
   }
   .environment(playbackController)
   .environment(RadioStationController(playbackController: playbackController))

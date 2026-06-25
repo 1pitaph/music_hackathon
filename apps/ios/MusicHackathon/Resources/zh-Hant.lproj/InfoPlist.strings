@@ -1,0 +1,5 @@
+"CFBundleDisplayName" = "Airset";
+"CFBundleName" = "Airset";
+"NSAppleMusicUsageDescription" = "Airset 使用 Apple Music 權限播放完整歌曲，並讀取你授權的歌單和歌曲。";
+"NSMediaLibraryUsageDescription" = "Airset 使用媒體資料庫權限載入你選擇用於電台播放的歌單和歌曲。";
+"NSMicrophoneUsageDescription" = "Airset 可能會在未來的錄音和音樂創作功能中使用麥克風權限。";
