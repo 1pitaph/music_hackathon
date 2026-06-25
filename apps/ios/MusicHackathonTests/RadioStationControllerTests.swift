@@ -518,6 +518,71 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertEqual(controller.currentItem?.track.title, "Two")
   }
 
+  func testFullSongHandoffWindowStartsStandaloneTransitionSpeech() async {
+    let station = makeStation(
+      items: [
+        makeQueueItem(title: "One", appleMusicID: "one"),
+        makeQueueItem(title: "Two", appleMusicID: "two")
+      ],
+      speech: RadioSpeech(
+        betweenTracks: [
+          RadioTransitionCopy(
+            id: "transition-1",
+            fromItemId: "one",
+            toItemId: "two",
+            text: "Next up is Two.",
+            displayText: "Next up is Two."
+          )
+        ]
+      )
+    )
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: MockStationClient(result: .success(station)),
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    playbackController.triggerFullSongHandoffWindow()
+    await waitForSpeech(playbackController, text: "Next up is Two.")
+
+    XCTAssertNil(controller.currentItem)
+    XCTAssertEqual(controller.queue.map(\.track.title), ["Two"])
+    XCTAssertEqual(playbackController.lastSpeechMode, .standalone)
+
+    playbackController.finish(.speech)
+    await waitForPlayback(playbackController, title: "Two")
+
+    XCTAssertEqual(controller.currentItem?.track.title, "Two")
+    XCTAssertFalse(playbackController.lastPreservesSpeech)
+  }
+
+  func testFullSongHandoffWindowWithoutTransitionWaitsForCompletionFallback() async {
+    let station = makeStation(items: [
+      makeQueueItem(title: "One", appleMusicID: "one"),
+      makeQueueItem(title: "Two", appleMusicID: "two")
+    ])
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: MockStationClient(result: .success(station)),
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    playbackController.triggerFullSongHandoffWindow()
+
+    XCTAssertEqual(controller.currentItem?.track.title, "One")
+    XCTAssertNil(playbackController.currentSpeech)
+
+    playbackController.finish(.track)
+    await waitForPlayback(playbackController, title: "Two")
+
+    XCTAssertEqual(controller.currentItem?.track.title, "Two")
+    XCTAssertTrue(controller.queue.isEmpty)
+  }
+
   func testAutomaticCompletionUsesHandoffTextWhenSpeechIsMissing() async {
     let station = makeStation(
       items: [
@@ -645,6 +710,82 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertTrue(controller.queue.isEmpty)
     let eventTypes = await memoryStore.eventTypes()
     XCTAssertTrue(eventTypes.contains("skip"))
+  }
+
+  func testRemoteNextPlaysTransitionSpeechBeforeNextTrack() async {
+    let station = makeStation(
+      items: [
+        makeQueueItem(title: "One", appleMusicID: "one"),
+        makeQueueItem(title: "Two", appleMusicID: "two")
+      ],
+      speech: RadioSpeech(
+        betweenTracks: [
+          RadioTransitionCopy(
+            id: "transition-1",
+            fromItemId: "one",
+            toItemId: "two",
+            text: "Next up is Two.",
+            displayText: "Next up is Two."
+          )
+        ]
+      )
+    )
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: MockStationClient(result: .success(station)),
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    playbackController.triggerRemoteNext()
+    await waitForSpeech(playbackController, text: "Next up is Two.")
+
+    XCTAssertEqual(playbackController.currentSpeech?.displayText, "Next up is Two.")
+    XCTAssertNil(controller.currentItem)
+    XCTAssertEqual(controller.queue.map(\.track.title), ["Two"])
+
+    playbackController.finish(.speech)
+    await waitForPlayback(playbackController, title: "Two")
+
+    XCTAssertEqual(controller.currentItem?.track.title, "Two")
+  }
+
+  func testRemoteNextDuringPendingTransitionStartsNextTrack() async {
+    let station = makeStation(
+      items: [
+        makeQueueItem(title: "One", appleMusicID: "one"),
+        makeQueueItem(title: "Two", appleMusicID: "two")
+      ],
+      speech: RadioSpeech(
+        betweenTracks: [
+          RadioTransitionCopy(
+            id: "transition-1",
+            fromItemId: "one",
+            toItemId: "two",
+            text: "Next up is Two.",
+            displayText: "Next up is Two."
+          )
+        ]
+      )
+    )
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: MockStationClient(result: .success(station)),
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    playbackController.finish(.track)
+    await waitForSpeech(playbackController, text: "Next up is Two.")
+
+    playbackController.triggerRemoteNext()
+    await waitForPlayback(playbackController, title: "Two")
+
+    XCTAssertEqual(controller.currentItem?.track.title, "Two")
+    XCTAssertTrue(controller.queue.isEmpty)
+    XCTAssertFalse(playbackController.lastPreservesSpeech)
   }
 
   func testManualNextUsesOverlayTransitionWhenTracksAreMixable() async {
@@ -1043,7 +1184,9 @@ private final class MockPlaybackController: RadioPlaybackControlling {
   var onPlaybackFinished: ((PlaybackCompletionKind) -> Void)?
   var onPlaybackFailed: ((PlaybackFailureContext) -> Void)?
   var onTrackTransitionWindowReached: (() -> Void)?
+  var onFullSongHandoffWindowReached: (() -> Void)?
   var onSpeechAdvancePointReached: (() -> Void)?
+  var onRemoteNextTrackRequested: (() -> Void)?
   var currentTrack: Track?
   var currentSpeech: RadioSpeechPlaybackSegment?
   var lastTrackPolicy: RadioTrackPlaybackPolicy?
@@ -1095,8 +1238,16 @@ private final class MockPlaybackController: RadioPlaybackControlling {
     onTrackTransitionWindowReached?()
   }
 
+  func triggerFullSongHandoffWindow() {
+    onFullSongHandoffWindowReached?()
+  }
+
   func triggerSpeechAdvancePoint() {
     onSpeechAdvancePointReached?()
+  }
+
+  func triggerRemoteNext() {
+    onRemoteNextTrackRequested?()
   }
 
   func failCurrent(phase: String) {

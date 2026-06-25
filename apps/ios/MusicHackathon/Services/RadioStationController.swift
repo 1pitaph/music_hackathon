@@ -104,9 +104,19 @@ final class RadioStationController {
         await self?.handleTrackTransitionWindowReached()
       }
     }
+    playbackController.onFullSongHandoffWindowReached = { [weak self] in
+      Task { @MainActor in
+        await self?.handleFullSongHandoffWindowReached()
+      }
+    }
     playbackController.onSpeechAdvancePointReached = { [weak self] in
       Task { @MainActor in
         await self?.handleSpeechAdvancePointReached()
+      }
+    }
+    playbackController.onRemoteNextTrackRequested = { [weak self] in
+      Task { @MainActor in
+        await self?.handleRemoteNextTrackRequested()
       }
     }
   }
@@ -166,6 +176,12 @@ final class RadioStationController {
   }
 
   func playNext(reason: RadioAdvanceReason = .manual) async {
+    if reason == .manual, currentItem == nil, pendingTransition != nil {
+      await startPendingTransitionNextTrackIfNeeded(preservesSpeech: false)
+      pendingTransition = nil
+      return
+    }
+
     if reason == .stationStart,
        !hasPlayedStationIntro,
        let intro = station?.speech?.stationIntro {
@@ -810,6 +826,21 @@ final class RadioStationController {
       style: .overlay,
       memoryEventType: "complete"
     )
+  }
+
+  private func handleFullSongHandoffWindowReached() async {
+    guard pendingTransition == nil else { return }
+    guard let currentItem else { return }
+    _ = await playTransitionIfAvailable(
+      from: currentItem,
+      reason: .automaticCompletion,
+      style: .standalone,
+      memoryEventType: "complete"
+    )
+  }
+
+  private func handleRemoteNextTrackRequested() async {
+    await playNext(reason: .manual)
   }
 
   private func handleSpeechAdvancePointReached() async {

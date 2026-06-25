@@ -86,7 +86,8 @@ def mock_transition_copy(state: AgentState, pair: tuple[str, str]) -> RadioTrans
   else:
     text = (
       "Airset is keeping the station moving, so the silence does not have to do all the work. "
-      "Stay with me; the next playable track is almost ready."
+      "Stay with me for a moment; I will keep this handoff gentle while the next playable track gets ready. "
+      "The idea is not to force a big reveal, just to keep the room warm until the music can take over again."
       if _is_english(state["request"])
       else "Airset 正在把电台带向下一首。"
     )
@@ -119,7 +120,8 @@ def _transition_copy_for_pair(
     if is_english:
       return (
         f"{from_title} keeps us close to {to_artist}, so we do not need to hurry the turn. "
-        f"Stay with me; {to_title} carries the same thread a little farther.",
+        f"There is already a clear thread here, and I like letting it breathe instead of jumping away too quickly. "
+        f"Stay with me; {to_title} carries that same feeling a little farther, like a friend turning over one more card from the same stack.",
         f"Staying with {to_artist} as {to_title} carries the thread forward.",
       )
     return (
@@ -131,7 +133,8 @@ def _transition_copy_for_pair(
     if is_english:
       return (
         f"These two feel like different light from the same room, so let's not rush the door closed. "
-        f"After {from_title}, {to_title} gives the set a softer edge.",
+        f"{from_title} already put us inside that space, and the nicest move is to notice another corner of it. "
+        f"After that, {to_title} gives the set a softer edge without making the whole mood start over.",
         f"Another side of the album: {to_title}.",
       )
     return (
@@ -145,7 +148,8 @@ def _transition_copy_for_pair(
     if is_english:
       return (
         f"That last track warmed up the room, and I would rather hold that glow than snap away from it. "
-        f"Next, {to_title} keeps the familiar part of the set close.",
+        f"It feels better to keep something familiar within reach while the set turns, almost like leaving a light on in the next room. "
+        f"{to_title} keeps that part close, then lets the mood move forward at its own pace.",
         f"Holding the familiar glow a little longer with {to_title}.",
       )
     return (
@@ -157,7 +161,8 @@ def _transition_copy_for_pair(
     if is_english:
       return (
         f"Let's turn the corner gently here, just enough to let a new color into the set. "
-        f"After {from_title}, {to_artist}'s {to_title} gives us that small change of light.",
+        f"{from_title} gave us a place to stand, so this does not need to feel like being pushed into a different room. "
+        f"After that, {to_artist}'s {to_title} brings in a small change of light and gives us something fresh to follow.",
         f"Turning the mood toward {to_title} with a new color.",
       )
     return (
@@ -169,16 +174,19 @@ def _transition_copy_for_pair(
     templates = [
       (
         f"{from_title} opened up the {from_mood} side, and I want to let that feeling breathe for a second. "
-        f"Now {to_title} carries us toward something more {to_mood}.",
+        f"There is a nice little afterimage there, the kind that makes the next choice matter more than a quick announcement would. "
+        f"Now {to_title} carries us toward something more {to_mood}, but it keeps the handoff friendly.",
         f"Moving from {from_title} toward {to_title}'s {to_mood} side.",
       ),
       (
         f"Let's keep the turn gentle here, like lowering the lights instead of changing rooms. "
-        f"{to_title} carries the afterglow forward and gives the set a softer landing.",
+        f"The last track left enough warmth behind that we can use it as a bridge, not a hard stop. "
+        f"{to_title} carries that afterglow forward and gives the set a softer landing.",
         f"{to_title} carries the afterglow forward.",
       ),
       (
         f"Let's hear this from another angle before the set gets too settled. "
+        f"The previous track gave us one version of the room, and this is the moment where a friend might say, try this side too. "
         f"{to_artist}'s {to_title} moves us into a more {to_mood} place without breaking the mood.",
         f"Another angle now: {to_title} moves the set toward {to_mood}.",
       ),

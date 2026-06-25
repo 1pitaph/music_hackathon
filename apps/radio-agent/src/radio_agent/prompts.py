@@ -276,7 +276,7 @@ def _copy_budget_payload(speech_language: str) -> dict[str, str]:
   if _is_english(speech_language):
     return {
       "stationIntroText": "50-75 English words, 2-3 short spoken sentences",
-      "transitionText": "24-38 English words, exactly 2 short spoken sentences",
+      "transitionText": "50-75 English words, 2-3 short spoken sentences",
       "displayText": "8-16 English words, one UI-safe subtitle sentence",
     }
   return {
@@ -301,7 +301,7 @@ def _entry_copy_budget_payload(speech_language: str) -> dict[str, str]:
 def _transition_copy_budget_payload(speech_language: str) -> dict[str, str]:
   if _is_english(speech_language):
     return {
-      "text": "24-38 English words, exactly 2 short spoken sentences",
+      "text": "50-75 English words, 2-3 short spoken sentences",
       "displayText": "8-16 English words, one UI-safe subtitle sentence",
     }
   return {
@@ -318,7 +318,7 @@ def _intro_text_requirement(speech_language: str) -> str:
 
 def _transition_text_requirement(speech_language: str) -> str:
   if _is_english(speech_language):
-    return "natural English between-track host bridge for TTS, exactly 2 short sentences, mention mood or pacing before the next track"
+    return "friend-like English between-track host bridge for TTS, 2-3 warm spoken sentences, acknowledge the previous mood and explain why the next track fits"
   return "natural Chinese between-track host bridge for TTS, mention mood or pacing before the next track"
 
 

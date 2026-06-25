@@ -30,7 +30,9 @@ protocol RadioPlaybackControlling: AnyObject {
   var onPlaybackFinished: ((PlaybackCompletionKind) -> Void)? { get set }
   var onPlaybackFailed: ((PlaybackFailureContext) -> Void)? { get set }
   var onTrackTransitionWindowReached: (() -> Void)? { get set }
+  var onFullSongHandoffWindowReached: (() -> Void)? { get set }
   var onSpeechAdvancePointReached: (() -> Void)? { get set }
+  var onRemoteNextTrackRequested: (() -> Void)? { get set }
 
   func prepareUpcomingTrack(_ track: Track?, policy: RadioTrackPlaybackPolicy)
   func play(track: Track)
@@ -114,7 +116,9 @@ final class PlaybackController: RadioPlaybackControlling {
   var onPlaybackFinished: ((PlaybackCompletionKind) -> Void)?
   var onPlaybackFailed: ((PlaybackFailureContext) -> Void)?
   var onTrackTransitionWindowReached: (() -> Void)?
+  var onFullSongHandoffWindowReached: (() -> Void)?
   var onSpeechAdvancePointReached: (() -> Void)?
+  var onRemoteNextTrackRequested: (() -> Void)?
   var onTrackFinished: (() -> Void)?
 
   @ObservationIgnored private let trackPreviewPlayer = AVPlayer()
@@ -142,6 +146,7 @@ final class PlaybackController: RadioPlaybackControlling {
   @ObservationIgnored private var didNotifyTrackFinished = false
   @ObservationIgnored private var didNotifySpeechFinished = false
   @ObservationIgnored private var didNotifyTrackTransitionWindow = false
+  @ObservationIgnored private var didNotifyFullSongHandoffWindow = false
   @ObservationIgnored private var didNotifySpeechAdvancePoint = false
   @ObservationIgnored private var didNotifyPlaybackFailed = false
   @ObservationIgnored private var currentPlaybackAttemptID: String?
@@ -154,6 +159,7 @@ final class PlaybackController: RadioPlaybackControlling {
   @ObservationIgnored private var preparingAppleMusicTrackKey: String?
   @ObservationIgnored private var backgroundContinuationTask: UIBackgroundTaskIdentifier = .invalid
   @ObservationIgnored private var backgroundContinuationReason: String?
+  @ObservationIgnored private var remoteCommandTargets: [(command: MPRemoteCommand, target: Any)] = []
 
   init(diagnostics: DiagnosticsStore? = nil) {
     self.musicAuthorization = MusicAuthorizationService(diagnostics: diagnostics)
@@ -204,6 +210,10 @@ final class PlaybackController: RadioPlaybackControlling {
     speechStartTask?.cancel()
     trackVolumeRampTask?.cancel()
     upcomingPreparationTask?.cancel()
+    remoteCommandTargets.forEach { item in
+      item.command.removeTarget(item.target)
+    }
+    remoteCommandTargets = []
   }
 
   func prepareUpcomingTrack(_ track: Track?, policy: RadioTrackPlaybackPolicy) {
@@ -428,6 +438,7 @@ final class PlaybackController: RadioPlaybackControlling {
       stopCurrentPlayback(clearCurrentTrack: false)
     }
     didNotifyPlaybackFailed = false
+    didNotifyFullSongHandoffWindow = false
     resetPlaybackProgress()
     let shouldPreferPreview = policy == .mixablePreferred
       && track.normalizedAppleMusicID == nil
@@ -496,6 +507,7 @@ final class PlaybackController: RadioPlaybackControlling {
 
   private func startAppleMusicPlayback(for track: Track, attemptID: String) async throws {
     didNotifyTrackFinished = false
+    didNotifyFullSongHandoffWindow = false
     diagnostics?.record(
       .info,
       chain: .musicSubscription,
@@ -954,6 +966,7 @@ final class PlaybackController: RadioPlaybackControlling {
     musicPlayer.stop()
     didNotifyTrackFinished = false
     didNotifyTrackTransitionWindow = false
+    didNotifyFullSongHandoffWindow = false
     removeTrackPeriodicTimeObserver()
     removeTrackPlaybackItemObservers()
     stopMusicProgressTimer()
@@ -1163,14 +1176,17 @@ final class PlaybackController: RadioPlaybackControlling {
 
     musicProgressTask = Task { [weak self] in
       while !Task.isCancelled {
-        try? await Task.sleep(for: .seconds(1))
+        var sleepMilliseconds = 1_000
 
         await MainActor.run {
           guard
             let self,
             self.activeBackend == .appleMusic,
             self.state == .playing
-          else { return }
+          else {
+            sleepMilliseconds = 1_000
+            return
+          }
 
           let observedSeconds = self.currentPlaybackSeconds()
           let playbackStatus = self.musicPlayer.state.playbackStatus
@@ -1180,9 +1196,18 @@ final class PlaybackController: RadioPlaybackControlling {
             self.elapsedSeconds = observedSeconds
           }
           self.updateMusicPlaybackProgress(duration: duration)
+          sleepMilliseconds = self.musicProgressPollingMilliseconds(duration: duration)
         }
+
+        try? await Task.sleep(for: .milliseconds(sleepMilliseconds))
       }
     }
+  }
+
+  private func musicProgressPollingMilliseconds(duration: TimeInterval) -> Int {
+    guard duration > 0 else { return 1_000 }
+    let remaining = duration - elapsedSeconds
+    return remaining <= 5 ? 250 : 1_000
   }
 
   private func stopMusicProgressTimer() {
@@ -1231,6 +1256,7 @@ final class PlaybackController: RadioPlaybackControlling {
     let newElapsedTimeText = Self.timeText(for: elapsedSeconds)
     if activeBackend == .localPreview, elapsedTimeText != newElapsedTimeText {
       elapsedTimeText = newElapsedTimeText
+      updateNowPlayingElapsedTime(elapsedSeconds)
     }
 
     guard
@@ -1257,6 +1283,7 @@ final class PlaybackController: RadioPlaybackControlling {
     let newElapsedTimeText = Self.timeText(for: elapsedSeconds)
     if elapsedTimeText != newElapsedTimeText {
       elapsedTimeText = newElapsedTimeText
+      updateNowPlayingElapsedTime(elapsedSeconds)
     }
     if let currentSpeech {
       updateCurrentSpeechCue(for: elapsedSeconds, speech: currentSpeech)
@@ -1273,6 +1300,7 @@ final class PlaybackController: RadioPlaybackControlling {
 
   private func updateMusicPlaybackProgress(duration: TimeInterval) {
     elapsedTimeText = Self.timeText(for: elapsedSeconds)
+    updateNowPlayingElapsedTime(elapsedSeconds)
 
     guard duration > 0 else {
       playbackProgress = 0
@@ -1280,7 +1308,7 @@ final class PlaybackController: RadioPlaybackControlling {
     }
 
     playbackProgress = min(max(elapsedSeconds / duration, 0), 1)
-    notifyTrackTransitionWindowIfNeeded(elapsedSeconds: elapsedSeconds, duration: duration)
+    notifyFullSongHandoffWindowIfNeeded(elapsedSeconds: elapsedSeconds, duration: duration)
 
     let wallClockElapsed = currentPlaybackStartedAt.map { Date().timeIntervalSince($0) } ?? elapsedSeconds
     let musicPlayerStoppedAtEnd = musicPlayer.state.playbackStatus == .stopped
@@ -1323,6 +1351,27 @@ final class PlaybackController: RadioPlaybackControlling {
     didNotifyTrackTransitionWindow = true
     beginBackgroundContinuationTask(reason: "track_transition_window")
     onTrackTransitionWindowReached?()
+  }
+
+  private func notifyFullSongHandoffWindowIfNeeded(elapsedSeconds: TimeInterval, duration: TimeInterval) {
+    guard activeBackend == .appleMusic else { return }
+    guard currentTrackPlaybackPolicy == .fullSongPreferred else { return }
+    guard !didNotifyFullSongHandoffWindow else { return }
+    guard duration > 0, duration - elapsedSeconds <= 1.5 else { return }
+    didNotifyFullSongHandoffWindow = true
+    beginBackgroundContinuationTask(reason: "full_song_handoff_window")
+    diagnostics?.record(
+      .notice,
+      chain: .playbackAppleMusic,
+      event: "full_song_handoff_window",
+      message: L10n.tr("diagnostic.message.fullSongHandoffWindowReached"),
+      correlationID: currentPlaybackAttemptID,
+      payload: [
+        "elapsed_seconds": String(Int(elapsedSeconds.rounded())),
+        "remaining_ms": DiagnosticsPayload.durationMilliseconds(max(0, duration - elapsedSeconds))
+      ]
+    )
+    onFullSongHandoffWindowReached?()
   }
 
   private func notifySpeechAdvancePointIfNeeded(elapsedSeconds: TimeInterval, duration: TimeInterval) {
@@ -1668,19 +1717,84 @@ final class PlaybackController: RadioPlaybackControlling {
   private func configureRemoteCommands() {
     let commandCenter = MPRemoteCommandCenter.shared()
 
-    commandCenter.playCommand.addTarget { [weak self] _ in
+    removeRemoteCommandTargets()
+    commandCenter.previousTrackCommand.isEnabled = false
+    commandCenter.playCommand.isEnabled = true
+    commandCenter.pauseCommand.isEnabled = true
+    commandCenter.togglePlayPauseCommand.isEnabled = true
+    commandCenter.nextTrackCommand.isEnabled = true
+
+    let playTarget = commandCenter.playCommand.addTarget { [weak self] _ in
+      Task { @MainActor in
+        self?.handleRemotePlayCommand()
+      }
+      return .success
+    }
+
+    let pauseTarget = commandCenter.pauseCommand.addTarget { [weak self] _ in
+      Task { @MainActor in
+        self?.pause()
+      }
+      return .success
+    }
+
+    let toggleTarget = commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
       Task { @MainActor in
         self?.togglePlayback()
       }
       return .success
     }
 
-    commandCenter.pauseCommand.addTarget { [weak self] _ in
+    let nextTarget = commandCenter.nextTrackCommand.addTarget { [weak self] _ in
       Task { @MainActor in
-        self?.pause()
+        self?.handleRemoteNextTrackCommand()
       }
       return .success
     }
+
+    remoteCommandTargets = [
+      (commandCenter.playCommand, playTarget),
+      (commandCenter.pauseCommand, pauseTarget),
+      (commandCenter.togglePlayPauseCommand, toggleTarget),
+      (commandCenter.nextTrackCommand, nextTarget)
+    ]
+  }
+
+  private func removeRemoteCommandTargets() {
+    remoteCommandTargets.forEach { item in
+      item.command.removeTarget(item.target)
+    }
+    remoteCommandTargets = []
+  }
+
+  private func handleRemoteNextTrackCommand() {
+    guard let onRemoteNextTrackRequested else {
+      diagnostics?.record(
+        .warning,
+        chain: .radioStation,
+        event: "remote_next_unhandled",
+        message: L10n.tr("diagnostic.message.remoteNextUnhandled")
+      )
+      return
+    }
+
+    beginBackgroundContinuationTask(reason: "remote_next")
+    diagnostics?.record(
+      .notice,
+      chain: .radioStation,
+      event: "remote_next_requested",
+      message: L10n.tr("diagnostic.message.remoteNextRequested"),
+      payload: [
+        "backend": activeBackend.rawValue,
+        "state": state.rawValue
+      ]
+    )
+    onRemoteNextTrackRequested()
+  }
+
+  private func handleRemotePlayCommand() {
+    guard state != .playing else { return }
+    togglePlayback()
   }
 
   private func updateNowPlayingInfo(for track: Track) {
@@ -1689,23 +1803,36 @@ final class PlaybackController: RadioPlaybackControlling {
       MPMediaItemPropertyArtist: track.artist,
       MPMediaItemPropertyAlbumTitle: track.album,
       MPMediaItemPropertyPlaybackDuration: track.duration,
-      MPNowPlayingInfoPropertyPlaybackRate: state == .playing ? 1.0 : 0.0
+      MPNowPlayingInfoPropertyElapsedPlaybackTime: currentPlaybackSeconds(),
+      MPNowPlayingInfoPropertyPlaybackRate: state == .playing ? 1.0 : 0.0,
+      MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0
     ]
   }
 
   private func updateNowPlayingInfo(for speech: RadioSpeechPlaybackSegment) {
+    let spokenText = speech.text.isEmpty ? speech.displayText : speech.text
     MPNowPlayingInfoCenter.default().nowPlayingInfo = [
       MPMediaItemPropertyTitle: "Airset Host",
       MPMediaItemPropertyArtist: speech.displayText,
       MPMediaItemPropertyAlbumTitle: "Airset Radio",
-      MPMediaItemPropertyPlaybackDuration: speech.audio?.durationSeconds ?? 0,
-      MPNowPlayingInfoPropertyPlaybackRate: state == .playing ? 1.0 : 0.0
+      MPMediaItemPropertyPlaybackDuration: speech.audio?.durationSeconds ?? Self.estimatedSpeechDuration(for: spokenText),
+      MPNowPlayingInfoPropertyElapsedPlaybackTime: currentPlaybackSeconds(),
+      MPNowPlayingInfoPropertyPlaybackRate: state == .playing ? 1.0 : 0.0,
+      MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0
     ]
   }
 
   private func updateNowPlayingPlaybackRate(_ rate: Double) {
     var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+    nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentPlaybackSeconds()
     nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = rate
+    nowPlayingInfo[MPNowPlayingInfoPropertyDefaultPlaybackRate] = 1.0
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+  }
+
+  private func updateNowPlayingElapsedTime(_ elapsedSeconds: TimeInterval) {
+    var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+    nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = max(0, elapsedSeconds)
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
   }
 

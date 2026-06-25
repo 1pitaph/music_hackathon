@@ -313,6 +313,7 @@
 "mine.profile.title" = "個人電臺";
 "mine.editProfile" = "編輯個人資料";
 "mine.stat.hours" = "小時";
+"mine.sharedStations.title" = "我分享的電臺";
 "mine.library.loading.title" = "正在讀取 Apple Music";
 "mine.library.loading.message" = "資料庫加載完成後，這裏會顯示你的真實歌單、歌曲和封面。";
 "mine.library.connect.message" = "授權後會讀取你的資料庫歌單和歌曲，不再顯示佔位內容。";
@@ -518,6 +519,7 @@
 "diagnostic.message.upcomingFullSongPrepareSucceeded" = "下一首完整歌曲預載完成。";
 "diagnostic.message.upcomingFullSongPrepareFailed" = "下一首完整歌曲預載失敗。";
 "diagnostic.message.upcomingFullSongPrepareReused" = "已復用預載的下一首完整歌曲。";
+"diagnostic.message.fullSongHandoffWindowReached" = "完整歌曲進入電臺交接窗口。";
 "diagnostic.message.fullSongPlayRequestStarted" = "開始請求完整歌曲播放。";
 "diagnostic.message.fullSongPlaybackStarted" = "完整歌曲播放已啓動。";
 "diagnostic.message.fullSongFailedNoPreview" = "完整歌曲播放失敗，且沒有可用試聽片段。";
@@ -531,6 +533,8 @@
 "diagnostic.message.speechPlaybackFinished" = "主持人語音播放完成。";
 "diagnostic.message.audioSessionConfigured" = "音頻會話配置完成。";
 "diagnostic.message.audioSessionConfigurationFailed" = "音頻會話配置失敗。";
+"diagnostic.message.remoteNextRequested" = "系統下一首命令請求播放下一段電臺內容。";
+"diagnostic.message.remoteNextUnhandled" = "系統下一首命令沒有可用的電臺處理器。";
 "diagnostic.message.backgroundTaskRequestFailed" = "無法申請後臺播放交接時間。";
 "diagnostic.message.backgroundTaskRequested" = "已申請後臺播放交接時間。";
 "diagnostic.message.backgroundTaskEnded" = "後臺播放交接時間已結束。";

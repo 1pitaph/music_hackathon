@@ -1,6 +1,6 @@
 import Foundation
 
-struct RadioStation: Identifiable, Hashable {
+struct RadioStation: Identifiable, Hashable, Codable {
   let id: String
   let title: String
   let subtitle: String
@@ -25,7 +25,7 @@ struct RadioStation: Identifiable, Hashable {
   }
 }
 
-struct RadioQueueItem: Identifiable, Hashable {
+struct RadioQueueItem: Identifiable, Hashable, Codable {
   let id: String
   let track: Track
   let sourceTitle: String
@@ -287,7 +287,7 @@ struct DiscoverStationPublicationDraft: Equatable {
   var usedFallbackGeneration: Bool = false
 }
 
-struct PublishedDiscoverStation: Identifiable, Equatable {
+struct PublishedDiscoverStation: Identifiable, Equatable, Codable {
   var stationID: String
   var title: String
   var subtitle: String

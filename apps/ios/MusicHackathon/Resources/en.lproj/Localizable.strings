@@ -313,6 +313,7 @@
 "mine.profile.title" = "Personal Station";
 "mine.editProfile" = "Edit profile";
 "mine.stat.hours" = "Hours";
+"mine.sharedStations.title" = "Stations I Shared";
 "mine.library.loading.title" = "Reading Apple Music";
 "mine.library.loading.message" = "When your library finishes loading, your real playlists, songs, and artwork will appear here.";
 "mine.library.connect.message" = "After authorization, Airset will read your library playlists and songs instead of showing placeholders.";
@@ -518,6 +519,7 @@
 "diagnostic.message.upcomingFullSongPrepareSucceeded" = "Upcoming full song preload completed.";
 "diagnostic.message.upcomingFullSongPrepareFailed" = "Upcoming full song preload failed.";
 "diagnostic.message.upcomingFullSongPrepareReused" = "Reused preloaded upcoming full song.";
+"diagnostic.message.fullSongHandoffWindowReached" = "Full song reached the radio handoff window.";
 "diagnostic.message.fullSongPlayRequestStarted" = "Started full song playback request.";
 "diagnostic.message.fullSongPlaybackStarted" = "Full song playback started.";
 "diagnostic.message.fullSongFailedNoPreview" = "Full song playback failed and no preview is available.";
@@ -531,6 +533,8 @@
 "diagnostic.message.speechPlaybackFinished" = "Host speech playback completed.";
 "diagnostic.message.audioSessionConfigured" = "Audio session configured.";
 "diagnostic.message.audioSessionConfigurationFailed" = "Audio session configuration failed.";
+"diagnostic.message.remoteNextRequested" = "Remote next command requested the next radio item.";
+"diagnostic.message.remoteNextUnhandled" = "Remote next command had no radio handler.";
 "diagnostic.message.backgroundTaskRequestFailed" = "Could not request background playback handoff time.";
 "diagnostic.message.backgroundTaskRequested" = "Requested background playback handoff time.";
 "diagnostic.message.backgroundTaskEnded" = "Background playback handoff time ended.";

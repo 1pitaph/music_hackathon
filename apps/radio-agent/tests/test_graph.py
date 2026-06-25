@@ -83,7 +83,7 @@ def test_english_speech_language_shapes_station_program_prompt():
   assert payload["hostStyle"]["language"] == "en-US"
   assert payload["hostStyle"]["tone"].startswith("friend-like radio companion")
   assert payload["copyBudget"]["stationIntroText"].startswith("50-75 English words")
-  assert payload["copyBudget"]["transitionText"].startswith("24-38 English words")
+  assert payload["copyBudget"]["transitionText"].startswith("50-75 English words")
   assert payload["copyBudget"]["displayText"].startswith("8-16 English words")
   assert "friend-like English host intro" in payload["requiredShape"]["speech"]["stationIntro"]["text"]
 
@@ -99,7 +99,9 @@ def test_mock_english_response_contains_english_speech(monkeypatch):
   assert response.stationIntro.startswith("Opening with A")
   assert _sentence_count(response.speech.stationIntro.text) >= 2
   assert len(response.speech.stationIntro.text.split()) > len(response.stationIntro.split())
-  assert _sentence_count(response.speech.betweenTracks[0].text) == 2
+  assert _sentence_count(response.speech.betweenTracks[0].text) >= 2
+  assert len(response.speech.betweenTracks[0].text.split()) >= 50
+  assert len(response.speech.betweenTracks[0].text.split()) > len(response.speech.betweenTracks[0].displayText.split())
   assert response.speech.betweenTracks[0].displayText.startswith("Another side of the album")
   assert len(response.speech.betweenTracks[0].displayText.split()) <= 16
   assert "《" not in response.stationIntro
@@ -550,7 +552,7 @@ def test_english_copy_keeps_long_spoken_text_with_english_periods():
   assert _sentence_count(entry_result["entryCopy"].text) >= 2
   assert entry_result["entryCopy"].text.endswith(".")
   assert not entry_result["entryCopy"].text.endswith("。")
-  assert len(transition.text) <= 260
+  assert len(transition.text) <= 480
   assert _sentence_count(transition.text) >= 2
   assert transition.text.endswith(".")
   assert not transition.text.endswith("。")

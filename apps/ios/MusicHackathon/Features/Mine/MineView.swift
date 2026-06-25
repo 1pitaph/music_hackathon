@@ -4,6 +4,7 @@ import SwiftUI
 struct MineView: View {
   @Environment(MusicAuthorizationService.self) private var musicAuthorization
   @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
+  @Environment(DiscoverStationStore.self) private var discoverStationStore
   @Environment(ImageAssetStore.self) private var imageAssetStore
 
   @AppStorage("mine.profile.avatarSeed") private var profileAvatarSeed = ""
@@ -11,6 +12,7 @@ struct MineView: View {
   @AppStorage("mine.profile.bio") private var profileBio = ""
 
   @State private var profile = ArchiveProfile.empty
+  @State private var sharedStationsExpanded = true
   @State private var recentlyPlayedExpanded = true
   @State private var savedExpanded = true
   @State private var transientAvatarSeed = MineAvatarSeed.make()
@@ -22,6 +24,14 @@ struct MineView: View {
       VStack(spacing: 26) {
         identityHeader(profile: currentProfile)
         libraryStatusSection
+
+        if !sharedStationItems.isEmpty {
+          stationPanel(
+            title: L10n.tr("mine.sharedStations.title"),
+            items: sharedStationItems,
+            isExpanded: $sharedStationsExpanded
+          )
+        }
 
         if hasLibraryContent {
           recentArchiveSection(profile: currentProfile)
@@ -70,6 +80,7 @@ struct MineView: View {
     }
     .task {
       ensurePersistentAvatarSeed()
+      await discoverStationStore.loadMyPublishedStationsIfNeeded()
       await refreshLibraryIfNeeded()
     }
   }
@@ -93,6 +104,10 @@ struct MineView: View {
 
   private var hasLibraryContent: Bool {
     !appleMusicLibrary.playlists.isEmpty || !appleMusicLibrary.tracks.isEmpty
+  }
+
+  private var sharedStationItems: [ArchiveStationItem] {
+    discoverStationStore.myPublishedStations.map { $0.archiveStationItem() }
   }
 
   private var avatarSeed: String {
@@ -975,6 +990,7 @@ private struct MineTrackArtwork: View {
   .environment(RadioStationController(playbackController: playbackController))
   .environment(MusicAuthorizationService())
   .environment(AppleMusicLibraryStore())
+  .environment(DiscoverStationStore())
   .environment(DiagnosticsStore.preview())
   .environment(ImageAssetStore())
   .environment(ArtworkAnalysisStore())

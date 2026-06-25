@@ -9,7 +9,8 @@ from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
-DEFAULT_OPENAI_MODEL = "gpt-4.1-mini"
+DEFAULT_OPENAI_BASE_URL = "https://api.apimart.ai/v1"
+DEFAULT_OPENAI_MODEL = "deepseek-v4-pro"
 DEFAULT_TIMEOUT_SECONDS = 60.0
 
 
@@ -21,7 +22,7 @@ def chat_model(*, temperature: float, timeout: float = DEFAULT_TIMEOUT_SECONDS) 
   return ChatOpenAI(
     model=os.getenv("OPENAI_MODEL") or DEFAULT_OPENAI_MODEL,
     api_key=os.getenv("OPENAI_API_KEY"),
-    base_url=os.getenv("OPENAI_BASE_URL") or None,
+    base_url=os.getenv("OPENAI_BASE_URL") or DEFAULT_OPENAI_BASE_URL,
     temperature=temperature,
     timeout=_timeout_seconds(timeout),
   )

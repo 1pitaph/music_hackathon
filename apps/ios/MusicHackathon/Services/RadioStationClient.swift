@@ -40,18 +40,67 @@ enum DiscoverFeedState: Equatable {
   }
 }
 
+protocol PublishedDiscoverStationArchiving {
+  func load() async throws -> [PublishedDiscoverStation]
+  func save(_ stations: [PublishedDiscoverStation]) async throws
+}
+
+actor PublishedDiscoverStationArchiveStore: PublishedDiscoverStationArchiving {
+  private let fileURL: URL
+
+  init(fileURL: URL? = nil) {
+    self.fileURL = fileURL ?? Self.defaultFileURL()
+  }
+
+  func load() async throws -> [PublishedDiscoverStation] {
+    guard FileManager.default.fileExists(atPath: fileURL.path) else {
+      return []
+    }
+
+    let data = try Data(contentsOf: fileURL)
+    return try JSONDecoder().decode([PublishedDiscoverStation].self, from: data)
+  }
+
+  func save(_ stations: [PublishedDiscoverStation]) async throws {
+    try FileManager.default.createDirectory(
+      at: fileURL.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
+
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    let data = try encoder.encode(stations)
+    try data.write(to: fileURL, options: .atomic)
+  }
+
+  private static func defaultFileURL() -> URL {
+    let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+      ?? FileManager.default.temporaryDirectory
+    return baseURL
+      .appending(path: "AirsetDiscover", directoryHint: .isDirectory)
+      .appending(path: "my-published-stations.json")
+  }
+}
+
 @MainActor
 @Observable
 final class DiscoverStationStore {
   var state: DiscoverFeedState = .idle
   var stations: [DiscoverStation] = []
+  var myPublishedStations: [PublishedDiscoverStation] = []
   var nextCursor: String?
   var lastErrorMessage: String?
 
   @ObservationIgnored private let client: any RadioStationFetching & DiscoverStationServing
+  @ObservationIgnored private let publishedArchive: any PublishedDiscoverStationArchiving
+  @ObservationIgnored private var hasLoadedMyPublishedStations = false
 
-  init(client: any RadioStationFetching & DiscoverStationServing = RadioStationClient()) {
+  init(
+    client: any RadioStationFetching & DiscoverStationServing = RadioStationClient(),
+    publishedArchive: any PublishedDiscoverStationArchiving = PublishedDiscoverStationArchiveStore()
+  ) {
     self.client = client
+    self.publishedArchive = publishedArchive
   }
 
   func loadIfNeeded() async {
@@ -127,6 +176,8 @@ final class DiscoverStationStore {
 
   func publish(_ draft: DiscoverStationPublicationDraft) async throws -> DiscoverStation {
     let publishedStation = try await client.publishDiscoverStation(draft)
+    await rememberMyPublishedStation(publishedStation)
+
     let discoverStation = publishedStation.discoverStation()
     if publishedStation.visibility == .public {
       stations.removeAll { $0.id == discoverStation.id }
@@ -136,10 +187,34 @@ final class DiscoverStationStore {
     return discoverStation
   }
 
+  func loadMyPublishedStationsIfNeeded() async {
+    guard !hasLoadedMyPublishedStations else { return }
+
+    do {
+      myPublishedStations = try await publishedArchive.load()
+      hasLoadedMyPublishedStations = true
+    } catch {
+      myPublishedStations = []
+      hasLoadedMyPublishedStations = true
+    }
+  }
+
   private func apply(_ page: DiscoverFeedPage) {
     stations = page.stations.map { $0.discoverStation() }
     nextCursor = page.nextCursor
     state = stations.isEmpty ? .empty : .loaded
+  }
+
+  private func rememberMyPublishedStation(_ station: PublishedDiscoverStation) async {
+    await loadMyPublishedStationsIfNeeded()
+    myPublishedStations.removeAll { $0.stationID == station.stationID }
+    myPublishedStations.insert(station, at: 0)
+
+    do {
+      try await publishedArchive.save(myPublishedStations)
+    } catch {
+      lastErrorMessage = Self.errorMessage(for: error)
+    }
   }
 
   private func publicationDraft(

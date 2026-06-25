@@ -107,6 +107,44 @@ extension ArchiveStationItem {
   }
 }
 
+extension PublishedDiscoverStation {
+  func archiveStationItem() -> ArchiveStationItem {
+    ArchiveStationItem(
+      id: "published-discover-\(stationID)",
+      name: title,
+      createdAt: publishedDate,
+      isFeatured: false,
+      genre: seedTracks.first?.mood ?? items.first?.track.mood ?? "Radio",
+      colorHex: colorHex,
+      artworkURL: coverArtworkURL ?? items.first?.track.artworkURL,
+      subtitle: subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : subtitle,
+      tracks: items.map(\.track)
+    )
+  }
+
+  private var publishedDate: Date? {
+    PublishedDiscoverStationDateParser.date(from: publishedAt)
+  }
+}
+
+private enum PublishedDiscoverStationDateParser {
+  private static let fractionalFormatter: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+  }()
+
+  private static let standardFormatter = ISO8601DateFormatter()
+
+  static func date(from value: String) -> Date? {
+    let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedValue.isEmpty else { return nil }
+
+    return fractionalFormatter.date(from: trimmedValue)
+      ?? standardFormatter.date(from: trimmedValue)
+  }
+}
+
 extension ArchiveProfile {
   static let empty = ArchiveProfile(
     nickname: "",
