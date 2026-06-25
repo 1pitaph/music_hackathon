@@ -6,19 +6,22 @@ struct RadioStation: Identifiable, Hashable {
   let subtitle: String
   let items: [RadioQueueItem]
   let speech: RadioSpeech?
+  let allowsAutoExtension: Bool
 
   init(
     id: String,
     title: String,
     subtitle: String,
     items: [RadioQueueItem],
-    speech: RadioSpeech? = nil
+    speech: RadioSpeech? = nil,
+    allowsAutoExtension: Bool = true
   ) {
     self.id = id
     self.title = title
     self.subtitle = subtitle
     self.items = items
     self.speech = speech
+    self.allowsAutoExtension = allowsAutoExtension
   }
 }
 
@@ -243,6 +246,80 @@ struct RadioSpeechPlaybackSegment: Identifiable, Hashable {
 
   var timedCues: [RadioSpeechCue] {
     audio?.cues ?? []
+  }
+}
+
+enum RadioStationVisibility: String, Codable, CaseIterable, Identifiable {
+  case `public`
+  case unlisted
+  case `private`
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .public:
+      L10n.tr("discover.publish.visibility.public")
+    case .unlisted:
+      L10n.tr("discover.publish.visibility.unlisted")
+    case .private:
+      L10n.tr("discover.publish.visibility.private")
+    }
+  }
+}
+
+struct DiscoverFeedPage: Equatable {
+  var stations: [PublishedDiscoverStation]
+  var nextCursor: String?
+}
+
+struct DiscoverStationPublicationDraft: Equatable {
+  var title: String
+  var subtitle: String
+  var description: String
+  var visibility: RadioStationVisibility
+  var ownerID: String
+  var ownerDisplayName: String
+  var seedTracks: [Track]
+  var station: RadioStation
+  var coverArtworkURL: URL?
+  var colorHex: String
+  var usedFallbackGeneration: Bool = false
+}
+
+struct PublishedDiscoverStation: Identifiable, Equatable {
+  var stationID: String
+  var title: String
+  var subtitle: String
+  var description: String
+  var visibility: RadioStationVisibility
+  var ownerID: String
+  var ownerDisplayName: String
+  var publishedAt: String
+  var shareURL: URL
+  var seedTracks: [Track]
+  var items: [RadioQueueItem]
+  var speech: RadioSpeech?
+  var coverArtworkURL: URL?
+  var colorHex: String
+  var favorites: Int
+
+  var id: String { stationID }
+
+  func discoverStation() -> DiscoverStation {
+    DiscoverStation(
+      id: stationID,
+      title: title,
+      briefIntro: subtitle,
+      description: description,
+      hostName: ownerDisplayName,
+      genre: seedTracks.first?.mood ?? items.first?.track.mood ?? "Radio",
+      favorites: favorites,
+      items: items,
+      colorHex: colorHex,
+      artworkURL: coverArtworkURL,
+      shareURL: shareURL
+    )
   }
 }
 

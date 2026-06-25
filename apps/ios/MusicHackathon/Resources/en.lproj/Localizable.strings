@@ -5,6 +5,7 @@
 "common.all" = "All";
 "common.automatic" = "Automatic";
 "common.cancel" = "Cancel";
+"common.close" = "Close";
 "common.collapseDetails" = "Collapse details";
 "common.comingSoon" = "Coming soon";
 "common.continue" = "Continue";
@@ -206,7 +207,28 @@
 "radioMemory.markdown.noneYet" = "- None yet.";
 
 "discover.share.accessibilityLabel" = "Share current station";
+"discover.share.title" = "Share station";
 "discover.share.message" = "Listening to %@'s %@";
+"discover.publish.accessibilityLabel" = "Publish station";
+"discover.publish.title" = "Publish Station";
+"discover.publish.selectionTitle" = "Choose 5 songs";
+"discover.publish.selectionCount" = "%d/5 selected";
+"discover.publish.visibility" = "Visibility";
+"discover.publish.visibility.public" = "Public";
+"discover.publish.visibility.unlisted" = "Link only";
+"discover.publish.visibility.private" = "Private";
+"discover.publish.generate" = "Generate station";
+"discover.publish.emptyLibrary" = "No playable Apple Music songs with artwork were found.";
+"discover.publish.generatedFallback" = "Generated locally because the backend did not return a preview.";
+"discover.publish.previewPlay" = "Preview";
+"discover.publish.publishAndShare" = "Publish";
+"discover.publish.successTitle" = "Station published";
+"discover.publish.shareNow" = "Share now";
+"discover.publish.defaultOwnerName" = "Mine Radio";
+"discover.publish.fallbackTitle" = "%@'s 5-song station";
+"discover.publish.fallbackSubtitle" = "Starting from %@";
+"discover.publish.fallbackIntro" = "Starting with %@.";
+"discover.publish.fallbackReason" = "%@ selected %@ for this published station.";
 "discover.card.next" = "Next card";
 "discover.card.previous" = "Previous card";
 "discover.card.onAir" = "ON AIR";
@@ -492,6 +514,10 @@
 "diagnostic.message.applicationMusicQueuePrepared" = "ApplicationMusicPlayer queue prepared.";
 "diagnostic.message.fullSongPrepareStarted" = "Started preparing full song playback.";
 "diagnostic.message.fullSongPrepareSucceeded" = "Full song playback preparation completed.";
+"diagnostic.message.upcomingFullSongPrepareStarted" = "Started preloading upcoming full song.";
+"diagnostic.message.upcomingFullSongPrepareSucceeded" = "Upcoming full song preload completed.";
+"diagnostic.message.upcomingFullSongPrepareFailed" = "Upcoming full song preload failed.";
+"diagnostic.message.upcomingFullSongPrepareReused" = "Reused preloaded upcoming full song.";
 "diagnostic.message.fullSongPlayRequestStarted" = "Started full song playback request.";
 "diagnostic.message.fullSongPlaybackStarted" = "Full song playback started.";
 "diagnostic.message.fullSongFailedNoPreview" = "Full song playback failed and no preview is available.";

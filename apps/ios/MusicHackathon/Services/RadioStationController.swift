@@ -180,6 +180,7 @@ final class RadioStationController {
           "speech_id_hash": DiagnosticsRedactor.hash(intro.id)
         ]
       )
+      prepareUpcomingTrack(queue.first?.track)
       playbackController.playSpeech(intro.playbackSegment, mode: .standalone)
       return
     }
@@ -227,6 +228,7 @@ final class RadioStationController {
     }
 
     guard !queue.isEmpty else {
+      prepareUpcomingTrack(nil)
       if errorMessage == nil {
         errorMessage = extensionErrorMessage ?? L10n.tr("radio.error.noBackendTracks")
       }
@@ -266,6 +268,7 @@ final class RadioStationController {
       policy: playbackPolicy(for: nextItem.track),
       preservesSpeech: false
     )
+    prepareUpcomingTrack(queue.first?.track)
     prefetchStationExtensionIfNeeded()
   }
 
@@ -294,6 +297,7 @@ final class RadioStationController {
       policy: playbackPolicy(for: previousItem.track),
       preservesSpeech: false
     )
+    prepareUpcomingTrack(queue.first?.track)
   }
 
   func refreshStation() async {
@@ -333,6 +337,7 @@ final class RadioStationController {
     if playImmediately, !station.items.isEmpty {
       await playNext(reason: .stationStart)
     } else {
+      prepareUpcomingTrack(nil)
       playbackController.stop()
     }
   }
@@ -511,6 +516,7 @@ final class RadioStationController {
   }
 
   private func prefetchStationExtensionIfNeeded() {
+    guard station?.allowsAutoExtension ?? false else { return }
     guard queue.count <= prefetchThreshold else { return }
     guard extensionTask == nil else { return }
 
@@ -530,7 +536,7 @@ final class RadioStationController {
 
   private func performStationExtension() async -> Bool {
     guard !Task.isCancelled else { return false }
-    guard station != nil else { return false }
+    guard station?.allowsAutoExtension ?? false else { return !queue.isEmpty }
     guard !isLoadingStation, !isExtendingStation else { return !queue.isEmpty }
 
     let generationID = stationGenerationID
@@ -575,6 +581,9 @@ final class RadioStationController {
       stationSessionID = result.stationSessionID ?? stationSessionID
       continuationCursor = result.continuationCursor ?? continuationCursor
       let newItems = appendStationExtension(nextStation)
+      if currentItem != nil {
+        prepareUpcomingTrack(queue.first?.track)
+      }
       isExtendingStation = false
 
       guard let firstNewItem = newItems.first else {
@@ -635,7 +644,8 @@ final class RadioStationController {
       title: currentStation?.title ?? nextStation.title,
       subtitle: currentStation?.subtitle ?? nextStation.subtitle,
       items: baseItems + newItems,
-      speech: mergedSpeech(existing: currentStation?.speech, incoming: nextStation.speech)
+      speech: mergedSpeech(existing: currentStation?.speech, incoming: nextStation.speech),
+      allowsAutoExtension: currentStation?.allowsAutoExtension ?? nextStation.allowsAutoExtension
     )
     return newItems
   }
@@ -647,7 +657,8 @@ final class RadioStationController {
       title: station.title,
       subtitle: station.subtitle,
       items: items,
-      speech: station.speech
+      speech: station.speech,
+      allowsAutoExtension: station.allowsAutoExtension
     )
   }
 
@@ -723,6 +734,7 @@ final class RadioStationController {
     isExtendingStation = false
     extensionErrorMessage = nil
     pendingTransition = nil
+    prepareUpcomingTrack(nil)
   }
 
   private func stationSeeds() -> [Track] {
@@ -837,6 +849,7 @@ final class RadioStationController {
       policy: playbackPolicy(for: nextItem.track),
       preservesSpeech: preservesSpeech
     )
+    prepareUpcomingTrack(queue.first?.track)
     prefetchStationExtensionIfNeeded()
   }
 
@@ -939,6 +952,7 @@ final class RadioStationController {
       speech: speech,
       reason: reason
     )
+    prepareUpcomingTrack(nextItem.track)
     diagnostics?.record(
       .notice,
       chain: .playbackSpeech,
@@ -962,6 +976,15 @@ final class RadioStationController {
 
   private func playbackPolicy(for track: Track) -> RadioTrackPlaybackPolicy {
     isPreviewOnly(track) ? .mixablePreferred : .fullSongPreferred
+  }
+
+  private func prepareUpcomingTrack(_ track: Track?) {
+    guard let track else {
+      playbackController.prepareUpcomingTrack(nil, policy: .fullSongPreferred)
+      return
+    }
+
+    playbackController.prepareUpcomingTrack(track, policy: playbackPolicy(for: track))
   }
 
   private func isPreviewOnly(_ track: Track) -> Bool {

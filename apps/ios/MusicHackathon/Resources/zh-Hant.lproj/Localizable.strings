@@ -5,6 +5,7 @@
 "common.all" = "全部";
 "common.automatic" = "自動";
 "common.cancel" = "取消";
+"common.close" = "關閉";
 "common.collapseDetails" = "收起詳情";
 "common.comingSoon" = "準備中";
 "common.continue" = "繼續";
@@ -206,7 +207,28 @@
 "radioMemory.markdown.noneYet" = "- 暫無。";
 
 "discover.share.accessibilityLabel" = "分享當前電臺";
+"discover.share.title" = "分享電臺";
 "discover.share.message" = "正在收聽 %@ 的 %@";
+"discover.publish.accessibilityLabel" = "發布電臺";
+"discover.publish.title" = "發布電臺";
+"discover.publish.selectionTitle" = "選擇 5 首歌";
+"discover.publish.selectionCount" = "已選擇 %d/5";
+"discover.publish.visibility" = "可見性";
+"discover.publish.visibility.public" = "公開";
+"discover.publish.visibility.unlisted" = "僅鏈接";
+"discover.publish.visibility.private" = "私密";
+"discover.publish.generate" = "生成電臺";
+"discover.publish.emptyLibrary" = "沒有找到帶封面的可播放 Apple Music 歌曲。";
+"discover.publish.generatedFallback" = "後端未返回預覽，已在本地生成。";
+"discover.publish.previewPlay" = "試聽";
+"discover.publish.publishAndShare" = "發布";
+"discover.publish.successTitle" = "電臺已發布";
+"discover.publish.shareNow" = "立即分享";
+"discover.publish.defaultOwnerName" = "我的電臺";
+"discover.publish.fallbackTitle" = "%@ 的 5 首歌電臺";
+"discover.publish.fallbackSubtitle" = "從 %@ 開始";
+"discover.publish.fallbackIntro" = "從 %@ 開始。";
+"discover.publish.fallbackReason" = "%@ 為這個公開電臺選擇了 %@。";
 "discover.card.next" = "下一張";
 "discover.card.previous" = "上一張";
 "discover.card.onAir" = "ON AIR";
@@ -492,6 +514,10 @@
 "diagnostic.message.applicationMusicQueuePrepared" = "ApplicationMusicPlayer 隊列已設置。";
 "diagnostic.message.fullSongPrepareStarted" = "開始準備完整歌曲播放。";
 "diagnostic.message.fullSongPrepareSucceeded" = "完整歌曲播放準備完成。";
+"diagnostic.message.upcomingFullSongPrepareStarted" = "開始預載下一首完整歌曲。";
+"diagnostic.message.upcomingFullSongPrepareSucceeded" = "下一首完整歌曲預載完成。";
+"diagnostic.message.upcomingFullSongPrepareFailed" = "下一首完整歌曲預載失敗。";
+"diagnostic.message.upcomingFullSongPrepareReused" = "已復用預載的下一首完整歌曲。";
 "diagnostic.message.fullSongPlayRequestStarted" = "開始請求完整歌曲播放。";
 "diagnostic.message.fullSongPlaybackStarted" = "完整歌曲播放已啓動。";
 "diagnostic.message.fullSongFailedNoPreview" = "完整歌曲播放失敗，且沒有可用試聽片段。";

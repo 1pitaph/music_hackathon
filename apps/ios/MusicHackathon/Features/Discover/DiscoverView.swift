@@ -4,11 +4,13 @@ struct DiscoverView: View {
   @Environment(PlaybackController.self) private var playbackController
   @Environment(RadioStationController.self) private var radioStation
   @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
+  @Environment(DiscoverStationStore.self) private var discoverStationStore
 
   @State private var currentIndex = 0
   @State private var favoritedIDs: Set<String> = []
   @State private var expandedStationID: String?
   @State private var activeStationID: String?
+  @State private var presentedSheet: DiscoverSheet?
 
   var body: some View {
     ZStack {
@@ -34,6 +36,17 @@ struct DiscoverView: View {
         .padding(.bottom, 36)
       }
     }
+    .sheet(item: $presentedSheet) { sheet in
+      switch sheet {
+      case .publish:
+        DiscoverPublishSheet()
+          .presentationDetents([.large])
+          .presentationDragIndicator(.visible)
+      }
+    }
+    .task {
+      await discoverStationStore.loadIfNeeded()
+    }
     .animation(.spring(response: 0.35, dampingFraction: 0.82), value: activeStationID)
     .onChange(of: stationIDs) { _, _ in
       normalizeSelectionForAvailableStations()
@@ -41,7 +54,7 @@ struct DiscoverView: View {
   }
 
   private var stations: [DiscoverStation] {
-    appleMusicLibrary.stations.isEmpty ? DiscoverStation.mockStations : appleMusicLibrary.stations
+    discoverStationStore.stations.isEmpty ? DiscoverStation.mockStations : discoverStationStore.stations
   }
 
   private var stationIDs: [String] {
@@ -80,18 +93,16 @@ struct DiscoverView: View {
 
       Spacer()
 
-      ShareLink(
-        item: currentStation.shareURL,
-        subject: Text(currentStation.title),
-        message: Text(L10n.tr("discover.share.message", currentStation.hostName, currentStation.title))
-      ) {
-        Image(systemName: "square.and.arrow.up")
+      Button {
+        presentedSheet = .publish
+      } label: {
+        Image(systemName: "plus")
           .font(.system(size: 20, weight: .semibold))
           .frame(width: 44, height: 44)
       }
       .buttonStyle(.plain)
       .foregroundStyle(.white.opacity(0.72))
-      .accessibilityLabel(L10n.tr("discover.share.accessibilityLabel"))
+      .accessibilityLabel(L10n.tr("discover.publish.accessibilityLabel"))
     }
   }
 
@@ -147,6 +158,17 @@ struct DiscoverView: View {
 
   private func toggleExpanded(_ station: DiscoverStation) {
     expandedStationID = expandedStationID == station.id ? nil : station.id
+  }
+}
+
+private enum DiscoverSheet: Identifiable {
+  case publish
+
+  var id: String {
+    switch self {
+    case .publish:
+      "publish"
+    }
   }
 }
 
@@ -788,12 +810,456 @@ private struct DiscoverStationDrawer: View {
           }
         }
       }
+
+      ShareLink(
+        item: station.shareURL,
+        subject: Text(station.title),
+        message: Text(L10n.tr("discover.share.message", station.hostName, station.title))
+      ) {
+        Label(L10n.tr("discover.share.title"), systemImage: "square.and.arrow.up")
+          .font(.system(size: 14, weight: .bold, design: .rounded))
+          .foregroundStyle(.white.opacity(0.84))
+          .frame(maxWidth: .infinity)
+          .frame(height: 42)
+          .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel(L10n.tr("discover.share.accessibilityLabel"))
     }
     .padding(.horizontal, 20)
     .padding(.top, 16)
     .padding(.bottom, 22)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(Color(hex: "#1E1B18"))
+  }
+}
+
+private struct DiscoverPublishSheet: View {
+  @Environment(\.dismiss) private var dismiss
+  @Environment(MusicAuthorizationService.self) private var musicAuthorization
+  @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
+  @Environment(DiscoverStationStore.self) private var discoverStationStore
+  @Environment(RadioStationController.self) private var radioStation
+
+  @State private var selectedTrackIDs: [String] = []
+  @State private var visibility: RadioStationVisibility = .public
+  @State private var draft: DiscoverStationPublicationDraft?
+  @State private var publishedStation: DiscoverStation?
+  @State private var isGenerating = false
+  @State private var isPublishing = false
+  @State private var errorMessage: String?
+
+  var body: some View {
+    NavigationStack {
+      content
+        .navigationTitle(L10n.tr("discover.publish.title"))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+          ToolbarItem(placement: .cancellationAction) {
+            Button(L10n.tr("common.close")) {
+              dismiss()
+            }
+          }
+        }
+    }
+    .preferredColorScheme(.dark)
+    .task {
+      await loadLibraryIfNeeded()
+    }
+    .onChange(of: selectedTrackIDs) { _, _ in
+      draft = nil
+      publishedStation = nil
+      errorMessage = nil
+    }
+  }
+
+  @ViewBuilder
+  private var content: some View {
+    if let publishedStation {
+      publishedContent(station: publishedStation)
+    } else {
+      ScrollView(.vertical, showsIndicators: false) {
+        VStack(spacing: 18) {
+          selectionHeader
+          visibilityPicker
+
+          if let draft {
+            previewContent(draft: draft)
+          } else {
+            trackSelectionContent
+          }
+
+          if let errorMessage {
+            Text(errorMessage)
+              .font(.footnote)
+              .foregroundStyle(Color(hex: "#F2A27F"))
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 16)
+        .padding(.bottom, 28)
+      }
+      .background(Color(hex: "#151311"))
+    }
+  }
+
+  private var selectionHeader: some View {
+    HStack(spacing: 12) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text(L10n.tr("discover.publish.selectionTitle"))
+          .font(.system(size: 20, weight: .bold, design: .rounded))
+          .foregroundStyle(.white)
+
+        Text(L10n.tr("discover.publish.selectionCount", selectedTrackIDs.count))
+          .font(.system(size: 13, weight: .semibold, design: .rounded))
+          .foregroundStyle(.white.opacity(0.46))
+      }
+
+      Spacer()
+
+      Button {
+        Task {
+          await generatePreview()
+        }
+      } label: {
+        if isGenerating {
+          ProgressView()
+            .controlSize(.small)
+            .frame(width: 42, height: 42)
+        } else {
+          Image(systemName: "sparkles")
+            .font(.system(size: 18, weight: .bold))
+            .frame(width: 42, height: 42)
+        }
+      }
+      .buttonStyle(.plain)
+      .foregroundStyle(canGenerate ? .white : .white.opacity(0.28))
+      .background(.white.opacity(canGenerate ? 0.12 : 0.05), in: Circle())
+      .disabled(!canGenerate || isGenerating)
+      .accessibilityLabel(L10n.tr("discover.publish.generate"))
+    }
+  }
+
+  private var visibilityPicker: some View {
+    Picker(L10n.tr("discover.publish.visibility"), selection: $visibility) {
+      ForEach(RadioStationVisibility.allCases) { visibility in
+        Text(visibility.title).tag(visibility)
+      }
+    }
+    .pickerStyle(.segmented)
+  }
+
+  @ViewBuilder
+  private var trackSelectionContent: some View {
+    if musicAuthorization.status != .authorized {
+      VStack(spacing: 14) {
+        Label(L10n.tr("library.connectAppleMusic"), systemImage: "person.badge.key")
+          .font(.system(size: 15, weight: .semibold, design: .rounded))
+          .foregroundStyle(.white.opacity(0.78))
+
+        Button {
+          Task {
+            await musicAuthorization.requestAccess()
+            await appleMusicLibrary.refresh(authorizationStatus: musicAuthorization.status)
+          }
+        } label: {
+          Label(L10n.tr("appleMusic.requestAccess"), systemImage: "music.note.house")
+            .frame(maxWidth: .infinity)
+            .frame(height: 46)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(musicAuthorization.isRequestingAccess)
+      }
+      .padding(18)
+      .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    } else if selectableTracks.isEmpty {
+      VStack(spacing: 14) {
+        Label(L10n.tr("discover.publish.emptyLibrary"), systemImage: "music.note.list")
+          .font(.system(size: 15, weight: .semibold, design: .rounded))
+          .foregroundStyle(.white.opacity(0.78))
+
+        Button {
+          Task {
+            await appleMusicLibrary.refresh(authorizationStatus: musicAuthorization.status)
+          }
+        } label: {
+          Label(L10n.tr("library.refreshPlaylists"), systemImage: "arrow.clockwise")
+            .frame(maxWidth: .infinity)
+            .frame(height: 46)
+        }
+        .buttonStyle(.bordered)
+        .disabled(appleMusicLibrary.state.isLoading)
+      }
+      .padding(18)
+      .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    } else {
+      LazyVStack(spacing: 10) {
+        ForEach(selectableTracks) { track in
+          DiscoverPublishTrackRow(
+            track: track,
+            selectionIndex: selectionIndex(for: track),
+            isDisabled: !isSelected(track) && selectedTrackIDs.count >= 5,
+            onToggle: {
+              toggleSelection(track)
+            }
+          )
+        }
+      }
+    }
+  }
+
+  private func previewContent(draft: DiscoverStationPublicationDraft) -> some View {
+    VStack(alignment: .leading, spacing: 14) {
+      VStack(alignment: .leading, spacing: 6) {
+        Text(draft.title)
+          .font(.system(size: 22, weight: .bold, design: .rounded))
+          .foregroundStyle(.white)
+          .lineLimit(2)
+
+        Text(draft.subtitle)
+          .font(.system(size: 14, weight: .medium, design: .rounded))
+          .foregroundStyle(.white.opacity(0.52))
+          .lineLimit(3)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+      if draft.usedFallbackGeneration {
+        Label(L10n.tr("discover.publish.generatedFallback"), systemImage: "exclamationmark.triangle")
+          .font(.footnote.weight(.semibold))
+          .foregroundStyle(Color(hex: "#F2A27F"))
+      }
+
+      VStack(spacing: 10) {
+        ForEach(draft.station.items.prefix(5)) { item in
+          HStack(spacing: 10) {
+            ArtworkImageView(resolution: ArtworkResolution(remoteURLs: [item.track.artworkURL])) {
+              Color.white.opacity(0.08)
+            }
+            .frame(width: 38, height: 38)
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+              Text(item.track.title)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+
+              Text(item.track.artist)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.45))
+                .lineLimit(1)
+            }
+
+            Spacer()
+          }
+        }
+      }
+      .padding(12)
+      .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+      HStack(spacing: 10) {
+        Button {
+          Task {
+            await radioStation.loadLocalStation(draft.station, playImmediately: true)
+          }
+        } label: {
+          Label(L10n.tr("discover.publish.previewPlay"), systemImage: "play.fill")
+            .frame(maxWidth: .infinity)
+            .frame(height: 46)
+        }
+        .buttonStyle(.bordered)
+
+        Button {
+          Task {
+            await publishDraft()
+          }
+        } label: {
+          if isPublishing {
+            ProgressView()
+              .frame(maxWidth: .infinity)
+              .frame(height: 46)
+          } else {
+            Label(L10n.tr("discover.publish.publishAndShare"), systemImage: "paperplane.fill")
+              .frame(maxWidth: .infinity)
+              .frame(height: 46)
+          }
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(isPublishing)
+      }
+    }
+    .padding(16)
+    .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+  }
+
+  private func publishedContent(station: DiscoverStation) -> some View {
+    VStack(spacing: 18) {
+      Spacer(minLength: 24)
+
+      Image(systemName: "checkmark.circle.fill")
+        .font(.system(size: 48, weight: .bold))
+        .foregroundStyle(Color(hex: "#7BCFA6"))
+
+      VStack(spacing: 8) {
+        Text(L10n.tr("discover.publish.successTitle"))
+          .font(.system(size: 24, weight: .bold, design: .rounded))
+          .foregroundStyle(.white)
+
+        Text(station.title)
+          .font(.system(size: 15, weight: .semibold, design: .rounded))
+          .foregroundStyle(.white.opacity(0.58))
+          .multilineTextAlignment(.center)
+      }
+
+      ShareLink(
+        item: station.shareURL,
+        subject: Text(station.title),
+        message: Text(L10n.tr("discover.share.message", station.hostName, station.title))
+      ) {
+        Label(L10n.tr("discover.publish.shareNow"), systemImage: "square.and.arrow.up")
+          .frame(maxWidth: .infinity)
+          .frame(height: 48)
+      }
+      .buttonStyle(.borderedProminent)
+      .padding(.horizontal, 20)
+
+      Button(L10n.tr("common.close")) {
+        dismiss()
+      }
+      .buttonStyle(.plain)
+      .foregroundStyle(.white.opacity(0.62))
+
+      Spacer()
+    }
+    .padding(20)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(Color(hex: "#151311"))
+  }
+
+  private var selectableTracks: [Track] {
+    let tracks = appleMusicLibrary.playlists.flatMap(\.tracks) + appleMusicLibrary.tracks
+    var seen: Set<String> = []
+    var result: [Track] = []
+
+    for track in tracks where track.isPlayable && track.hasRealArtwork {
+      guard !seen.contains(track.radioIdentity) else { continue }
+      seen.insert(track.radioIdentity)
+      result.append(track)
+    }
+
+    return result
+  }
+
+  private var selectedTracks: [Track] {
+    let tracksByID = Dictionary(uniqueKeysWithValues: selectableTracks.map { ($0.radioIdentity, $0) })
+    return selectedTrackIDs.compactMap { tracksByID[$0] }
+  }
+
+  private var canGenerate: Bool {
+    selectedTrackIDs.count == 5 && selectedTracks.count == 5 && !isGenerating
+  }
+
+  private func isSelected(_ track: Track) -> Bool {
+    selectedTrackIDs.contains(track.radioIdentity)
+  }
+
+  private func selectionIndex(for track: Track) -> Int? {
+    selectedTrackIDs.firstIndex(of: track.radioIdentity).map { $0 + 1 }
+  }
+
+  private func toggleSelection(_ track: Track) {
+    if let index = selectedTrackIDs.firstIndex(of: track.radioIdentity) {
+      selectedTrackIDs.remove(at: index)
+      return
+    }
+
+    guard selectedTrackIDs.count < 5 else { return }
+    selectedTrackIDs.append(track.radioIdentity)
+  }
+
+  private func loadLibraryIfNeeded() async {
+    await musicAuthorization.refreshAccessState()
+    await appleMusicLibrary.loadIfNeeded(authorizationStatus: musicAuthorization.status)
+  }
+
+  private func generatePreview() async {
+    guard canGenerate else { return }
+    isGenerating = true
+    errorMessage = nil
+    defer { isGenerating = false }
+
+    let ownerID = DiscoverPublisherIdentity.ownerID()
+    let ownerDisplayName = DiscoverPublisherIdentity.displayName()
+    draft = await discoverStationStore.generatePublicationDraft(
+      seedTracks: selectedTracks,
+      visibility: visibility,
+      ownerID: ownerID,
+      ownerDisplayName: ownerDisplayName
+    )
+  }
+
+  private func publishDraft() async {
+    guard var draft else { return }
+    isPublishing = true
+    errorMessage = nil
+    defer { isPublishing = false }
+
+    draft.visibility = visibility
+    do {
+      publishedStation = try await discoverStationStore.publish(draft)
+    } catch {
+      errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+  }
+}
+
+private struct DiscoverPublishTrackRow: View {
+  let track: Track
+  let selectionIndex: Int?
+  let isDisabled: Bool
+  let onToggle: () -> Void
+
+  var body: some View {
+    Button(action: onToggle) {
+      HStack(spacing: 12) {
+        ArtworkImageView(resolution: ArtworkResolution(remoteURLs: [track.artworkURL])) {
+          Color.white.opacity(0.08)
+        }
+        .frame(width: 48, height: 48)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+        VStack(alignment: .leading, spacing: 4) {
+          Text(track.title)
+            .font(.system(size: 15, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white.opacity(isDisabled ? 0.35 : 0.92))
+            .lineLimit(1)
+
+          Text("\(track.artist) - \(track.album)")
+            .font(.system(size: 12, weight: .medium, design: .rounded))
+            .foregroundStyle(.white.opacity(isDisabled ? 0.24 : 0.44))
+            .lineLimit(1)
+        }
+
+        Spacer()
+
+        if let selectionIndex {
+          Text("\(selectionIndex)")
+            .font(.system(size: 13, weight: .black, design: .rounded))
+            .foregroundStyle(.black.opacity(0.86))
+            .frame(width: 28, height: 28)
+            .background(Color(hex: "#7BCFA6"), in: Circle())
+        } else {
+          Image(systemName: "plus.circle")
+            .font(.system(size: 22, weight: .semibold))
+            .foregroundStyle(.white.opacity(isDisabled ? 0.2 : 0.5))
+        }
+      }
+      .padding(12)
+      .background(.white.opacity(selectionIndex == nil ? 0.055 : 0.1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+    .buttonStyle(.plain)
+    .disabled(isDisabled)
   }
 }
 
@@ -804,6 +1270,7 @@ private struct DiscoverStationDrawer: View {
     .environment(RadioStationController(playbackController: playbackController))
     .environment(MusicAuthorizationService())
     .environment(AppleMusicLibraryStore())
+    .environment(DiscoverStationStore())
     .environment(ImageAssetStore())
     .environment(ArtworkAnalysisStore())
 }

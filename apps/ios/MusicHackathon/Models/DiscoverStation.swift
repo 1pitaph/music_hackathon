@@ -52,7 +52,8 @@ struct DiscoverStation: Identifiable, Hashable {
       title: title,
       subtitle: briefIntro,
       items: items,
-      speech: radioSpeech
+      speech: radioSpeech,
+      allowsAutoExtension: false
     )
   }
 

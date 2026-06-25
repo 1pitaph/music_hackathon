@@ -1,10 +1,17 @@
 import Foundation
+import Observation
 
 protocol RadioStationFetching {
   func fetchCurrentStation() async throws -> RadioStation
   func generateStation(context: RadioStationGenerationContext) async throws -> RadioStationResult
   func fetchSpeechVoices() async throws -> RadioSpeechVoiceCatalog
   func compressMemory(_ request: RadioMemoryCompressionRequest) async throws -> RadioCompressedMemory?
+}
+
+protocol DiscoverStationServing {
+  func fetchDiscoverStations(cursor: String?, limit: Int) async throws -> DiscoverFeedPage
+  func publishDiscoverStation(_ draft: DiscoverStationPublicationDraft) async throws -> PublishedDiscoverStation
+  func fetchPublishedStation(id: String) async throws -> PublishedDiscoverStation
 }
 
 extension RadioStationFetching {
@@ -18,6 +25,204 @@ extension RadioStationFetching {
 
   func fetchSpeechVoices() async throws -> RadioSpeechVoiceCatalog {
     .fallback
+  }
+}
+
+enum DiscoverFeedState: Equatable {
+  case idle
+  case loading
+  case loaded
+  case empty
+  case failed(String)
+
+  var isLoading: Bool {
+    self == .loading
+  }
+}
+
+@MainActor
+@Observable
+final class DiscoverStationStore {
+  var state: DiscoverFeedState = .idle
+  var stations: [DiscoverStation] = []
+  var nextCursor: String?
+  var lastErrorMessage: String?
+
+  @ObservationIgnored private let client: any RadioStationFetching & DiscoverStationServing
+
+  init(client: any RadioStationFetching & DiscoverStationServing = RadioStationClient()) {
+    self.client = client
+  }
+
+  func loadIfNeeded() async {
+    guard stations.isEmpty else { return }
+    await refresh()
+  }
+
+  func refresh() async {
+    state = .loading
+    lastErrorMessage = nil
+
+    do {
+      let page = try await client.fetchDiscoverStations(cursor: nil, limit: 20)
+      apply(page)
+    } catch is CancellationError {
+      return
+    } catch {
+      state = .failed(Self.errorMessage(for: error))
+      lastErrorMessage = Self.errorMessage(for: error)
+      stations = []
+      nextCursor = nil
+    }
+  }
+
+  func generatePublicationDraft(
+    seedTracks: [Track],
+    visibility: RadioStationVisibility,
+    ownerID: String,
+    ownerDisplayName: String
+  ) async -> DiscoverStationPublicationDraft {
+    do {
+      let context = RadioStationGenerationContext(
+        seedTracks: seedTracks,
+        catalogCandidates: seedTracks,
+        memoryContext: RadioMemoryContext(),
+        limit: 5,
+        stationID: "published-\(UUID().uuidString.lowercased())",
+        speechLanguage: RadioSpeechLanguage.stored()
+      )
+      let result = try await client.generateStation(context: context)
+      let fixedStation = RadioStation(
+        id: result.station.id,
+        title: result.station.title,
+        subtitle: result.station.subtitle,
+        items: Array(result.station.items.prefix(5)),
+        speech: result.station.speech,
+        allowsAutoExtension: false
+      )
+      return publicationDraft(
+        station: fixedStation,
+        seedTracks: seedTracks,
+        visibility: visibility,
+        ownerID: ownerID,
+        ownerDisplayName: ownerDisplayName,
+        usedFallbackGeneration: false
+      )
+    } catch is CancellationError {
+      return fallbackPublicationDraft(
+        seedTracks: seedTracks,
+        visibility: visibility,
+        ownerID: ownerID,
+        ownerDisplayName: ownerDisplayName
+      )
+    } catch {
+      return fallbackPublicationDraft(
+        seedTracks: seedTracks,
+        visibility: visibility,
+        ownerID: ownerID,
+        ownerDisplayName: ownerDisplayName
+      )
+    }
+  }
+
+  func publish(_ draft: DiscoverStationPublicationDraft) async throws -> DiscoverStation {
+    let publishedStation = try await client.publishDiscoverStation(draft)
+    let discoverStation = publishedStation.discoverStation()
+    if publishedStation.visibility == .public {
+      stations.removeAll { $0.id == discoverStation.id }
+      stations.insert(discoverStation, at: 0)
+      state = stations.isEmpty ? .empty : .loaded
+    }
+    return discoverStation
+  }
+
+  private func apply(_ page: DiscoverFeedPage) {
+    stations = page.stations.map { $0.discoverStation() }
+    nextCursor = page.nextCursor
+    state = stations.isEmpty ? .empty : .loaded
+  }
+
+  private func publicationDraft(
+    station: RadioStation,
+    seedTracks: [Track],
+    visibility: RadioStationVisibility,
+    ownerID: String,
+    ownerDisplayName: String,
+    usedFallbackGeneration: Bool
+  ) -> DiscoverStationPublicationDraft {
+    DiscoverStationPublicationDraft(
+      title: station.title,
+      subtitle: station.subtitle,
+      description: station.subtitle,
+      visibility: visibility,
+      ownerID: ownerID,
+      ownerDisplayName: ownerDisplayName,
+      seedTracks: seedTracks,
+      station: station,
+      coverArtworkURL: seedTracks.first?.artworkURL ?? station.items.first?.track.artworkURL,
+      colorHex: "#D8633C",
+      usedFallbackGeneration: usedFallbackGeneration
+    )
+  }
+
+  private func fallbackPublicationDraft(
+    seedTracks: [Track],
+    visibility: RadioStationVisibility,
+    ownerID: String,
+    ownerDisplayName: String
+  ) -> DiscoverStationPublicationDraft {
+    let stationID = "local-published-\(UUID().uuidString.lowercased())"
+    let items = seedTracks.prefix(5).enumerated().map { offset, track in
+      RadioQueueItem(
+        id: "\(stationID)-\(offset)",
+        track: track,
+        sourceTitle: ownerDisplayName,
+        reason: L10n.tr("discover.publish.fallbackReason", ownerDisplayName, track.title),
+        handoffText: offset == 0 ? L10n.tr("discover.publish.fallbackIntro", track.title) : nil
+      )
+    }
+    let title = L10n.tr("discover.publish.fallbackTitle", ownerDisplayName)
+    let subtitle = L10n.tr("discover.publish.fallbackSubtitle", seedTracks.first?.title ?? title)
+    let station = RadioStation(
+      id: stationID,
+      title: title,
+      subtitle: subtitle,
+      items: items,
+      speech: nil,
+      allowsAutoExtension: false
+    )
+    return publicationDraft(
+      station: station,
+      seedTracks: seedTracks,
+      visibility: visibility,
+      ownerID: ownerID,
+      ownerDisplayName: ownerDisplayName,
+      usedFallbackGeneration: true
+    )
+  }
+
+  private static func errorMessage(for error: Error) -> String {
+    (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+  }
+}
+
+enum DiscoverPublisherIdentity {
+  private static let ownerIDKey = "discover.publisher.ownerID"
+  private static let nicknameKey = "mine.profile.nickname"
+
+  static func ownerID(defaults: UserDefaults = .standard) -> String {
+    if let existingID = defaults.string(forKey: ownerIDKey)?.trimmedNilIfEmpty {
+      return existingID
+    }
+
+    let newID = "ios-\(UUID().uuidString.lowercased())"
+    defaults.set(newID, forKey: ownerIDKey)
+    return newID
+  }
+
+  static func displayName(defaults: UserDefaults = .standard) -> String {
+    defaults.string(forKey: nicknameKey)?.trimmedNilIfEmpty
+      ?? L10n.tr("discover.publish.defaultOwnerName")
   }
 }
 
@@ -193,6 +398,27 @@ struct RadioTrackPayload: Codable, Equatable {
   let sourceScore: Double?
   let reasonSignals: [String]
 
+  enum CodingKeys: String, CodingKey {
+    case radioIdentity
+    case title
+    case artist
+    case album
+    case mood
+    case duration
+    case artworkURL
+    case artworkUrl
+    case previewURL
+    case previewUrl
+    case appleMusicID
+    case appleMusicId
+    case isExplicit
+    case playlistName
+    case source
+    case sourceLane
+    case sourceScore
+    case reasonSignals
+  }
+
   init(
     track: Track,
     playlistName: String? = nil,
@@ -217,9 +443,89 @@ struct RadioTrackPayload: Codable, Equatable {
     self.sourceScore = sourceScore ?? track.sourceScore
     self.reasonSignals = reasonSignals.isEmpty ? (track.reasonSignals ?? []) : reasonSignals
   }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    title = try container.decode(String.self, forKey: .title)
+    artist = try container.decode(String.self, forKey: .artist)
+    album = try container.decodeIfPresent(String.self, forKey: .album) ?? ""
+    mood = try container.decodeIfPresent(String.self, forKey: .mood) ?? ""
+    duration = try container.decodeIfPresent(TimeInterval.self, forKey: .duration) ?? 0
+    artworkURL = try container.decodeIfPresent(URL.self, forKey: .artworkURL)
+      ?? container.decodeIfPresent(URL.self, forKey: .artworkUrl)
+    previewURL = try container.decodeIfPresent(URL.self, forKey: .previewURL)
+      ?? container.decodeIfPresent(URL.self, forKey: .previewUrl)
+    appleMusicID = (
+      try container.decodeIfPresent(String.self, forKey: .appleMusicID)
+        ?? container.decodeIfPresent(String.self, forKey: .appleMusicId)
+    )?.trimmedNilIfEmpty
+    isExplicit = try container.decodeIfPresent(Bool.self, forKey: .isExplicit) ?? false
+    playlistName = try container.decodeIfPresent(String.self, forKey: .playlistName)?.trimmedNilIfEmpty
+    source = try container.decodeIfPresent(String.self, forKey: .source)?.trimmedNilIfEmpty
+    sourceLane = try container.decodeIfPresent(String.self, forKey: .sourceLane)?.trimmedNilIfEmpty
+    sourceScore = try container.decodeIfPresent(Double.self, forKey: .sourceScore)
+    reasonSignals = try container.decodeIfPresent([String].self, forKey: .reasonSignals) ?? []
+    radioIdentity = try container.decodeIfPresent(String.self, forKey: .radioIdentity)?.trimmedNilIfEmpty
+      ?? Track(
+        title: title,
+        artist: artist,
+        album: album,
+        mood: mood,
+        duration: duration,
+        artworkSystemName: "music.note",
+        artworkURL: artworkURL,
+        previewURL: previewURL,
+        appleMusicID: appleMusicID,
+        isExplicit: isExplicit,
+        playlistName: playlistName,
+        source: source,
+        sourceLane: sourceLane,
+        sourceScore: sourceScore,
+        reasonSignals: reasonSignals
+      ).radioIdentity
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(radioIdentity, forKey: .radioIdentity)
+    try container.encode(title, forKey: .title)
+    try container.encode(artist, forKey: .artist)
+    try container.encode(album, forKey: .album)
+    try container.encode(mood, forKey: .mood)
+    try container.encode(duration, forKey: .duration)
+    try container.encodeIfPresent(artworkURL, forKey: .artworkURL)
+    try container.encodeIfPresent(previewURL, forKey: .previewURL)
+    try container.encodeIfPresent(appleMusicID, forKey: .appleMusicID)
+    try container.encode(isExplicit, forKey: .isExplicit)
+    try container.encodeIfPresent(playlistName, forKey: .playlistName)
+    try container.encodeIfPresent(source, forKey: .source)
+    try container.encodeIfPresent(sourceLane, forKey: .sourceLane)
+    try container.encodeIfPresent(sourceScore, forKey: .sourceScore)
+    try container.encode(reasonSignals, forKey: .reasonSignals)
+  }
+
+  func track() -> Track {
+    Track(
+      title: title,
+      artist: artist,
+      album: album,
+      mood: mood,
+      duration: duration,
+      artworkSystemName: "music.note",
+      artworkURL: artworkURL,
+      previewURL: previewURL,
+      appleMusicID: appleMusicID,
+      isExplicit: isExplicit,
+      playlistName: playlistName,
+      source: source,
+      sourceLane: sourceLane,
+      sourceScore: sourceScore,
+      reasonSignals: reasonSignals
+    )
+  }
 }
 
-struct RadioStationClient: RadioStationFetching {
+struct RadioStationClient: RadioStationFetching, DiscoverStationServing {
   static let defaultBaseURL = URL(string: "https://musichackathon-production.up.railway.app")
 
   private let baseURL: URL?
@@ -393,6 +699,54 @@ struct RadioStationClient: RadioStationFetching {
     return response.compressedMemoryProposal
   }
 
+  func fetchDiscoverStations(cursor: String? = nil, limit: Int = 20) async throws -> DiscoverFeedPage {
+    guard let baseURL else {
+      throw RadioStationClientError.disabled
+    }
+
+    let endpoint = discoverStationsURL(
+      baseURL: baseURL,
+      cursor: cursor,
+      limit: limit
+    )
+    var request = URLRequest(url: endpoint, timeoutInterval: timeout)
+    request.httpMethod = "GET"
+    applyLocalizationHeaders(to: &request)
+
+    let payload: DiscoverFeedPagePayload = try await decodedPayload(for: request)
+    return try payload.page()
+  }
+
+  func publishDiscoverStation(_ draft: DiscoverStationPublicationDraft) async throws -> PublishedDiscoverStation {
+    guard let baseURL else {
+      throw RadioStationClientError.disabled
+    }
+
+    let endpoint = baseURL.appending(path: "v1/discover/stations")
+    var request = URLRequest(url: endpoint, timeoutInterval: generationTimeout)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    applyLocalizationHeaders(to: &request)
+    request.httpBody = try encoder.encode(DiscoverStationPublishPayload(draft: draft))
+
+    let payload: PublishedDiscoverStationPayload = try await decodedPayload(for: request)
+    return try payload.station()
+  }
+
+  func fetchPublishedStation(id: String) async throws -> PublishedDiscoverStation {
+    guard let baseURL else {
+      throw RadioStationClientError.disabled
+    }
+
+    let endpoint = baseURL.appending(path: "v1/radio/stations/\(id)")
+    var request = URLRequest(url: endpoint, timeoutInterval: timeout)
+    request.httpMethod = "GET"
+    applyLocalizationHeaders(to: &request)
+
+    let payload: PublishedDiscoverStationPayload = try await decodedPayload(for: request)
+    return try payload.station()
+  }
+
   private func decodedPayload<T: Decodable>(for request: URLRequest) async throws -> T {
     let startedAt = Date()
     recordNetwork(
@@ -499,6 +853,19 @@ struct RadioStationClient: RadioStationFetching {
   private func applyLocalizationHeaders(to request: inout URLRequest) {
     request.setValue(AppLanguage.acceptLanguageHeader(), forHTTPHeaderField: "Accept-Language")
   }
+
+  private func discoverStationsURL(baseURL: URL, cursor: String?, limit: Int) -> URL {
+    let endpoint = baseURL.appending(path: "v1/discover/stations")
+    guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
+      return endpoint
+    }
+
+    components.queryItems = [
+      URLQueryItem(name: "limit", value: "\(limit)"),
+      cursor.map { URLQueryItem(name: "cursor", value: $0) }
+    ].compactMap { $0 }
+    return components.url ?? endpoint
+  }
 }
 
 enum RadioStationClientError: LocalizedError, Equatable {
@@ -604,6 +971,180 @@ private struct RadioStationPayload: Decodable {
 
 private struct RadioMemoryCompressionPayload: Decodable {
   let compressedMemoryProposal: RadioCompressedMemory
+}
+
+private struct DiscoverFeedPagePayload: Decodable {
+  let stations: [PublishedDiscoverStationPayload]
+  let nextCursor: String?
+
+  func page() throws -> DiscoverFeedPage {
+    DiscoverFeedPage(
+      stations: try stations.map { try $0.station() },
+      nextCursor: nextCursor
+    )
+  }
+}
+
+private struct PublishedDiscoverStationPayload: Decodable {
+  let stationID: String
+  let title: String
+  let subtitle: String
+  let description: String
+  let visibility: RadioStationVisibility
+  let ownerID: String
+  let ownerDisplayName: String
+  let publishedAt: String
+  let shareURL: URL
+  let seedTracks: [RadioTrackPayload]
+  let items: [RadioStationItemPayload]
+  let speech: RadioSpeech?
+  let coverArtworkURL: URL?
+  let colorHex: String
+  let favorites: Int
+
+  enum CodingKeys: String, CodingKey {
+    case id
+    case stationID
+    case stationId
+    case title
+    case subtitle
+    case description
+    case visibility
+    case ownerID
+    case ownerId
+    case ownerDisplayName
+    case publishedAt
+    case shareURL
+    case shareUrl
+    case seedTracks
+    case items
+    case speech
+    case coverArtworkURL
+    case coverArtworkUrl
+    case colorHex
+    case favorites
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    stationID = try container.decodeIfPresent(String.self, forKey: .stationID)
+      ?? container.decodeIfPresent(String.self, forKey: .stationId)
+      ?? container.decodeIfPresent(String.self, forKey: .id)
+      ?? "published"
+    title = try container.decodeIfPresent(String.self, forKey: .title) ?? L10n.tr("radio.defaultTitle")
+    subtitle = try container.decodeIfPresent(String.self, forKey: .subtitle) ?? ""
+    description = try container.decodeIfPresent(String.self, forKey: .description) ?? subtitle
+    visibility = try container.decodeIfPresent(RadioStationVisibility.self, forKey: .visibility) ?? .public
+    ownerID = try container.decodeIfPresent(String.self, forKey: .ownerID)
+      ?? container.decodeIfPresent(String.self, forKey: .ownerId)
+      ?? "anonymous"
+    ownerDisplayName = try container.decodeIfPresent(String.self, forKey: .ownerDisplayName)
+      ?? L10n.tr("discover.publish.defaultOwnerName")
+    publishedAt = try container.decodeIfPresent(String.self, forKey: .publishedAt) ?? ""
+    shareURL = try container.decodeIfPresent(URL.self, forKey: .shareURL)
+      ?? container.decodeIfPresent(URL.self, forKey: .shareUrl)
+      ?? URL(string: "https://airset.example/stations/\(stationID)")!
+    seedTracks = try container.decodeIfPresent([RadioTrackPayload].self, forKey: .seedTracks) ?? []
+    items = try container.decode([RadioStationItemPayload].self, forKey: .items)
+    speech = try container.decodeIfPresent(RadioSpeech.self, forKey: .speech)
+    coverArtworkURL = try container.decodeIfPresent(URL.self, forKey: .coverArtworkURL)
+      ?? container.decodeIfPresent(URL.self, forKey: .coverArtworkUrl)
+    colorHex = try container.decodeIfPresent(String.self, forKey: .colorHex) ?? "#D8633C"
+    favorites = try container.decodeIfPresent(Int.self, forKey: .favorites) ?? 0
+  }
+
+  func station() throws -> PublishedDiscoverStation {
+    let queueItems = items.compactMap { try? $0.queueItem() }
+    guard !queueItems.isEmpty else {
+      throw RadioStationClientError.emptyStation
+    }
+
+    return PublishedDiscoverStation(
+      stationID: stationID,
+      title: title,
+      subtitle: subtitle,
+      description: description,
+      visibility: visibility,
+      ownerID: ownerID,
+      ownerDisplayName: ownerDisplayName,
+      publishedAt: publishedAt,
+      shareURL: shareURL,
+      seedTracks: seedTracks.map { $0.track() },
+      items: queueItems,
+      speech: speech,
+      coverArtworkURL: coverArtworkURL,
+      colorHex: colorHex,
+      favorites: favorites
+    )
+  }
+}
+
+private struct DiscoverStationPublishPayload: Encodable {
+  let title: String
+  let subtitle: String
+  let description: String
+  let visibility: RadioStationVisibility
+  let ownerID: String
+  let ownerDisplayName: String
+  let seedTracks: [RadioTrackPayload]
+  let items: [RadioStationItemPublishPayload]
+  let speech: RadioSpeech?
+  let coverArtworkURL: URL?
+  let colorHex: String
+
+  init(draft: DiscoverStationPublicationDraft) {
+    title = draft.title
+    subtitle = draft.subtitle
+    description = draft.description
+    visibility = draft.visibility
+    ownerID = draft.ownerID
+    ownerDisplayName = draft.ownerDisplayName
+    seedTracks = draft.seedTracks.map {
+      RadioTrackPayload(track: $0, playlistName: $0.playlistName, source: $0.source, sourceLane: $0.sourceLane)
+    }
+    items = draft.station.items.map(RadioStationItemPublishPayload.init)
+    speech = draft.station.speech
+    coverArtworkURL = draft.coverArtworkURL
+    colorHex = draft.colorHex
+  }
+}
+
+private struct RadioStationItemPublishPayload: Encodable {
+  let id: String
+  let title: String
+  let artist: String
+  let album: String
+  let mood: String
+  let duration: TimeInterval
+  let artworkSystemName: String
+  let artworkURL: URL?
+  let previewURL: URL?
+  let appleMusicID: String?
+  let isExplicit: Bool
+  let sourceTitle: String
+  let source: String?
+  let sourceLane: String?
+  let reason: String
+  let handoffText: String?
+
+  init(item: RadioQueueItem) {
+    id = item.id
+    title = item.track.title
+    artist = item.track.artist
+    album = item.track.album
+    mood = item.track.mood
+    duration = item.track.duration
+    artworkSystemName = item.track.artworkSystemName
+    artworkURL = item.track.artworkURL
+    previewURL = item.track.previewURL
+    appleMusicID = item.track.normalizedAppleMusicID
+    isExplicit = item.track.isExplicit
+    sourceTitle = item.sourceTitle
+    source = item.track.source
+    sourceLane = item.track.sourceLane
+    reason = item.reason
+    handoffText = item.handoffText
+  }
 }
 
 private struct RadioStationItemPayload: Decodable {

@@ -32,6 +32,7 @@ protocol RadioPlaybackControlling: AnyObject {
   var onTrackTransitionWindowReached: (() -> Void)? { get set }
   var onSpeechAdvancePointReached: (() -> Void)? { get set }
 
+  func prepareUpcomingTrack(_ track: Track?, policy: RadioTrackPlaybackPolicy)
   func play(track: Track)
   func play(track: Track, policy: RadioTrackPlaybackPolicy, preservesSpeech: Bool)
   func playSpeech(_ speech: RadioSpeechPlaybackSegment)
@@ -50,6 +51,12 @@ enum PlaybackState: String {
 private enum PlaybackMediaKind {
   case track(Track, String?)
   case speech(RadioSpeechPlaybackSegment)
+}
+
+private struct PreparedAppleMusicTrack {
+  let trackKey: String
+  let resolution: AppleMusicCatalogResolution
+  let resolvedTrack: Track
 }
 
 private struct RadioTransitionOverlayTiming {
@@ -131,6 +138,7 @@ final class PlaybackController: RadioPlaybackControlling {
   @ObservationIgnored private var playbackTask: Task<Void, Never>?
   @ObservationIgnored private var speechStartTask: Task<Void, Never>?
   @ObservationIgnored private var trackVolumeRampTask: Task<Void, Never>?
+  @ObservationIgnored private var upcomingPreparationTask: Task<Void, Never>?
   @ObservationIgnored private var didNotifyTrackFinished = false
   @ObservationIgnored private var didNotifySpeechFinished = false
   @ObservationIgnored private var didNotifyTrackTransitionWindow = false
@@ -142,6 +150,8 @@ final class PlaybackController: RadioPlaybackControlling {
   @ObservationIgnored private var currentTrackPlaybackPolicy: RadioTrackPlaybackPolicy = .fullSongPreferred
   @ObservationIgnored private var currentSpeechPlaybackMode: RadioSpeechPlaybackMode = .standalone
   @ObservationIgnored private var currentOverlayTiming: RadioTransitionOverlayTiming = .automatic
+  @ObservationIgnored private var preparedAppleMusicTrack: PreparedAppleMusicTrack?
+  @ObservationIgnored private var preparingAppleMusicTrackKey: String?
   @ObservationIgnored private var backgroundContinuationTask: UIBackgroundTaskIdentifier = .invalid
   @ObservationIgnored private var backgroundContinuationReason: String?
 
@@ -170,6 +180,7 @@ final class PlaybackController: RadioPlaybackControlling {
     }
     speechSynthesizer.delegate = speechCompletionDelegate
     configureAudioSession()
+    configureAppleMusicTransition()
     configureRemoteCommands()
   }
 
@@ -192,6 +203,36 @@ final class PlaybackController: RadioPlaybackControlling {
     playbackTask?.cancel()
     speechStartTask?.cancel()
     trackVolumeRampTask?.cancel()
+    upcomingPreparationTask?.cancel()
+  }
+
+  func prepareUpcomingTrack(_ track: Track?, policy: RadioTrackPlaybackPolicy) {
+    guard
+      let track,
+      policy == .fullSongPreferred,
+      track.normalizedAppleMusicID != nil
+    else {
+      cancelUpcomingTrackPreparation()
+      return
+    }
+
+    let trackKey = track.radioIdentity
+    if preparedAppleMusicTrack?.trackKey == trackKey || preparingAppleMusicTrackKey == trackKey {
+      return
+    }
+
+    cancelUpcomingTrackPreparation()
+    preparingAppleMusicTrackKey = trackKey
+    diagnostics?.record(
+      .info,
+      chain: .playbackAppleMusic,
+      event: "prepare_upcoming_start",
+      message: L10n.tr("diagnostic.message.upcomingFullSongPrepareStarted"),
+      payload: DiagnosticsPayload.track(track)
+    )
+    upcomingPreparationTask = Task { [weak self] in
+      await self?.prepareUpcomingAppleMusicTrack(track, trackKey: trackKey)
+    }
   }
 
   func play(track: Track) {
@@ -273,6 +314,7 @@ final class PlaybackController: RadioPlaybackControlling {
 
   func stop() {
     playbackTask?.cancel()
+    cancelUpcomingTrackPreparation()
     stopCurrentPlayback(clearCurrentTrack: true)
   }
 
@@ -292,6 +334,73 @@ final class PlaybackController: RadioPlaybackControlling {
     case .none:
       return 0
     }
+  }
+
+  private func prepareUpcomingAppleMusicTrack(_ track: Track, trackKey: String) async {
+    defer {
+      if preparingAppleMusicTrackKey == trackKey {
+        preparingAppleMusicTrackKey = nil
+        upcomingPreparationTask = nil
+      }
+    }
+
+    do {
+      try await musicAuthorization.ensureCatalogPlaybackReady()
+      guard !Task.isCancelled, preparingAppleMusicTrackKey == trackKey else { return }
+
+      let resolution = try await catalogService.resolveSong(for: track)
+      guard !Task.isCancelled, preparingAppleMusicTrackKey == trackKey else { return }
+
+      let resolvedTrack = AppleMusicCatalogService.track(from: resolution.song, fallback: track)
+      preparedAppleMusicTrack = PreparedAppleMusicTrack(
+        trackKey: trackKey,
+        resolution: resolution,
+        resolvedTrack: resolvedTrack
+      )
+      diagnostics?.record(
+        .notice,
+        chain: .playbackAppleMusic,
+        event: "prepare_upcoming_success",
+        message: L10n.tr("diagnostic.message.upcomingFullSongPrepareSucceeded"),
+        payload: DiagnosticsPayload.merge(
+          ["resolution_method": resolution.method.rawValue],
+          DiagnosticsPayload.track(resolvedTrack)
+        )
+      )
+    } catch is CancellationError {
+      return
+    } catch {
+      guard !Task.isCancelled, preparingAppleMusicTrackKey == trackKey else { return }
+      diagnostics?.record(
+        .warning,
+        chain: .playbackAppleMusic,
+        event: "prepare_upcoming_failed",
+        message: L10n.tr("diagnostic.message.upcomingFullSongPrepareFailed"),
+        payload: DiagnosticsPayload.merge(
+          DiagnosticsPayload.track(track),
+          DiagnosticsPayload.error(error)
+        )
+      )
+    }
+  }
+
+  private func cancelUpcomingTrackPreparation() {
+    upcomingPreparationTask?.cancel()
+    upcomingPreparationTask = nil
+    preparingAppleMusicTrackKey = nil
+    preparedAppleMusicTrack = nil
+  }
+
+  private func consumePreparedAppleMusicTrack(for track: Track) -> PreparedAppleMusicTrack? {
+    guard let preparedAppleMusicTrack else { return nil }
+
+    if preparedAppleMusicTrack.trackKey == track.radioIdentity {
+      self.preparedAppleMusicTrack = nil
+      return preparedAppleMusicTrack
+    }
+
+    self.preparedAppleMusicTrack = nil
+    return nil
   }
 
   private func startPlayback(
@@ -425,39 +534,57 @@ final class PlaybackController: RadioPlaybackControlling {
       payload: DiagnosticsPayload.track(track)
     )
     let resolution: AppleMusicCatalogResolution
-    do {
-      resolution = try await catalogService.resolveSong(for: track)
-      if let idError = resolution.idError {
-        diagnostics?.record(
-          .warning,
-          chain: .musicCatalog,
-          event: "resolve_id_failed_search_fallback",
-          message: L10n.tr("diagnostic.message.catalogSongIDFallback"),
-          correlationID: attemptID,
-          payload: DiagnosticsPayload.merge(
-            ["resolution_method": resolution.method.rawValue],
-            DiagnosticsPayload.track(track),
-            DiagnosticsPayload.error(idError)
-          )
-        )
-      }
-    } catch {
+    let resolvedTrack: Track
+    if let preparedTrack = consumePreparedAppleMusicTrack(for: track) {
+      resolution = preparedTrack.resolution
+      resolvedTrack = preparedTrack.resolvedTrack
       diagnostics?.record(
-        .error,
+        .notice,
         chain: .musicCatalog,
-        event: "resolve_failed",
-        message: L10n.tr("diagnostic.message.catalogSongResolveFailed"),
+        event: "resolve_reused_prepared",
+        message: L10n.tr("diagnostic.message.upcomingFullSongPrepareReused"),
         correlationID: attemptID,
         payload: DiagnosticsPayload.merge(
-          DiagnosticsPayload.track(track),
-          DiagnosticsPayload.error(error)
+          ["resolution_method": resolution.method.rawValue],
+          DiagnosticsPayload.track(resolvedTrack)
         )
       )
-      throw error
+    } else {
+      do {
+        resolution = try await catalogService.resolveSong(for: track)
+        if let idError = resolution.idError {
+          diagnostics?.record(
+            .warning,
+            chain: .musicCatalog,
+            event: "resolve_id_failed_search_fallback",
+            message: L10n.tr("diagnostic.message.catalogSongIDFallback"),
+            correlationID: attemptID,
+            payload: DiagnosticsPayload.merge(
+              ["resolution_method": resolution.method.rawValue],
+              DiagnosticsPayload.track(track),
+              DiagnosticsPayload.error(idError)
+            )
+          )
+        }
+      } catch {
+        diagnostics?.record(
+          .error,
+          chain: .musicCatalog,
+          event: "resolve_failed",
+          message: L10n.tr("diagnostic.message.catalogSongResolveFailed"),
+          correlationID: attemptID,
+          payload: DiagnosticsPayload.merge(
+            DiagnosticsPayload.track(track),
+            DiagnosticsPayload.error(error)
+          )
+        )
+        throw error
+      }
+
+      resolvedTrack = AppleMusicCatalogService.track(from: resolution.song, fallback: track)
     }
 
     let song = resolution.song
-    let resolvedTrack = AppleMusicCatalogService.track(from: song, fallback: track)
     diagnostics?.record(
       .notice,
       chain: .musicCatalog,
@@ -1328,9 +1455,12 @@ final class PlaybackController: RadioPlaybackControlling {
       for step in 1...steps {
         guard !Task.isCancelled else { return }
         let progress = Float(step) / Float(steps)
-        let volume = startVolume + (targetVolume - startVolume) * progress
         await MainActor.run {
-          self?.trackPreviewPlayer.volume = volume
+          self?.trackPreviewPlayer.volume = Self.smoothedVolume(
+            startVolume: startVolume,
+            targetVolume: targetVolume,
+            progress: progress
+          )
         }
         try? await Task.sleep(for: .milliseconds(50))
       }
@@ -1479,6 +1609,11 @@ final class PlaybackController: RadioPlaybackControlling {
     }
   }
 
+  private func configureAppleMusicTransition() {
+    guard #available(iOS 18.0, *) else { return }
+    musicPlayer.transition = .crossfade(duration: 4.0)
+  }
+
   private func beginBackgroundContinuationTask(reason: String) {
     guard backgroundContinuationTask == .invalid else { return }
 
@@ -1577,6 +1712,12 @@ final class PlaybackController: RadioPlaybackControlling {
   private static func timeText(for seconds: TimeInterval) -> String {
     let totalSeconds = max(0, Int(seconds.rounded(.down)))
     return "\(totalSeconds / 60):\(String(format: "%02d", totalSeconds % 60))"
+  }
+
+  static func smoothedVolume(startVolume: Float, targetVolume: Float, progress: Float) -> Float {
+    let clampedProgress = min(max(progress, 0), 1)
+    let easedProgress = clampedProgress * clampedProgress * (3 - 2 * clampedProgress)
+    return startVolume + (targetVolume - startVolume) * easedProgress
   }
 
   static func estimatedSpeechDuration(for text: String) -> TimeInterval {

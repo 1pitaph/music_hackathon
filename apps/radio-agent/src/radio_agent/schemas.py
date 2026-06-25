@@ -216,6 +216,43 @@ class RadioStationGenerateResponse(BaseModel):
   memoryPatchProposals: list[RadioMemoryPatchProposal] = Field(default_factory=list)
 
 
+class DiscoverStationPublishRequest(BaseModel):
+  title: str = Field(min_length=1, max_length=120)
+  subtitle: str = Field(default="", max_length=300)
+  description: str | None = Field(default=None, max_length=1200)
+  visibility: Literal["public", "unlisted", "private"] = "public"
+  ownerID: str = Field(default="anonymous", min_length=1, max_length=128)
+  ownerDisplayName: str = Field(default="Airset listener", min_length=1, max_length=80)
+  seedTracks: list[RadioTrack] = Field(min_length=5, max_length=5)
+  items: list[RadioStationItem] = Field(min_length=1, max_length=40)
+  speech: RadioSpeech | None = None
+  coverArtworkURL: str | None = None
+  colorHex: str | None = Field(default="#D8633C", max_length=16)
+
+
+class DiscoverStationResponse(BaseModel):
+  stationID: str
+  title: str
+  subtitle: str
+  description: str
+  visibility: Literal["public", "unlisted", "private"]
+  ownerID: str
+  ownerDisplayName: str
+  publishedAt: str
+  shareURL: str
+  seedTracks: list[RadioTrack]
+  items: list[RadioStationItem]
+  speech: RadioSpeech | None = None
+  coverArtworkURL: str | None = None
+  colorHex: str = "#D8633C"
+  favorites: int = 0
+
+
+class DiscoverStationPage(BaseModel):
+  stations: list[DiscoverStationResponse]
+  nextCursor: str | None = None
+
+
 class RadioSpeechSegment(BaseModel):
   id: str
   kind: Literal["stationIntro", "transition"]

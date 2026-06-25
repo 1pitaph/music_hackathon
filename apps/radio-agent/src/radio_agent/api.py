@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+import base64
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import sqlite3
+from typing import Any
+import uuid
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
@@ -7,6 +15,9 @@ from fastapi.responses import FileResponse
 
 from radio_agent.graph import compress_radio_memory, generate_radio
 from radio_agent.schemas import (
+  DiscoverStationPage,
+  DiscoverStationPublishRequest,
+  DiscoverStationResponse,
   RadioGenerateRequest,
   RadioGenerateResponse,
   RadioMemoryCompressionRequest,
@@ -149,6 +160,45 @@ def generate_station(request: RadioStationGenerateRequest) -> RadioStationGenera
   )
 
 
+@app.post("/v1/discover/stations", response_model=DiscoverStationResponse)
+def publish_discover_station(request: DiscoverStationPublishRequest) -> DiscoverStationResponse:
+  _validate_publish_request(request)
+  station_id = f"station-{uuid.uuid4().hex[:12]}"
+  share_url = f"{_discover_public_base_url()}/stations/{station_id}"
+  published_at = _timestamp_now()
+  response = DiscoverStationResponse(
+    stationID=station_id,
+    title=request.title.strip(),
+    subtitle=request.subtitle.strip(),
+    description=(request.description or request.subtitle or "").strip(),
+    visibility=request.visibility,
+    ownerID=request.ownerID.strip(),
+    ownerDisplayName=request.ownerDisplayName.strip(),
+    publishedAt=published_at,
+    shareURL=share_url,
+    seedTracks=request.seedTracks,
+    items=request.items,
+    speech=request.speech,
+    coverArtworkURL=_trimmed_or_none(request.coverArtworkURL) or _first_artwork_url(request),
+    colorHex=_trimmed_or_none(request.colorHex) or "#D8633C",
+  )
+  _save_discover_station(response)
+  return response
+
+
+@app.get("/v1/discover/stations", response_model=DiscoverStationPage)
+def discover_stations(cursor: str | None = None, limit: int = 20) -> DiscoverStationPage:
+  return _discover_station_page(cursor=cursor, limit=limit)
+
+
+@app.get("/v1/radio/stations/{station_id}", response_model=DiscoverStationResponse)
+def station_by_id(station_id: str) -> DiscoverStationResponse:
+  station = _load_discover_station(station_id)
+  if station is None or station.visibility == "private":
+    raise HTTPException(status_code=404, detail="Station not found.")
+  return station
+
+
 @app.post("/v1/radio/generate", response_model=RadioGenerateResponse)
 def generate(request: RadioGenerateRequest) -> RadioGenerateResponse:
   return generate_radio(request)
@@ -181,6 +231,187 @@ def speech_audio_file(file_name: str) -> FileResponse:
 @app.post("/v1/radio/memory/compress", response_model=RadioMemoryCompressionResponse)
 def compress_memory(request: RadioMemoryCompressionRequest) -> RadioMemoryCompressionResponse:
   return compress_radio_memory(request)
+
+
+def _validate_publish_request(request: DiscoverStationPublishRequest) -> None:
+  seed_keys = [track.radioIdentity for track in request.seedTracks]
+  if len(set(seed_keys)) != 5:
+    raise HTTPException(status_code=422, detail="seedTracks must contain exactly 5 unique tracks.")
+
+  if not request.items:
+    raise HTTPException(status_code=422, detail="items must contain at least one station item.")
+
+
+def _discover_station_page(cursor: str | None, limit: int) -> DiscoverStationPage:
+  page_size = min(max(limit, 1), 40)
+  cursor_value = _decode_discover_cursor(cursor)
+  connection = _discover_db_connection()
+  try:
+    _ensure_discover_schema(connection)
+    if cursor_value is None:
+      rows = connection.execute(
+        """
+        SELECT payload_json FROM discover_stations
+        WHERE visibility = 'public'
+        ORDER BY published_at DESC, station_id DESC
+        LIMIT ?
+        """,
+        (page_size + 1,),
+      ).fetchall()
+    else:
+      published_at, station_id = cursor_value
+      rows = connection.execute(
+        """
+        SELECT payload_json FROM discover_stations
+        WHERE visibility = 'public'
+          AND (published_at < ? OR (published_at = ? AND station_id < ?))
+        ORDER BY published_at DESC, station_id DESC
+        LIMIT ?
+        """,
+        (published_at, published_at, station_id, page_size + 1),
+      ).fetchall()
+  finally:
+    connection.close()
+
+  stations = [_station_from_payload_json(row["payload_json"]) for row in rows[:page_size]]
+  next_cursor = None
+  if len(rows) > page_size and stations:
+    last_station = stations[-1]
+    next_cursor = _encode_discover_cursor(last_station.publishedAt, last_station.stationID)
+  return DiscoverStationPage(stations=stations, nextCursor=next_cursor)
+
+
+def _save_discover_station(station: DiscoverStationResponse) -> None:
+  connection = _discover_db_connection()
+  try:
+    _ensure_discover_schema(connection)
+    connection.execute(
+      """
+      INSERT INTO discover_stations (
+        station_id,
+        visibility,
+        owner_id,
+        owner_display_name,
+        published_at,
+        share_url,
+        payload_json
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      """,
+      (
+        station.stationID,
+        station.visibility,
+        station.ownerID,
+        station.ownerDisplayName,
+        station.publishedAt,
+        station.shareURL,
+        json.dumps(station.model_dump(mode="json"), ensure_ascii=False),
+      ),
+    )
+    connection.commit()
+  finally:
+    connection.close()
+
+
+def _load_discover_station(station_id: str) -> DiscoverStationResponse | None:
+  connection = _discover_db_connection()
+  try:
+    _ensure_discover_schema(connection)
+    row = connection.execute(
+      "SELECT payload_json FROM discover_stations WHERE station_id = ?",
+      (station_id,),
+    ).fetchone()
+  finally:
+    connection.close()
+
+  if row is None:
+    return None
+  return _station_from_payload_json(row["payload_json"])
+
+
+def _station_from_payload_json(payload_json: str) -> DiscoverStationResponse:
+  payload: dict[str, Any] = json.loads(payload_json)
+  return DiscoverStationResponse.model_validate(payload)
+
+
+def _discover_db_connection() -> sqlite3.Connection:
+  db_path = _discover_db_path()
+  if db_path != ":memory:":
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+  connection = sqlite3.connect(db_path)
+  connection.row_factory = sqlite3.Row
+  return connection
+
+
+def _discover_db_path() -> str:
+  return os.getenv("DISCOVER_STATIONS_DB_PATH", "/data/airset-discover.sqlite3")
+
+
+def _ensure_discover_schema(connection: sqlite3.Connection) -> None:
+  connection.execute(
+    """
+    CREATE TABLE IF NOT EXISTS discover_stations (
+      station_id TEXT PRIMARY KEY,
+      visibility TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      owner_display_name TEXT NOT NULL,
+      published_at TEXT NOT NULL,
+      share_url TEXT NOT NULL,
+      payload_json TEXT NOT NULL
+    )
+    """
+  )
+  connection.execute(
+    """
+    CREATE INDEX IF NOT EXISTS idx_discover_public_feed
+    ON discover_stations (visibility, published_at DESC, station_id DESC)
+    """
+  )
+  connection.commit()
+
+
+def _discover_public_base_url() -> str:
+  raw_value = (
+    os.getenv("DISCOVER_STATIONS_PUBLIC_BASE_URL")
+    or os.getenv("PUBLIC_BASE_URL")
+    or "https://airset.example"
+  )
+  return raw_value.rstrip("/")
+
+
+def _timestamp_now() -> str:
+  return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _encode_discover_cursor(published_at: str, station_id: str) -> str:
+  payload = json.dumps({"publishedAt": published_at, "stationID": station_id}, separators=(",", ":"))
+  return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _decode_discover_cursor(cursor: str | None) -> tuple[str, str] | None:
+  if not cursor:
+    return None
+
+  try:
+    padding = "=" * (-len(cursor) % 4)
+    payload = json.loads(base64.urlsafe_b64decode(f"{cursor}{padding}").decode("utf-8"))
+    published_at = payload["publishedAt"]
+    station_id = payload["stationID"]
+    if not isinstance(published_at, str) or not isinstance(station_id, str):
+      raise ValueError("Invalid cursor values.")
+    return published_at, station_id
+  except Exception as exc:
+    raise HTTPException(status_code=400, detail="Invalid discover cursor.") from exc
+
+
+def _first_artwork_url(request: DiscoverStationPublishRequest) -> str | None:
+  for item in request.items:
+    if _trimmed_or_none(item.artworkURL):
+      return item.artworkURL
+  for track in request.seedTracks:
+    if _trimmed_or_none(track.artworkURL):
+      return track.artworkURL
+  return None
 
 
 def _candidate_map(request: RadioStationGenerateRequest) -> dict[str, RadioTrack]:

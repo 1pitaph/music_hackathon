@@ -369,6 +369,136 @@ final class RadioStationClientTests: XCTestCase {
     )
   }
 
+  func testFetchDiscoverStationsRequestsFeedAndDecodesPublishedStations() async throws {
+    let session = makeSession { request in
+      XCTAssertEqual(request.url?.path, "/v1/discover/stations")
+      let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+      let queryItems = components?.queryItems ?? []
+      XCTAssertEqual(queryItems.first(where: { $0.name == "cursor" })?.value, "cursor-1")
+      XCTAssertEqual(queryItems.first(where: { $0.name == "limit" })?.value, "3")
+      XCTAssertEqual(request.httpMethod, "GET")
+
+      let data = """
+      {
+        "stations": [
+          {
+            "stationID": "station-1",
+            "title": "Published Radio",
+            "subtitle": "Five songs from a friend.",
+            "description": "A published station.",
+            "visibility": "public",
+            "ownerID": "owner-1",
+            "ownerDisplayName": "Publisher",
+            "publishedAt": "2026-06-25T01:00:00.000Z",
+            "shareURL": "https://share.test/stations/station-1",
+            "coverArtworkURL": "https://example.com/cover.jpg",
+            "colorHex": "#D8633C",
+            "favorites": 8,
+            "seedTracks": [
+              {
+                "radioIdentity": "seed-1",
+                "title": "Seed",
+                "artist": "Artist",
+                "album": "Album",
+                "mood": "Pop",
+                "duration": 200,
+                "artworkURL": "https://example.com/seed.jpg",
+                "previewURL": "https://example.com/seed.m4a",
+                "appleMusicID": "seed"
+              }
+            ],
+            "items": [
+              {
+                "id": "item-1",
+                "title": "Signal",
+                "artist": "Artist A",
+                "artworkURL": "https://example.com/signal.jpg",
+                "previewURL": "https://example.com/signal.m4a",
+                "sourceTitle": "Publisher",
+                "reason": "Published by Publisher."
+              }
+            ]
+          }
+        ],
+        "nextCursor": "cursor-2"
+      }
+      """.data(using: .utf8)!
+      return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+    }
+    let client = RadioStationClient(baseURL: URL(string: "http://station.test")!, session: session)
+
+    let page = try await client.fetchDiscoverStations(cursor: "cursor-1", limit: 3)
+
+    XCTAssertEqual(page.nextCursor, "cursor-2")
+    XCTAssertEqual(page.stations.first?.stationID, "station-1")
+    XCTAssertEqual(page.stations.first?.ownerDisplayName, "Publisher")
+    XCTAssertEqual(page.stations.first?.shareURL.absoluteString, "https://share.test/stations/station-1")
+    XCTAssertEqual(page.stations.first?.discoverStation().hostName, "Publisher")
+    XCTAssertEqual(page.stations.first?.discoverStation().favorites, 8)
+  }
+
+  func testPublishDiscoverStationPostsFiveSeedTracksAndDecodesPublishedStation() async throws {
+    let session = makeSession { request in
+      XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/discover/stations")
+      XCTAssertEqual(request.httpMethod, "POST")
+
+      let body = try JSONSerialization.jsonObject(with: self.bodyData(from: request)) as? [String: Any]
+      XCTAssertEqual(body?["title"] as? String, "Draft Radio")
+      XCTAssertEqual(body?["visibility"] as? String, "public")
+      XCTAssertEqual(body?["ownerID"] as? String, "owner-1")
+      XCTAssertEqual((body?["seedTracks"] as? [[String: Any]])?.count, 5)
+      XCTAssertEqual((body?["items"] as? [[String: Any]])?.count, 5)
+      XCTAssertEqual((body?["seedTracks"] as? [[String: Any]])?.first?["appleMusicID"] as? String, "seed-1")
+
+      let data = """
+      {
+        "stationID": "station-1",
+        "title": "Draft Radio",
+        "subtitle": "Draft intro.",
+        "description": "Draft description.",
+        "visibility": "public",
+        "ownerID": "owner-1",
+        "ownerDisplayName": "Publisher",
+        "publishedAt": "2026-06-25T01:00:00.000Z",
+        "shareURL": "https://share.test/stations/station-1",
+        "seedTracks": [
+          {
+            "radioIdentity": "appleMusic:seed-1",
+            "title": "Seed 1",
+            "artist": "Artist",
+            "album": "Album",
+            "mood": "Pop",
+            "duration": 200,
+            "artworkURL": "https://example.com/seed-1.jpg",
+            "previewURL": "https://example.com/seed-1.m4a",
+            "appleMusicID": "seed-1"
+          }
+        ],
+        "items": [
+          {
+            "id": "item-1",
+            "title": "Seed 1",
+            "artist": "Artist",
+            "artworkURL": "https://example.com/seed-1.jpg",
+            "previewURL": "https://example.com/seed-1.m4a",
+            "sourceTitle": "Publisher",
+            "reason": "Published."
+          }
+        ]
+      }
+      """.data(using: .utf8)!
+      return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+    }
+    let client = RadioStationClient(baseURL: URL(string: "http://station.test")!, session: session)
+
+    let station = try await client.publishDiscoverStation(makePublicationDraft())
+
+    XCTAssertEqual(station.stationID, "station-1")
+    XCTAssertEqual(station.visibility, .public)
+    XCTAssertEqual(station.shareURL.absoluteString, "https://share.test/stations/station-1")
+    XCTAssertEqual(station.items.first?.track.title, "Seed 1")
+  }
+
   func testFetchSpeechVoicesDecodesCatalog() async throws {
     let session = makeSession { request in
       XCTAssertEqual(request.url?.absoluteString, "http://station.test/v1/radio/speech/voices")
@@ -551,6 +681,55 @@ final class RadioStationClientTests: XCTestCase {
       source: source,
       sourceLane: sourceLane,
       reasonSignals: reasonSignals
+    )
+  }
+
+  private func makePublicationDraft() -> DiscoverStationPublicationDraft {
+    let seedTracks = (1...5).map { makePublishTrack(index: $0) }
+    let items = seedTracks.enumerated().map { offset, track in
+      RadioQueueItem(
+        id: "item-\(offset + 1)",
+        track: track,
+        sourceTitle: "Publisher",
+        reason: "Selected by Publisher.",
+        handoffText: offset == 0 ? "Start here." : nil
+      )
+    }
+    let station = RadioStation(
+      id: "draft-1",
+      title: "Draft Radio",
+      subtitle: "Draft intro.",
+      items: items,
+      allowsAutoExtension: false
+    )
+    return DiscoverStationPublicationDraft(
+      title: "Draft Radio",
+      subtitle: "Draft intro.",
+      description: "Draft description.",
+      visibility: .public,
+      ownerID: "owner-1",
+      ownerDisplayName: "Publisher",
+      seedTracks: seedTracks,
+      station: station,
+      coverArtworkURL: URL(string: "https://example.com/cover.jpg"),
+      colorHex: "#D8633C"
+    )
+  }
+
+  private func makePublishTrack(index: Int) -> Track {
+    Track(
+      title: "Seed \(index)",
+      artist: "Artist",
+      album: "Album",
+      mood: "Pop",
+      duration: 200,
+      artworkSystemName: "music.note",
+      artworkURL: URL(string: "https://example.com/seed-\(index).jpg"),
+      previewURL: URL(string: "https://example.com/seed-\(index).m4a"),
+      appleMusicID: "seed-\(index)",
+      playlistName: "Publish Seeds",
+      source: "apple_music_library",
+      sourceLane: "library_song"
     )
   }
 

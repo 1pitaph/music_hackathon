@@ -3,6 +3,7 @@ import json
 
 from fastapi.testclient import TestClient
 
+import radio_agent.api as api
 from radio_agent.api import app, _is_playable, _station_item
 from radio_agent import speech
 from radio_agent.schemas import RadioSpeechAudioConfig, RadioSpeechSegment, RadioTrack
@@ -145,6 +146,75 @@ def test_generate_station_can_attach_mock_speech_audio(monkeypatch):
   assert intro_audio["audioURL"].startswith("https://speech.test/audio/speech_")
   assert transition_audio["status"] == "ready"
   assert "Using mock speech synthesis metadata." in body["diagnostics"]
+
+
+def test_publish_discover_station_persists_feed_and_station_lookup(monkeypatch, tmp_path):
+  monkeypatch.setenv("DISCOVER_STATIONS_DB_PATH", str(tmp_path / "discover.sqlite3"))
+  monkeypatch.setenv("DISCOVER_STATIONS_PUBLIC_BASE_URL", "https://share.test")
+  timestamps = iter([
+    "2026-06-25T01:00:00.000Z",
+    "2026-06-25T01:01:00.000Z",
+    "2026-06-25T01:02:00.000Z",
+    "2026-06-25T01:03:00.000Z",
+  ])
+  monkeypatch.setattr(api, "_timestamp_now", lambda: next(timestamps))
+  client = TestClient(app)
+
+  first_public = client.post("/v1/discover/stations", json=_publish_payload(title="First")).json()
+  unlisted = client.post(
+    "/v1/discover/stations",
+    json=_publish_payload(title="Unlisted", visibility="unlisted"),
+  ).json()
+  second_public = client.post("/v1/discover/stations", json=_publish_payload(title="Second")).json()
+  private = client.post(
+    "/v1/discover/stations",
+    json=_publish_payload(title="Private", visibility="private"),
+  ).json()
+
+  assert first_public["shareURL"] == f"https://share.test/stations/{first_public['stationID']}"
+  assert first_public["visibility"] == "public"
+  assert first_public["seedTracks"][0]["radioIdentity"] == "seed-1"
+
+  first_page = client.get("/v1/discover/stations?limit=1")
+  assert first_page.status_code == 200
+  first_page_body = first_page.json()
+  assert [station["title"] for station in first_page_body["stations"]] == ["Second"]
+  assert first_page_body["nextCursor"]
+
+  second_page = client.get(f"/v1/discover/stations?limit=5&cursor={first_page_body['nextCursor']}")
+  assert second_page.status_code == 200
+  assert [station["title"] for station in second_page.json()["stations"]] == ["First"]
+  assert second_page.json()["nextCursor"] is None
+
+  assert client.get(f"/v1/radio/stations/{first_public['stationID']}").json()["title"] == "First"
+  assert client.get(f"/v1/radio/stations/{unlisted['stationID']}").json()["title"] == "Unlisted"
+  assert client.get(f"/v1/radio/stations/{private['stationID']}").status_code == 404
+
+  persisted_client = TestClient(app)
+  persisted_response = persisted_client.get(f"/v1/radio/stations/{second_public['stationID']}")
+  assert persisted_response.status_code == 200
+  assert persisted_response.json()["title"] == "Second"
+
+
+def test_publish_discover_station_requires_five_unique_seed_tracks(monkeypatch, tmp_path):
+  monkeypatch.setenv("DISCOVER_STATIONS_DB_PATH", str(tmp_path / "discover.sqlite3"))
+  client = TestClient(app)
+  payload = _publish_payload()
+  payload["seedTracks"][4]["radioIdentity"] = "seed-1"
+
+  response = client.post("/v1/discover/stations", json=payload)
+
+  assert response.status_code == 422
+  assert "5 unique" in response.json()["detail"]
+
+
+def test_discover_station_feed_rejects_invalid_cursor(monkeypatch, tmp_path):
+  monkeypatch.setenv("DISCOVER_STATIONS_DB_PATH", str(tmp_path / "discover.sqlite3"))
+  client = TestClient(app)
+
+  response = client.get("/v1/discover/stations?cursor=not-a-cursor")
+
+  assert response.status_code == 400
 
 
 def test_synthesize_speech_endpoint_returns_matching_segment_audio(monkeypatch):
@@ -789,6 +859,51 @@ def _request_payload():
         "source": "catalog",
       }
     ],
+  }
+
+
+def _publish_payload(title="Published", visibility="public"):
+  seed_tracks = []
+  items = []
+  for index in range(1, 6):
+    seed_tracks.append({
+      "radioIdentity": f"seed-{index}",
+      "title": f"Seed {index}",
+      "artist": f"Artist {index}",
+      "album": "Shared Album",
+      "mood": "Pop",
+      "duration": 180 + index,
+      "appleMusicID": f"apple-{index}",
+      "previewURL": f"https://example.com/seed-{index}.m4a",
+      "artworkURL": f"https://example.com/seed-{index}.jpg",
+      "playlistName": "Publish Seeds",
+    })
+    items.append({
+      "id": f"seed-{index}",
+      "title": f"Seed {index}",
+      "artist": f"Artist {index}",
+      "album": "Shared Album",
+      "mood": "Pop",
+      "duration": 180 + index,
+      "artworkURL": f"https://example.com/seed-{index}.jpg",
+      "previewURL": f"https://example.com/seed-{index}.m4a",
+      "appleMusicID": f"apple-{index}",
+      "sourceTitle": "Publish Seeds",
+      "reason": "Selected by the publisher.",
+      "handoffText": "Next from the published station.",
+    })
+
+  return {
+    "title": title,
+    "subtitle": f"{title} station intro.",
+    "description": f"{title} station description.",
+    "visibility": visibility,
+    "ownerID": "owner-1",
+    "ownerDisplayName": "Publisher",
+    "seedTracks": seed_tracks,
+    "items": items,
+    "coverArtworkURL": "https://example.com/cover.jpg",
+    "colorHex": "#D8633C",
   }
 
 

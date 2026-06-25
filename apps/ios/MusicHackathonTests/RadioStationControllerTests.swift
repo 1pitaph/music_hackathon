@@ -72,7 +72,8 @@ final class RadioStationControllerTests: XCTestCase {
       playbackController: MockPlaybackController(),
       stationClient: stationClient,
       memoryStore: MockMemoryStore(),
-      hostSpeakerIDProvider: { "zh_female_shuangkuaisisi_moon_bigtts" }
+      hostSpeakerIDProvider: { "zh_female_shuangkuaisisi_moon_bigtts" },
+      speechLanguageProvider: { .chinese }
     )
 
     await controller.loadCurrentStation()
@@ -114,6 +115,18 @@ final class RadioStationControllerTests: XCTestCase {
 
     XCTAssertGreaterThan(PlaybackController.estimatedSpeechDuration(for: chineseText), 5.0)
     XCTAssertLessThan(PlaybackController.estimatedSpeechDuration(for: englishText), 3.0)
+  }
+
+  func testSmoothedVolumeUsesMonotonicSmoothstepCurve() {
+    let start = PlaybackController.smoothedVolume(startVolume: 1.0, targetVolume: 0.2, progress: 0)
+    let middle = PlaybackController.smoothedVolume(startVolume: 1.0, targetVolume: 0.2, progress: 0.5)
+    let end = PlaybackController.smoothedVolume(startVolume: 1.0, targetVolume: 0.2, progress: 1)
+
+    XCTAssertEqual(start, 1.0, accuracy: 0.0001)
+    XCTAssertEqual(middle, 0.6, accuracy: 0.0001)
+    XCTAssertEqual(end, 0.2, accuracy: 0.0001)
+    XCTAssertGreaterThan(start, middle)
+    XCTAssertGreaterThan(middle, end)
   }
 
   func testLoadCurrentStationUsesLibraryTracksForGenerationCandidates() async {
@@ -187,6 +200,8 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertEqual(controller.currentItem?.handoffText, "Welcome into One.")
     XCTAssertEqual(controller.queue.map(\.track.title), ["Two"])
     XCTAssertEqual(playbackController.currentTrack?.title, "One")
+    XCTAssertEqual(playbackController.preparedUpcomingTrack?.title, "Two")
+    XCTAssertEqual(playbackController.preparedUpcomingPolicy, .fullSongPreferred)
   }
 
   func testPlayNextAdvancesThroughBackendQueue() async {
@@ -269,6 +284,32 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertNil(controller.errorMessage)
   }
 
+  func testFixedLocalStationDoesNotPrefetchBackendExtension() async {
+    let playbackController = MockPlaybackController()
+    let stationClient = SequencedStationClient(results: [
+      .success(makeResult(titles: ["Backend Extension"]))
+    ])
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore()
+    )
+    let localStation = makeStation(
+      items: [
+        makeQueueItem(title: "One", appleMusicID: "one"),
+        makeQueueItem(title: "Two", appleMusicID: "two"),
+        makeQueueItem(title: "Three", appleMusicID: "three")
+      ],
+      allowsAutoExtension: false
+    )
+
+    await controller.loadLocalStation(localStation, playImmediately: true)
+    await waitForPlayback(playbackController, title: "One")
+
+    XCTAssertEqual(controller.queue.map(\.track.title), ["Two", "Three"])
+    XCTAssertTrue(stationClient.contexts.isEmpty)
+  }
+
   func testStartStationPlaysIntroSpeechBeforeFirstTrack() async {
     let station = makeStation(
       items: [
@@ -293,6 +334,7 @@ final class RadioStationControllerTests: XCTestCase {
     await controller.startStation()
 
     XCTAssertEqual(playbackController.currentSpeech?.displayText, "Welcome to Airset.")
+    XCTAssertEqual(playbackController.preparedUpcomingTrack?.title, "One")
     XCTAssertNil(controller.currentItem)
 
     playbackController.finish(.speech)
@@ -335,6 +377,7 @@ final class RadioStationControllerTests: XCTestCase {
 
     XCTAssertNil(controller.currentItem)
     XCTAssertEqual(controller.queue.map(\.track.title), ["Two"])
+    XCTAssertEqual(playbackController.preparedUpcomingTrack?.title, "Two")
 
     playbackController.finish(.speech)
     await waitForPlayback(playbackController, title: "Two")
@@ -377,6 +420,8 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertNil(controller.currentItem)
     XCTAssertEqual(controller.queue.map(\.track.title), ["Two"])
     XCTAssertEqual(playbackController.lastSpeechMode, .transitionOverlay)
+    XCTAssertEqual(playbackController.preparedUpcomingTrack?.title, "Two")
+    XCTAssertEqual(playbackController.preparedUpcomingPolicy, .mixablePreferred)
 
     playbackController.triggerSpeechAdvancePoint()
     await waitForPlayback(playbackController, title: "Two")
@@ -465,6 +510,7 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertEqual(playbackController.lastSpeechMode, .standalone)
     XCTAssertNil(controller.currentItem)
     XCTAssertEqual(controller.queue.map(\.track.title), ["Two"])
+    XCTAssertEqual(playbackController.preparedUpcomingTrack?.title, "Two")
 
     playbackController.finish(.speech)
     await waitForPlayback(playbackController, title: "Two")
@@ -590,6 +636,7 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertEqual(playbackController.currentSpeech?.displayText, "Next up is Two.")
     XCTAssertNil(controller.currentItem)
     XCTAssertEqual(controller.queue.map(\.track.title), ["Two"])
+    XCTAssertEqual(playbackController.preparedUpcomingTrack?.title, "Two")
 
     playbackController.finish(.speech)
     await waitForPlayback(playbackController, title: "Two")
@@ -633,6 +680,8 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertEqual(playbackController.lastSpeechMode, .transitionOverlay)
     XCTAssertNil(controller.currentItem)
     XCTAssertEqual(controller.queue.map(\.track.title), ["Two"])
+    XCTAssertEqual(playbackController.preparedUpcomingTrack?.title, "Two")
+    XCTAssertEqual(playbackController.preparedUpcomingPolicy, .mixablePreferred)
 
     playbackController.triggerSpeechAdvancePoint()
     await waitForPlayback(playbackController, title: "Two")
@@ -851,13 +900,40 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertEqual(stationClient.contexts.map(\.action), ["start", "start"])
   }
 
-  private func makeStation(items: [RadioQueueItem], speech: RadioSpeech? = nil) -> RadioStation {
+  func testRefreshStationClearsPreparedUpcomingTrack() async {
+    let stationClient = SequencedStationClient(results: [
+      .success(makeResult(titles: ["One", "Two"])),
+      .success(makeResult(titles: ["Fresh"]))
+    ])
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: stationClient,
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.startStation()
+    await waitForPlayback(playbackController, title: "One")
+    XCTAssertEqual(playbackController.preparedUpcomingTrack?.title, "Two")
+
+    await controller.refreshStation()
+
+    XCTAssertNil(playbackController.preparedUpcomingTrack)
+    XCTAssertEqual(controller.queue.map(\.track.title), ["Fresh"])
+  }
+
+  private func makeStation(
+    items: [RadioQueueItem],
+    speech: RadioSpeech? = nil,
+    allowsAutoExtension: Bool = true
+  ) -> RadioStation {
     RadioStation(
       id: "station-1",
       title: "Backend Radio",
       subtitle: "Complete backend station.",
       items: items,
-      speech: speech
+      speech: speech,
+      allowsAutoExtension: allowsAutoExtension
     )
   }
 
@@ -907,7 +983,7 @@ final class RadioStationControllerTests: XCTestCase {
       artworkSystemName: "music.note",
       artworkURL: includeArtwork ? URL(string: "https://example.com/\(appleMusicID).jpg") : nil,
       previewURL: includePreview ? URL(string: "https://example.com/\(appleMusicID).m4a") : nil,
-      appleMusicID: appleMusicID
+      appleMusicID: includePreview ? nil : appleMusicID
     )
   }
 
@@ -973,6 +1049,13 @@ private final class MockPlaybackController: RadioPlaybackControlling {
   var lastTrackPolicy: RadioTrackPlaybackPolicy?
   var lastPreservesSpeech = false
   var lastSpeechMode: RadioSpeechPlaybackMode?
+  var preparedUpcomingTrack: Track?
+  var preparedUpcomingPolicy: RadioTrackPlaybackPolicy?
+
+  func prepareUpcomingTrack(_ track: Track?, policy: RadioTrackPlaybackPolicy) {
+    preparedUpcomingTrack = track
+    preparedUpcomingPolicy = policy
+  }
 
   func play(track: Track) {
     play(track: track, policy: .fullSongPreferred, preservesSpeech: false)
