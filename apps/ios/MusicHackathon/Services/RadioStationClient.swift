@@ -45,6 +45,12 @@ protocol PublishedDiscoverStationArchiving {
   func save(_ stations: [PublishedDiscoverStation]) async throws
 }
 
+protocol DiscoverFeedCaching {
+  func load(maxAge: TimeInterval) async throws -> DiscoverFeedPage?
+  func save(_ page: DiscoverFeedPage) async throws
+  func clear() async throws
+}
+
 actor PublishedDiscoverStationArchiveStore: PublishedDiscoverStationArchiving {
   private let fileURL: URL
 
@@ -82,6 +88,70 @@ actor PublishedDiscoverStationArchiveStore: PublishedDiscoverStationArchiving {
   }
 }
 
+private struct DiscoverFeedCacheEnvelope: Codable, Equatable {
+  let savedAt: Date
+  let page: DiscoverFeedPage
+}
+
+actor DiscoverFeedCacheStore: DiscoverFeedCaching {
+  private let fileURL: URL
+  private let now: () -> Date
+
+  init(fileURL: URL? = nil, now: @escaping () -> Date = Date.init) {
+    self.fileURL = fileURL ?? Self.defaultFileURL()
+    self.now = now
+  }
+
+  func load(maxAge: TimeInterval = 7 * 24 * 60 * 60) async throws -> DiscoverFeedPage? {
+    guard FileManager.default.fileExists(atPath: fileURL.path) else {
+      return nil
+    }
+
+    do {
+      let data = try Data(contentsOf: fileURL)
+      let envelope = try JSONDecoder().decode(DiscoverFeedCacheEnvelope.self, from: data)
+      guard now().timeIntervalSince(envelope.savedAt) <= maxAge else {
+        try await clear()
+        return nil
+      }
+      guard !envelope.page.stations.isEmpty else {
+        try await clear()
+        return nil
+      }
+      return envelope.page
+    } catch {
+      try? await clear()
+      return nil
+    }
+  }
+
+  func save(_ page: DiscoverFeedPage) async throws {
+    guard !page.stations.isEmpty else { return }
+    try FileManager.default.createDirectory(
+      at: fileURL.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
+
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    let data = try encoder.encode(DiscoverFeedCacheEnvelope(savedAt: now(), page: page))
+    try data.write(to: fileURL, options: .atomic)
+  }
+
+  func clear() async throws {
+    guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+    try FileManager.default.removeItem(at: fileURL)
+  }
+
+  private static func defaultFileURL() -> URL {
+    let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+      ?? FileManager.default.temporaryDirectory
+    return baseURL
+      .appending(path: "AirsetDiscover", directoryHint: .isDirectory)
+      .appending(path: "discover-feed-cache.json")
+  }
+}
+
 @MainActor
 @Observable
 final class DiscoverStationStore {
@@ -90,6 +160,11 @@ final class DiscoverStationStore {
   var myPublishedStations: [PublishedDiscoverStation] = []
   var nextCursor: String?
   var lastErrorMessage: String?
+  var isRefreshing = false
+  var isLoadingNextPage = false
+  var refreshErrorMessage: String?
+  var paginationErrorMessage: String?
+  var isShowingCachedFeed = false
 
   var locallyRecoveredStations: [DiscoverStation] {
     myPublishedStations
@@ -99,37 +174,76 @@ final class DiscoverStationStore {
 
   @ObservationIgnored private let client: any RadioStationFetching & DiscoverStationServing
   @ObservationIgnored private let publishedArchive: any PublishedDiscoverStationArchiving
+  @ObservationIgnored private let feedCache: any DiscoverFeedCaching
   @ObservationIgnored private var hasLoadedMyPublishedStations = false
-  @ObservationIgnored private var isLoadingNextPage = false
+  @ObservationIgnored private var publishedFeedStations: [PublishedDiscoverStation] = []
 
   init(
     client: any RadioStationFetching & DiscoverStationServing = RadioStationClient(),
-    publishedArchive: any PublishedDiscoverStationArchiving = PublishedDiscoverStationArchiveStore()
+    publishedArchive: any PublishedDiscoverStationArchiving = PublishedDiscoverStationArchiveStore(),
+    feedCache: any DiscoverFeedCaching = DiscoverFeedCacheStore()
   ) {
     self.client = client
     self.publishedArchive = publishedArchive
+    self.feedCache = feedCache
   }
 
   func loadIfNeeded() async {
     await loadMyPublishedStationsIfNeeded()
-    guard stations.isEmpty else { return }
-    await refresh()
+    var loadedCachedFeed = false
+    if stations.isEmpty {
+      loadedCachedFeed = await loadCachedFeedIfAvailable()
+    }
+    if stations.isEmpty || loadedCachedFeed {
+      await refresh()
+    }
   }
 
   func refresh() async {
-    state = .loading
+    isRefreshing = true
+    defer {
+      isRefreshing = false
+    }
+    if stations.isEmpty {
+      state = .loading
+    }
     lastErrorMessage = nil
+    refreshErrorMessage = nil
     await loadMyPublishedStationsIfNeeded()
 
     do {
       let page = try await client.fetchDiscoverStations(cursor: nil, limit: 20)
-      apply(page)
+      if page.stations.isEmpty {
+        let canKeepExistingFeed = !stations.isEmpty
+        let loadedCachedFeed = canKeepExistingFeed ? false : await loadCachedFeedIfAvailable()
+        if canKeepExistingFeed || loadedCachedFeed {
+          refreshErrorMessage = L10n.tr("discover.feed.emptyRemoteUsingCache")
+          lastErrorMessage = refreshErrorMessage
+          state = .loaded
+          return
+        }
+        apply(page, isCached: false)
+        return
+      }
+      apply(page, isCached: false)
+      if !page.stations.isEmpty {
+        try? await feedCache.save(page)
+      }
     } catch is CancellationError {
       return
     } catch {
       let message = Self.errorMessage(for: error)
-      state = stations.isEmpty ? .failed(message) : .loaded
+      if stations.isEmpty {
+        if await loadCachedFeedIfAvailable() {
+          state = .loaded
+        } else {
+          state = .failed(message)
+        }
+      } else {
+        state = .loaded
+      }
       lastErrorMessage = message
+      refreshErrorMessage = message
       if stations.isEmpty {
         nextCursor = nil
       }
@@ -152,10 +266,15 @@ final class DiscoverStationStore {
     do {
       let page = try await client.fetchDiscoverStations(cursor: nextCursor, limit: 20)
       append(page)
+      if !publishedFeedStations.isEmpty {
+        try? await feedCache.save(DiscoverFeedPage(stations: publishedFeedStations, nextCursor: self.nextCursor))
+      }
     } catch is CancellationError {
       return
     } catch {
-      lastErrorMessage = Self.errorMessage(for: error)
+      let message = Self.errorMessage(for: error)
+      lastErrorMessage = message
+      paginationErrorMessage = message
     }
   }
 
@@ -208,7 +327,7 @@ final class DiscoverStationStore {
     }
   }
 
-  func publish(_ draft: DiscoverStationPublicationDraft) async throws -> DiscoverStation {
+  func publishStation(_ draft: DiscoverStationPublicationDraft) async throws -> PublishedDiscoverStation {
     let publishedStation = try await client.publishDiscoverStation(draft)
     await rememberMyPublishedStation(publishedStation)
 
@@ -216,8 +335,31 @@ final class DiscoverStationStore {
     if publishedStation.visibility == .public {
       stations.removeAll { $0.id == discoverStation.id }
       stations.insert(discoverStation, at: 0)
+      publishedFeedStations.removeAll { $0.stationID == publishedStation.stationID }
+      publishedFeedStations.insert(publishedStation, at: 0)
       state = stations.isEmpty ? .empty : .loaded
+      isShowingCachedFeed = false
+      try? await feedCache.save(DiscoverFeedPage(stations: publishedFeedStations, nextCursor: nextCursor))
     }
+    return publishedStation
+  }
+
+  func publish(_ draft: DiscoverStationPublicationDraft) async throws -> DiscoverStation {
+    try await publishStation(draft).discoverStation()
+  }
+
+  func loadSharedStation(id: String) async throws -> DiscoverStation {
+    let publishedStation = try await client.fetchPublishedStation(id: id)
+    let discoverStation = publishedStation.discoverStation()
+    publishedFeedStations.removeAll { $0.stationID == publishedStation.stationID }
+    publishedFeedStations.insert(publishedStation, at: 0)
+    stations.removeAll { $0.id == discoverStation.id }
+    stations.insert(discoverStation, at: 0)
+    state = .loaded
+    isShowingCachedFeed = false
+    refreshErrorMessage = nil
+    paginationErrorMessage = nil
+    try? await feedCache.save(DiscoverFeedPage(stations: publishedFeedStations, nextCursor: nextCursor))
     return discoverStation
   }
 
@@ -233,13 +375,35 @@ final class DiscoverStationStore {
     }
   }
 
-  private func apply(_ page: DiscoverFeedPage) {
+  @discardableResult
+  private func loadCachedFeedIfAvailable() async -> Bool {
+    do {
+      guard let cachedPage = try await feedCache.load(maxAge: 7 * 24 * 60 * 60) else {
+        return false
+      }
+      apply(cachedPage, isCached: true)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private func apply(_ page: DiscoverFeedPage, isCached: Bool) {
+    publishedFeedStations = page.stations
     stations = page.stations.map { $0.discoverStation() }
     nextCursor = page.nextCursor
     state = stations.isEmpty ? .empty : .loaded
+    isShowingCachedFeed = isCached
+    paginationErrorMessage = nil
   }
 
   private func append(_ page: DiscoverFeedPage) {
+    var seenPublishedIDs = Set(publishedFeedStations.map(\.stationID))
+    for station in page.stations where !seenPublishedIDs.contains(station.stationID) {
+      publishedFeedStations.append(station)
+      seenPublishedIDs.insert(station.stationID)
+    }
+
     let incomingStations = page.stations.map { $0.discoverStation() }
     var seenStationIDs = Set(stations.map(\.id))
     for station in incomingStations where !seenStationIDs.contains(station.id) {
@@ -248,6 +412,8 @@ final class DiscoverStationStore {
     }
     nextCursor = page.nextCursor
     state = stations.isEmpty ? .empty : .loaded
+    isShowingCachedFeed = false
+    paginationErrorMessage = nil
   }
 
   private func rememberMyPublishedStation(_ station: PublishedDiscoverStation) async {
@@ -277,6 +443,7 @@ final class DiscoverStationStore {
       visibility: visibility,
       ownerID: ownerID,
       ownerDisplayName: ownerDisplayName,
+      clientPublicationID: "ios-\(UUID().uuidString.lowercased())",
       seedTracks: seedTracks,
       station: station,
       coverArtworkURL: seedTracks.first?.artworkURL ?? station.items.first?.track.artworkURL,
@@ -343,6 +510,36 @@ enum DiscoverPublisherIdentity {
   static func displayName(defaults: UserDefaults = .standard) -> String {
     defaults.string(forKey: nicknameKey)?.trimmedNilIfEmpty
       ?? L10n.tr("discover.publish.defaultOwnerName")
+  }
+}
+
+enum SharedStationLinkParser {
+  static func stationID(from url: URL) -> String? {
+    if url.scheme?.lowercased() == "airset" {
+      if url.host?.lowercased() == "stations" {
+        return cleanStationID(url.pathComponents.dropFirst().first)
+      }
+      return stationIDFromPathComponents(url.pathComponents)
+    }
+
+    if let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) {
+      return stationIDFromPathComponents(url.pathComponents)
+    }
+
+    return nil
+  }
+
+  private static func stationIDFromPathComponents(_ components: [String]) -> String? {
+    let cleanedComponents = components.filter { $0 != "/" }
+    guard let stationsIndex = cleanedComponents.firstIndex(where: { $0.lowercased() == "stations" }),
+          cleanedComponents.indices.contains(stationsIndex + 1) else {
+      return nil
+    }
+    return cleanStationID(cleanedComponents[stationsIndex + 1])
+  }
+
+  private static func cleanStationID(_ value: String?) -> String? {
+    value?.removingPercentEncoding?.trimmedNilIfEmpty
   }
 }
 
@@ -1114,6 +1311,7 @@ private struct PublishedDiscoverStationPayload: Decodable {
   let visibility: RadioStationVisibility
   let ownerID: String
   let ownerDisplayName: String
+  let clientPublicationID: String?
   let publishedAt: String
   let shareURL: URL
   let seedTracks: [RadioTrackPayload]
@@ -1134,6 +1332,8 @@ private struct PublishedDiscoverStationPayload: Decodable {
     case ownerID
     case ownerId
     case ownerDisplayName
+    case clientPublicationID
+    case clientPublicationId
     case publishedAt
     case shareURL
     case shareUrl
@@ -1161,6 +1361,8 @@ private struct PublishedDiscoverStationPayload: Decodable {
       ?? "anonymous"
     ownerDisplayName = try container.decodeIfPresent(String.self, forKey: .ownerDisplayName)
       ?? L10n.tr("discover.publish.defaultOwnerName")
+    clientPublicationID = try container.decodeIfPresent(String.self, forKey: .clientPublicationID)
+      ?? container.decodeIfPresent(String.self, forKey: .clientPublicationId)
     publishedAt = try container.decodeIfPresent(String.self, forKey: .publishedAt) ?? ""
     shareURL = try container.decodeIfPresent(URL.self, forKey: .shareURL)
       ?? container.decodeIfPresent(URL.self, forKey: .shareUrl)
@@ -1188,6 +1390,7 @@ private struct PublishedDiscoverStationPayload: Decodable {
       visibility: visibility,
       ownerID: ownerID,
       ownerDisplayName: ownerDisplayName,
+      clientPublicationID: clientPublicationID,
       publishedAt: publishedAt,
       shareURL: shareURL,
       seedTracks: seedTracks.map { $0.track() },
@@ -1207,6 +1410,7 @@ private struct DiscoverStationPublishPayload: Encodable {
   let visibility: RadioStationVisibility
   let ownerID: String
   let ownerDisplayName: String
+  let clientPublicationID: String
   let seedTracks: [RadioTrackPayload]
   let items: [RadioStationItemPublishPayload]
   let speech: RadioSpeech?
@@ -1220,6 +1424,7 @@ private struct DiscoverStationPublishPayload: Encodable {
     visibility = draft.visibility
     ownerID = draft.ownerID
     ownerDisplayName = draft.ownerDisplayName
+    clientPublicationID = draft.clientPublicationID
     seedTracks = draft.seedTracks.map {
       RadioTrackPayload(track: $0, playlistName: $0.playlistName, source: $0.source, sourceLane: $0.sourceLane)
     }

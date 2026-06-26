@@ -514,6 +514,7 @@ final class RadioStationClientTests: XCTestCase {
       XCTAssertEqual(body?["title"] as? String, "Draft Radio")
       XCTAssertEqual(body?["visibility"] as? String, "public")
       XCTAssertEqual(body?["ownerID"] as? String, "owner-1")
+      XCTAssertEqual(body?["clientPublicationID"] as? String, "client-pub-1")
       XCTAssertEqual((body?["seedTracks"] as? [[String: Any]])?.count, 5)
       XCTAssertEqual((body?["items"] as? [[String: Any]])?.count, 5)
       XCTAssertEqual((body?["seedTracks"] as? [[String: Any]])?.first?["appleMusicID"] as? String, "seed-1")
@@ -532,6 +533,7 @@ final class RadioStationClientTests: XCTestCase {
         "visibility": "public",
         "ownerID": "owner-1",
         "ownerDisplayName": "Publisher",
+        "clientPublicationID": "client-pub-1",
         "publishedAt": "2026-06-25T01:00:00.000Z",
         "shareURL": "https://share.test/stations/station-1",
         "seedTracks": [
@@ -568,8 +570,52 @@ final class RadioStationClientTests: XCTestCase {
 
     XCTAssertEqual(station.stationID, "station-1")
     XCTAssertEqual(station.visibility, .public)
+    XCTAssertEqual(station.clientPublicationID, "client-pub-1")
     XCTAssertEqual(station.shareURL.absoluteString, "https://share.test/stations/station-1")
     XCTAssertEqual(station.items.first?.track.title, "Seed 1")
+  }
+
+  @MainActor
+  func testDiscoverStationStoreUsesCachedFeedWhenRefreshFails() async throws {
+    let cached = makePublishedStation(stationID: "station-cached")
+    let feedCache = InMemoryDiscoverFeedCache(page: DiscoverFeedPage(stations: [cached], nextCursor: "cursor-cache"))
+    let store = DiscoverStationStore(
+      client: FakeDiscoverStationService(
+        publishResponses: [],
+        fetchResponses: [.failure(URLError(.timedOut))]
+      ),
+      publishedArchive: InMemoryPublishedStationArchive(),
+      feedCache: feedCache
+    )
+
+    await store.loadIfNeeded()
+
+    XCTAssertEqual(store.stations.map(\.id), ["station-cached"])
+    XCTAssertEqual(store.nextCursor, "cursor-cache")
+    XCTAssertEqual(store.state, .loaded)
+    XCTAssertTrue(store.isShowingCachedFeed)
+    XCTAssertEqual(store.refreshErrorMessage, URLError(.timedOut).localizedDescription)
+  }
+
+  @MainActor
+  func testDiscoverStationStoreKeepsCachedFeedWhenRemoteReturnsEmpty() async throws {
+    let cached = makePublishedStation(stationID: "station-cached")
+    let feedCache = InMemoryDiscoverFeedCache(page: DiscoverFeedPage(stations: [cached], nextCursor: nil))
+    let store = DiscoverStationStore(
+      client: FakeDiscoverStationService(
+        publishResponses: [],
+        fetchResponses: [.success(DiscoverFeedPage(stations: [], nextCursor: nil))]
+      ),
+      publishedArchive: InMemoryPublishedStationArchive(),
+      feedCache: feedCache
+    )
+
+    await store.loadIfNeeded()
+
+    XCTAssertEqual(store.stations.map(\.id), ["station-cached"])
+    XCTAssertEqual(store.state, .loaded)
+    XCTAssertTrue(store.isShowingCachedFeed)
+    XCTAssertEqual(store.refreshErrorMessage, L10n.tr("discover.feed.emptyRemoteUsingCache"))
   }
 
   @MainActor
@@ -578,7 +624,8 @@ final class RadioStationClientTests: XCTestCase {
     let archive = InMemoryPublishedStationArchive()
     let store = DiscoverStationStore(
       client: FakeDiscoverStationService(publishResponses: [published]),
-      publishedArchive: archive
+      publishedArchive: archive,
+      feedCache: InMemoryDiscoverFeedCache()
     )
 
     let station = try await store.publish(makePublicationDraft())
@@ -598,7 +645,8 @@ final class RadioStationClientTests: XCTestCase {
     let archive = InMemoryPublishedStationArchive(stations: [other, existing])
     let store = DiscoverStationStore(
       client: FakeDiscoverStationService(publishResponses: [updated]),
-      publishedArchive: archive
+      publishedArchive: archive,
+      feedCache: InMemoryDiscoverFeedCache()
     )
 
     _ = try await store.publish(makePublicationDraft())
@@ -616,7 +664,8 @@ final class RadioStationClientTests: XCTestCase {
       let archive = InMemoryPublishedStationArchive()
       let store = DiscoverStationStore(
         client: FakeDiscoverStationService(publishResponses: [published]),
-        publishedArchive: archive
+        publishedArchive: archive,
+        feedCache: InMemoryDiscoverFeedCache()
       )
 
       _ = try await store.publish(makePublicationDraft(visibility: visibility))
@@ -629,7 +678,7 @@ final class RadioStationClientTests: XCTestCase {
   }
 
   @MainActor
-  func testDiscoverStationStoreExposesLocalPublicArchiveWhenRemoteFeedIsEmpty() async throws {
+  func testDiscoverStationStoreKeepsLocalPublicArchiveSeparateWhenRemoteFeedIsEmpty() async throws {
     let publicStation = makePublishedStation(stationID: "station-public", visibility: .public)
     let privateStation = makePublishedStation(stationID: "station-private", visibility: .private)
     let archive = InMemoryPublishedStationArchive(stations: [privateStation, publicStation])
@@ -638,7 +687,8 @@ final class RadioStationClientTests: XCTestCase {
         publishResponses: [],
         fetchResponses: [.success(DiscoverFeedPage(stations: [], nextCursor: nil))]
       ),
-      publishedArchive: archive
+      publishedArchive: archive,
+      feedCache: InMemoryDiscoverFeedCache()
     )
 
     await store.loadIfNeeded()
@@ -659,7 +709,8 @@ final class RadioStationClientTests: XCTestCase {
           .failure(URLError(.timedOut))
         ]
       ),
-      publishedArchive: InMemoryPublishedStationArchive()
+      publishedArchive: InMemoryPublishedStationArchive(),
+      feedCache: InMemoryDiscoverFeedCache()
     )
 
     await store.refresh()
@@ -682,7 +733,8 @@ final class RadioStationClientTests: XCTestCase {
           .success(DiscoverFeedPage(stations: [firstStation, secondStation], nextCursor: nil))
         ]
       ),
-      publishedArchive: InMemoryPublishedStationArchive()
+      publishedArchive: InMemoryPublishedStationArchive(),
+      feedCache: InMemoryDiscoverFeedCache()
     )
 
     await store.refresh()
@@ -690,6 +742,98 @@ final class RadioStationClientTests: XCTestCase {
 
     XCTAssertEqual(store.stations.map(\.id), ["station-1", "station-2"])
     XCTAssertNil(store.nextCursor)
+  }
+
+  @MainActor
+  func testDiscoverStationStoreExposesPaginationFailureForRetry() async throws {
+    let firstStation = makePublishedStation(stationID: "station-1")
+    let store = DiscoverStationStore(
+      client: FakeDiscoverStationService(
+        publishResponses: [],
+        fetchResponses: [
+          .success(DiscoverFeedPage(stations: [firstStation], nextCursor: "cursor-2")),
+          .failure(URLError(.networkConnectionLost))
+        ]
+      ),
+      publishedArchive: InMemoryPublishedStationArchive(),
+      feedCache: InMemoryDiscoverFeedCache()
+    )
+
+    await store.refresh()
+    await store.loadNextPageIfNeeded(currentIndex: 0)
+
+    XCTAssertEqual(store.stations.map(\.id), ["station-1"])
+    XCTAssertEqual(store.paginationErrorMessage, URLError(.networkConnectionLost).localizedDescription)
+  }
+
+  @MainActor
+  func testDiscoverStationStoreLoadsSharedStationWithoutAutoPublishArchive() async throws {
+    let shared = makePublishedStation(stationID: "station-shared")
+    let store = DiscoverStationStore(
+      client: FakeDiscoverStationService(publishResponses: [shared]),
+      publishedArchive: InMemoryPublishedStationArchive(),
+      feedCache: InMemoryDiscoverFeedCache()
+    )
+
+    let station = try await store.loadSharedStation(id: "station-shared")
+
+    XCTAssertEqual(station.id, "station-shared")
+    XCTAssertEqual(store.stations.map(\.id), ["station-shared"])
+    XCTAssertTrue(store.myPublishedStations.isEmpty)
+    XCTAssertFalse(store.isShowingCachedFeed)
+  }
+
+  func testDiscoverFeedCacheStoreRoundTripsAndExpires() async throws {
+    let directoryURL = FileManager.default.temporaryDirectory
+      .appending(path: "airset-feed-cache-\(UUID().uuidString)", directoryHint: .isDirectory)
+    let fileURL = directoryURL.appending(path: "discover-feed-cache.json")
+    var now = Date(timeIntervalSince1970: 1_790_000_000)
+    let cache = DiscoverFeedCacheStore(fileURL: fileURL, now: { now })
+    let page = DiscoverFeedPage(stations: [makePublishedStation(stationID: "station-1")], nextCursor: "cursor-1")
+    defer {
+      try? FileManager.default.removeItem(at: directoryURL)
+    }
+
+    try await cache.save(page)
+    let loadedPage = try await cache.load(maxAge: 7 * 24 * 60 * 60)
+    now = now.addingTimeInterval(8 * 24 * 60 * 60)
+    let expiredPage = try await cache.load(maxAge: 7 * 24 * 60 * 60)
+
+    XCTAssertEqual(loadedPage?.stations.map(\.stationID), ["station-1"])
+    XCTAssertEqual(loadedPage?.nextCursor, "cursor-1")
+    XCTAssertNil(expiredPage)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+  }
+
+  func testDiscoverFeedCacheStoreClearsDamagedJSON() async throws {
+    let directoryURL = FileManager.default.temporaryDirectory
+      .appending(path: "airset-feed-cache-\(UUID().uuidString)", directoryHint: .isDirectory)
+    let fileURL = directoryURL.appending(path: "discover-feed-cache.json")
+    let cache = DiscoverFeedCacheStore(fileURL: fileURL)
+    defer {
+      try? FileManager.default.removeItem(at: directoryURL)
+    }
+    try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+    try Data("{".utf8).write(to: fileURL)
+
+    let loadedPage = try await cache.load(maxAge: 7 * 24 * 60 * 60)
+
+    XCTAssertNil(loadedPage)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+  }
+
+  func testSharedStationLinkParserRecognizesAppAndWebLinks() throws {
+    XCTAssertEqual(
+      SharedStationLinkParser.stationID(from: URL(string: "airset://stations/station-1")!),
+      "station-1"
+    )
+    XCTAssertEqual(
+      SharedStationLinkParser.stationID(from: URL(string: "https://music.1pitaph.com/stations/station-2")!),
+      "station-2"
+    )
+    XCTAssertNil(
+      SharedStationLinkParser.stationID(from: URL(string: "https://music.1pitaph.com/not-stations/station-3")!)
+    )
   }
 
   func testPublishedStationArchiveStoreRoundTripsStations() async throws {
@@ -958,6 +1102,7 @@ final class RadioStationClientTests: XCTestCase {
       visibility: visibility,
       ownerID: "owner-1",
       ownerDisplayName: "Publisher",
+      clientPublicationID: "client-pub-1",
       seedTracks: seedTracks,
       station: station,
       coverArtworkURL: URL(string: "https://example.com/cover.jpg"),
@@ -981,6 +1126,7 @@ final class RadioStationClientTests: XCTestCase {
       visibility: visibility,
       ownerID: "owner-1",
       ownerDisplayName: "Publisher",
+      clientPublicationID: "client-pub-1",
       publishedAt: publishedAt,
       shareURL: URL(string: "https://share.test/stations/\(stationID)")!,
       seedTracks: [track],
@@ -1157,6 +1303,26 @@ private actor InMemoryPublishedStationArchive: PublishedDiscoverStationArchiving
 
   func snapshot() async -> [PublishedDiscoverStation] {
     stations
+  }
+}
+
+private actor InMemoryDiscoverFeedCache: DiscoverFeedCaching {
+  private var page: DiscoverFeedPage?
+
+  init(page: DiscoverFeedPage? = nil) {
+    self.page = page
+  }
+
+  func load(maxAge: TimeInterval) async throws -> DiscoverFeedPage? {
+    page
+  }
+
+  func save(_ page: DiscoverFeedPage) async throws {
+    self.page = page
+  }
+
+  func clear() async throws {
+    page = nil
   }
 }
 

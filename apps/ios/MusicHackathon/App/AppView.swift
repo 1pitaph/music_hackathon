@@ -6,6 +6,7 @@ struct AppView: View {
   @Environment(RadioStationController.self) private var radioStation
   @Environment(MusicAuthorizationService.self) private var musicAuthorization
   @Environment(AppleMusicLibraryStore.self) private var appleMusicLibrary
+  @Environment(DiscoverStationStore.self) private var discoverStationStore
   @Environment(\.scenePhase) private var scenePhase
 
   @AppStorage(RadioPlaybackSettings.backgroundPlayKey) private var backgroundPlay = RadioPlaybackSettings.defaultBackgroundPlay
@@ -49,6 +50,9 @@ struct AppView: View {
         @unknown default:
           break
         }
+      }
+      .onOpenURL { url in
+        handleSharedStationURL(url)
       }
   }
 
@@ -149,6 +153,22 @@ struct AppView: View {
 
   private var miniPlayerArtworkResolution: ArtworkResolution {
     ArtworkResolution(remoteURLs: miniPlayerArtworkURLs)
+  }
+
+  private func handleSharedStationURL(_ url: URL) {
+    guard let stationID = SharedStationLinkParser.stationID(from: url) else {
+      return
+    }
+
+    selectedTab = .discover
+    Task {
+      do {
+        let station = try await discoverStationStore.loadSharedStation(id: stationID)
+        await radioStation.loadLocalStation(station.radioStation(), playImmediately: false)
+      } catch {
+        await discoverStationStore.refresh()
+      }
+    }
   }
 }
 

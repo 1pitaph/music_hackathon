@@ -215,6 +215,11 @@
 "discover.feed.empty.message" = "Published public stations will appear here as soon as the feed has them.";
 "discover.feed.failed.title" = "Feed unavailable";
 "discover.feed.localRecovery" = "Showing public stations saved on this device while the feed catches up.";
+"discover.feed.cached" = "Showing the last successful public feed while Airset refreshes.";
+"discover.feed.emptyRemoteUsingCache" = "The live feed returned empty, so Airset kept the last successful feed.";
+"discover.feed.refreshFailed" = "Refresh failed. Showing the current feed. %@";
+"discover.feed.loadingMore" = "Loading more published stations.";
+"discover.feed.paginationFailed" = "Could not load more stations. %@";
 "discover.publish.accessibilityLabel" = "Publish station";
 "discover.publish.title" = "Publish Station";
 "discover.publish.selectionTitle" = "Choose 5 songs";
@@ -230,6 +235,13 @@
 "discover.publish.publishAndShare" = "Publish";
 "discover.publish.successTitle" = "Station published";
 "discover.publish.shareNow" = "Share now";
+"discover.publish.copyLink" = "Copy link";
+"discover.publish.linkCopied" = "Link copied";
+"discover.publish.viewInDiscover" = "View in Discover";
+"discover.publish.success.public" = "This station is public and appears in Discover.";
+"discover.publish.success.unlisted" = "Only people with the link can open this station.";
+"discover.publish.success.private" = "This station is saved privately on the server and is not shareable.";
+"discover.publish.uploadNotice" = "Publishing uploads song titles, artists, Apple Music IDs, artwork and preview URLs, and AI station copy. Audio files are not uploaded.";
 "discover.publish.defaultOwnerName" = "Mine Radio";
 "discover.publish.fallbackTitle" = "%@'s 5-song station";
 "discover.publish.fallbackSubtitle" = "Starting from %@";

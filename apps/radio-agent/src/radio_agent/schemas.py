@@ -231,6 +231,7 @@ class DiscoverStationPublishRequest(BaseModel):
   visibility: Literal["public", "unlisted", "private"] = "public"
   ownerID: str = Field(default="anonymous", min_length=1, max_length=128)
   ownerDisplayName: str = Field(default="Airset listener", min_length=1, max_length=80)
+  clientPublicationID: str | None = Field(default=None, max_length=128)
   seedTracks: list[RadioTrack] = Field(min_length=5, max_length=5)
   items: list[RadioStationItem] = Field(min_length=1, max_length=40)
   speech: RadioSpeech | None = None
@@ -246,6 +247,7 @@ class DiscoverStationResponse(BaseModel):
   visibility: Literal["public", "unlisted", "private"]
   ownerID: str
   ownerDisplayName: str
+  clientPublicationID: str | None = None
   publishedAt: str
   shareURL: str
   seedTracks: list[RadioTrack]
@@ -266,6 +268,10 @@ class DiscoverStorageStatus(BaseModel):
   dbExists: bool
   directoryExists: bool
   directoryWritable: bool
+  dbSizeBytes: int = 0
+  sqliteIntegrityCheck: str = "unknown"
+  schemaVersion: int = 0
+  warnings: list[str] = Field(default_factory=list)
   totalStations: int = 0
   publicStations: int = 0
   unlistedStations: int = 0

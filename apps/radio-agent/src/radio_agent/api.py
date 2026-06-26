@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime, timezone
+from html import escape
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,7 @@ import uuid
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 
 from radio_agent.graph import compress_radio_memory, generate_radio
 from radio_agent.schemas import (
@@ -47,6 +48,8 @@ from radio_agent.speech import (
 )
 
 app = FastAPI(title="Airset Radio Agent", version="0.1.0")
+
+DISCOVER_SCHEMA_VERSION = 1
 
 CURRENT_STATION = {
   "stationID": "airset-live",
@@ -168,8 +171,14 @@ def generate_station(request: RadioStationGenerateRequest) -> RadioStationGenera
 @app.post("/v1/discover/stations", response_model=DiscoverStationResponse)
 def publish_discover_station(request: DiscoverStationPublishRequest) -> DiscoverStationResponse:
   _validate_publish_request(request)
+  owner_id = request.ownerID.strip()
+  client_publication_id = _trimmed_or_none(request.clientPublicationID)
+  if client_publication_id:
+    existing_station = _load_discover_station_by_client_publication(owner_id, client_publication_id)
+    if existing_station is not None:
+      return existing_station
+
   station_id = f"station-{uuid.uuid4().hex[:12]}"
-  share_url = f"{_discover_public_base_url()}/stations/{station_id}"
   published_at = _timestamp_now()
   response = DiscoverStationResponse(
     stationID=station_id,
@@ -177,17 +186,25 @@ def publish_discover_station(request: DiscoverStationPublishRequest) -> Discover
     subtitle=request.subtitle.strip(),
     description=(request.description or request.subtitle or "").strip(),
     visibility=request.visibility,
-    ownerID=request.ownerID.strip(),
+    ownerID=owner_id,
     ownerDisplayName=request.ownerDisplayName.strip(),
+    clientPublicationID=client_publication_id,
     publishedAt=published_at,
-    shareURL=share_url,
+    shareURL=_discover_share_url(station_id),
     seedTracks=request.seedTracks,
     items=request.items,
     speech=request.speech,
     coverArtworkURL=_trimmed_or_none(request.coverArtworkURL) or _first_artwork_url(request),
     colorHex=_trimmed_or_none(request.colorHex) or "#D8633C",
   )
-  _save_discover_station(response)
+  try:
+    _save_discover_station(response)
+  except sqlite3.IntegrityError:
+    if client_publication_id:
+      existing_station = _load_discover_station_by_client_publication(owner_id, client_publication_id)
+      if existing_station is not None:
+        return existing_station
+    raise
   return response
 
 
@@ -207,6 +224,15 @@ def station_by_id(station_id: str) -> DiscoverStationResponse:
   if station is None or station.visibility == "private":
     raise HTTPException(status_code=404, detail="Station not found.")
   return station
+
+
+@app.get("/stations/{station_id}", response_class=HTMLResponse)
+def shared_station_page(station_id: str) -> HTMLResponse:
+  station = _load_discover_station(station_id)
+  if station is None or station.visibility == "private":
+    raise HTTPException(status_code=404, detail="Station not found.")
+
+  return HTMLResponse(_shared_station_html(station))
 
 
 @app.post("/v1/radio/generate", response_model=RadioGenerateResponse)
@@ -321,17 +347,19 @@ def _save_discover_station(station: DiscoverStationResponse) -> None:
         visibility,
         owner_id,
         owner_display_name,
+        client_publication_id,
         published_at,
         share_url,
         payload_json
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       """,
       (
         station.stationID,
         station.visibility,
         station.ownerID,
         station.ownerDisplayName,
+        station.clientPublicationID,
         station.publishedAt,
         station.shareURL,
         json.dumps(station.model_dump(mode="json"), ensure_ascii=False),
@@ -358,6 +386,28 @@ def _load_discover_station(station_id: str) -> DiscoverStationResponse | None:
   return _station_from_payload_json(row["payload_json"])
 
 
+def _load_discover_station_by_client_publication(
+  owner_id: str,
+  client_publication_id: str,
+) -> DiscoverStationResponse | None:
+  connection = _discover_db_connection()
+  try:
+    _ensure_discover_schema(connection)
+    row = connection.execute(
+      """
+      SELECT payload_json FROM discover_stations
+      WHERE owner_id = ? AND client_publication_id = ?
+      """,
+      (owner_id, client_publication_id),
+    ).fetchone()
+  finally:
+    connection.close()
+
+  if row is None:
+    return None
+  return _station_from_payload_json(row["payload_json"])
+
+
 def _discover_storage_status() -> DiscoverStorageStatus:
   db_path = _discover_db_path()
   is_memory = db_path == ":memory:"
@@ -366,6 +416,10 @@ def _discover_storage_status() -> DiscoverStorageStatus:
   directory = None if db_file is None else db_file.parent
   directory_exists = is_memory or bool(directory and directory.exists())
   directory_writable = is_memory or bool(directory and directory.exists() and os.access(directory, os.W_OK))
+  db_size_bytes = 0 if db_file is None or not db_exists else db_file.stat().st_size
+  sqlite_integrity_check = "not_checked"
+  schema_version = 0
+  warnings: list[str] = []
 
   counts = {
     "totalStations": 0,
@@ -378,6 +432,8 @@ def _discover_storage_status() -> DiscoverStorageStatus:
     connection = _discover_db_connection()
     try:
       _ensure_discover_schema(connection)
+      sqlite_integrity_check = str(connection.execute("PRAGMA integrity_check").fetchone()[0])
+      schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
       row = connection.execute(
         """
         SELECT
@@ -400,19 +456,39 @@ def _discover_storage_status() -> DiscoverStorageStatus:
         "privateStations": int(row["private_stations"] or 0),
         "latestPublishedAt": row["latest_published_at"],
       }
+  else:
+    warnings.append("Discover database file does not exist yet.")
+
+  if not directory_exists:
+    warnings.append("Discover database directory does not exist.")
+  elif not directory_writable:
+    warnings.append("Discover database directory is not writable.")
+
+  if is_memory:
+    warnings.append("Discover database is in-memory; published stations will not persist.")
+  elif db_path.startswith("/data/"):
+    warnings.append("Verify Railway has a persistent volume mounted at /data; this endpoint cannot prove persistence.")
+
+  if sqlite_integrity_check not in {"ok", "not_checked"}:
+    warnings.append(f"SQLite integrity check reported: {sqlite_integrity_check}")
 
   return DiscoverStorageStatus(
     dbPath=db_path,
     dbExists=db_exists,
     directoryExists=directory_exists,
     directoryWritable=directory_writable,
+    dbSizeBytes=db_size_bytes,
+    sqliteIntegrityCheck=sqlite_integrity_check,
+    schemaVersion=schema_version,
+    warnings=warnings,
     **counts,
   )
 
 
 def _station_from_payload_json(payload_json: str) -> DiscoverStationResponse:
   payload: dict[str, Any] = json.loads(payload_json)
-  return DiscoverStationResponse.model_validate(payload)
+  station = DiscoverStationResponse.model_validate(payload)
+  return _station_with_current_share_url(station)
 
 
 def _discover_db_connection() -> sqlite3.Connection:
@@ -436,6 +512,7 @@ def _ensure_discover_schema(connection: sqlite3.Connection) -> None:
       visibility TEXT NOT NULL,
       owner_id TEXT NOT NULL,
       owner_display_name TEXT NOT NULL,
+      client_publication_id TEXT,
       published_at TEXT NOT NULL,
       share_url TEXT NOT NULL,
       payload_json TEXT NOT NULL
@@ -448,6 +525,17 @@ def _ensure_discover_schema(connection: sqlite3.Connection) -> None:
     ON discover_stations (visibility, published_at DESC, station_id DESC)
     """
   )
+  columns = {row["name"] for row in connection.execute("PRAGMA table_info(discover_stations)").fetchall()}
+  if "client_publication_id" not in columns:
+    connection.execute("ALTER TABLE discover_stations ADD COLUMN client_publication_id TEXT")
+  connection.execute(
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_discover_owner_client_publication
+    ON discover_stations (owner_id, client_publication_id)
+    WHERE client_publication_id IS NOT NULL
+    """
+  )
+  connection.execute(f"PRAGMA user_version = {DISCOVER_SCHEMA_VERSION}")
   connection.commit()
 
 
@@ -458,6 +546,127 @@ def _discover_public_base_url() -> str:
     or "https://airset.example"
   )
   return raw_value.rstrip("/")
+
+
+def _discover_share_url(station_id: str) -> str:
+  return f"{_discover_public_base_url()}/stations/{station_id}"
+
+
+def _station_with_current_share_url(station: DiscoverStationResponse) -> DiscoverStationResponse:
+  return station.model_copy(update={"shareURL": _discover_share_url(station.stationID)})
+
+
+def _shared_station_html(station: DiscoverStationResponse) -> str:
+  deep_link = f"airset://stations/{station.stationID}"
+  artwork_url = station.coverArtworkURL or _first_artwork_url_from_station(station) or ""
+  artwork_html = ""
+  if artwork_url:
+    artwork_html = f'<img class="cover" src="{escape(artwork_url, quote=True)}" alt="">'
+
+  track_items = "\n".join(
+    f"<li><strong>{escape(item.title)}</strong><span>{escape(item.artist)}</span></li>"
+    for item in station.items[:5]
+  )
+  return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escape(station.title)} - Airset</title>
+  <style>
+    :root {{
+      color-scheme: dark;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+      background: #151311;
+      color: #fff;
+    }}
+    body {{
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      box-sizing: border-box;
+      background:
+        radial-gradient(circle at 20% 10%, rgba(123, 207, 166, 0.16), transparent 34%),
+        linear-gradient(150deg, #151311, #24211e 62%, #151311);
+    }}
+    main {{
+      width: min(480px, 100%);
+      display: grid;
+      gap: 18px;
+    }}
+    .cover {{
+      width: 100%;
+      aspect-ratio: 1;
+      object-fit: cover;
+      border-radius: 16px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
+    }}
+    h1 {{
+      margin: 0;
+      font-size: clamp(32px, 8vw, 56px);
+      line-height: 0.95;
+      letter-spacing: 0;
+    }}
+    p {{
+      margin: 0;
+      color: rgba(255, 255, 255, 0.68);
+      line-height: 1.5;
+      font-size: 16px;
+    }}
+    ol {{
+      margin: 0;
+      padding: 14px 16px 14px 34px;
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(255, 255, 255, 0.11);
+      border-radius: 12px;
+    }}
+    li {{
+      padding: 6px 0;
+    }}
+    li span {{
+      display: block;
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 13px;
+      margin-top: 2px;
+    }}
+    a.button {{
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 50px;
+      border-radius: 12px;
+      text-decoration: none;
+      color: rgba(0, 0, 0, 0.86);
+      background: #7bcfa6;
+      font-weight: 800;
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    {artwork_html}
+    <section>
+      <p>Airset shared station by {escape(station.ownerDisplayName)}</p>
+      <h1>{escape(station.title)}</h1>
+      <p>{escape(station.description or station.subtitle)}</p>
+    </section>
+    <ol>{track_items}</ol>
+    <a class="button" href="{escape(deep_link, quote=True)}">Open in Airset</a>
+  </main>
+</body>
+</html>"""
+
+
+def _first_artwork_url_from_station(station: DiscoverStationResponse) -> str | None:
+  for item in station.items:
+    if _trimmed_or_none(item.artworkURL):
+      return item.artworkURL
+  for track in station.seedTracks:
+    if _trimmed_or_none(track.artworkURL):
+      return track.artworkURL
+  return None
 
 
 def _timestamp_now() -> str:

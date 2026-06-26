@@ -372,7 +372,7 @@ enum RadioStationVisibility: String, Codable, CaseIterable, Identifiable {
   }
 }
 
-struct DiscoverFeedPage: Equatable {
+struct DiscoverFeedPage: Equatable, Codable {
   var stations: [PublishedDiscoverStation]
   var nextCursor: String?
 }
@@ -384,6 +384,7 @@ struct DiscoverStationPublicationDraft: Equatable {
   var visibility: RadioStationVisibility
   var ownerID: String
   var ownerDisplayName: String
+  var clientPublicationID: String
   var seedTracks: [Track]
   var station: RadioStation
   var coverArtworkURL: URL?
@@ -399,6 +400,7 @@ struct PublishedDiscoverStation: Identifiable, Equatable, Codable {
   var visibility: RadioStationVisibility
   var ownerID: String
   var ownerDisplayName: String
+  var clientPublicationID: String?
   var publishedAt: String
   var shareURL: URL
   var seedTracks: [Track]

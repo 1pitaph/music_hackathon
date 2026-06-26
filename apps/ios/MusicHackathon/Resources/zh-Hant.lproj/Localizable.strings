@@ -215,6 +215,11 @@
 "discover.feed.empty.message" = "公開發布的電臺會在同步後出現在這裏。";
 "discover.feed.failed.title" = "發現頁暫時不可用";
 "discover.feed.localRecovery" = "已顯示本機保存的公開電臺，等待發現頁同步。";
+"discover.feed.cached" = "正在顯示上次成功刷新的公開電臺，同時繼續同步。";
+"discover.feed.emptyRemoteUsingCache" = "線上發現頁返回為空，已保留上次成功刷新的內容。";
+"discover.feed.refreshFailed" = "刷新失敗，正在顯示當前內容。%@";
+"discover.feed.loadingMore" = "正在載入更多已發布電臺。";
+"discover.feed.paginationFailed" = "載入更多失敗。%@";
 "discover.publish.accessibilityLabel" = "發布電臺";
 "discover.publish.title" = "發布電臺";
 "discover.publish.selectionTitle" = "選擇 5 首歌";
@@ -230,6 +235,13 @@
 "discover.publish.publishAndShare" = "發布";
 "discover.publish.successTitle" = "電臺已發布";
 "discover.publish.shareNow" = "立即分享";
+"discover.publish.copyLink" = "複製鏈接";
+"discover.publish.linkCopied" = "鏈接已複製";
+"discover.publish.viewInDiscover" = "在發現頁查看";
+"discover.publish.success.public" = "這個電臺已公開，會出現在發現頁。";
+"discover.publish.success.unlisted" = "只有拿到鏈接的人可以打開這個電臺。";
+"discover.publish.success.private" = "這個電臺已私密保存，不會用於分享。";
+"discover.publish.uploadNotice" = "發布會上傳歌曲標題、藝人、Apple Music ID、封面與試聽鏈接，以及 AI 電臺文案；不會上傳音頻本體。";
 "discover.publish.defaultOwnerName" = "我的電臺";
 "discover.publish.fallbackTitle" = "%@ 的 5 首歌電臺";
 "discover.publish.fallbackSubtitle" = "從 %@ 開始";

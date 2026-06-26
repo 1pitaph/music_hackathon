@@ -18,6 +18,11 @@ final class LocalizationResourceTests: XCTestCase {
       XCTAssertNotEqual(localized("settings.speechLanguage.footer", in: bundle), "settings.speechLanguage.footer")
       XCTAssertNotEqual(localized("appleMusic.alert.denied.title", in: bundle), "appleMusic.alert.denied.title")
       XCTAssertNotEqual(localized("diagnostics.title", in: bundle), "diagnostics.title")
+      XCTAssertNotEqual(localized("discover.feed.cached", in: bundle), "discover.feed.cached")
+      XCTAssertNotEqual(localized("discover.feed.paginationFailed", in: bundle), "discover.feed.paginationFailed")
+      XCTAssertNotEqual(localized("discover.publish.copyLink", in: bundle), "discover.publish.copyLink")
+      XCTAssertNotEqual(localized("discover.publish.uploadNotice", in: bundle), "discover.publish.uploadNotice")
+      XCTAssertNotEqual(localized("discover.publish.success.unlisted", in: bundle), "discover.publish.success.unlisted")
     }
   }
 

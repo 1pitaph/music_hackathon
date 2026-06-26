@@ -215,6 +215,11 @@
 "discover.feed.empty.message" = "公开发布的电台会在同步后出现在这里。";
 "discover.feed.failed.title" = "发现页暂时不可用";
 "discover.feed.localRecovery" = "已显示本机保存的公开电台，等待发现页同步。";
+"discover.feed.cached" = "正在显示上次成功刷新的公开电台，同时继续同步。";
+"discover.feed.emptyRemoteUsingCache" = "线上发现页返回为空，已保留上次成功刷新的内容。";
+"discover.feed.refreshFailed" = "刷新失败，正在显示当前内容。%@";
+"discover.feed.loadingMore" = "正在加载更多已发布电台。";
+"discover.feed.paginationFailed" = "加载更多失败。%@";
 "discover.publish.accessibilityLabel" = "发布电台";
 "discover.publish.title" = "发布电台";
 "discover.publish.selectionTitle" = "选择 5 首歌";
@@ -230,6 +235,13 @@
 "discover.publish.publishAndShare" = "发布";
 "discover.publish.successTitle" = "电台已发布";
 "discover.publish.shareNow" = "立即分享";
+"discover.publish.copyLink" = "复制链接";
+"discover.publish.linkCopied" = "链接已复制";
+"discover.publish.viewInDiscover" = "在发现页查看";
+"discover.publish.success.public" = "这个电台已公开，会出现在发现页。";
+"discover.publish.success.unlisted" = "只有拿到链接的人可以打开这个电台。";
+"discover.publish.success.private" = "这个电台已私密保存，不会用于分享。";
+"discover.publish.uploadNotice" = "发布会上传歌曲标题、艺人、Apple Music ID、封面与试听链接，以及 AI 电台文案；不会上传音频本体。";
 "discover.publish.defaultOwnerName" = "我的电台";
 "discover.publish.fallbackTitle" = "%@ 的 5 首歌电台";
 "discover.publish.fallbackSubtitle" = "从 %@ 开始";

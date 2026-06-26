@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct DiscoverView: View {
   @Environment(PlaybackController.self) private var playbackController
@@ -15,16 +16,20 @@ struct DiscoverView: View {
 
   var body: some View {
     ZStack {
-      ScrollView(.vertical, showsIndicators: false) {
-        VStack(spacing: 26) {
-          discoverContent
+      GeometryReader { proxy in
+        let emptyContentMinHeight = max(proxy.size.height - 56, 360)
+
+        ScrollView(.vertical, showsIndicators: false) {
+          VStack(spacing: 26) {
+            discoverContent(emptyContentMinHeight: emptyContentMinHeight)
+          }
+          .padding(.horizontal, 16)
+          .padding(.top, 20)
+          .padding(.bottom, 36)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 20)
-        .padding(.bottom, 36)
-      }
-      .refreshable {
-        await discoverStationStore.refresh()
+        .refreshable {
+          await discoverStationStore.refresh()
+        }
       }
     }
     .sheet(item: $presentedSheet) { sheet in
@@ -88,13 +93,12 @@ struct DiscoverView: View {
   }
 
   @ViewBuilder
-  private var discoverContent: some View {
+  private func discoverContent(emptyContentMinHeight: CGFloat) -> some View {
     if stations.isEmpty {
       emptyOrFailedContent
+        .frame(minHeight: emptyContentMinHeight, alignment: .center)
     } else {
-      if isShowingLocalRecovery {
-        DiscoverFeedRecoveryBanner()
-      }
+      feedStatusBanner
 
       DiscoverCardStack(
         stations: stations,
@@ -108,6 +112,66 @@ struct DiscoverView: View {
         onPreviousCard: showPreviousCard,
         onNextCard: showNextCard
       )
+
+      paginationStatusBanner
+    }
+  }
+
+  @ViewBuilder
+  private var feedStatusBanner: some View {
+    if discoverStationStore.isShowingCachedFeed {
+      DiscoverFeedNoticeBanner(
+        systemImage: "clock.arrow.circlepath",
+        message: L10n.tr("discover.feed.cached"),
+        tint: Color(hex: "#7BCFA6"),
+        actionTitle: L10n.tr("common.retry")
+      ) {
+        Task {
+          await discoverStationStore.refresh()
+        }
+      }
+    } else if isShowingLocalRecovery {
+      DiscoverFeedNoticeBanner(
+        systemImage: "externaldrive.fill.badge.checkmark",
+        message: L10n.tr("discover.feed.localRecovery"),
+        tint: Color(hex: "#7BCFA6"),
+        actionTitle: L10n.tr("common.retry")
+      ) {
+        Task {
+          await discoverStationStore.refresh()
+        }
+      }
+    } else if let message = discoverStationStore.refreshErrorMessage {
+      DiscoverFeedNoticeBanner(
+        systemImage: "wifi.exclamationmark",
+        message: L10n.tr("discover.feed.refreshFailed", message),
+        tint: Color(hex: "#F2A27F"),
+        actionTitle: L10n.tr("common.retry")
+      ) {
+        Task {
+          await discoverStationStore.refresh()
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var paginationStatusBanner: some View {
+    if discoverStationStore.isLoadingNextPage {
+      DiscoverFeedNoticeBanner(
+        systemImage: "arrow.down.circle",
+        message: L10n.tr("discover.feed.loadingMore"),
+        tint: Color(hex: "#7BCFA6")
+      )
+    } else if let message = discoverStationStore.paginationErrorMessage {
+      DiscoverFeedNoticeBanner(
+        systemImage: "wifi.exclamationmark",
+        message: L10n.tr("discover.feed.paginationFailed", message),
+        tint: Color(hex: "#F2A27F"),
+        actionTitle: L10n.tr("common.retry")
+      ) {
+        loadNextPageIfNeeded()
+      }
     }
   }
 
@@ -239,20 +303,33 @@ private extension View {
   }
 }
 
-private struct DiscoverFeedRecoveryBanner: View {
+private struct DiscoverFeedNoticeBanner: View {
+  let systemImage: String
+  let message: String
+  let tint: Color
+  var actionTitle: String?
+  var action: (() -> Void)?
+
   var body: some View {
     HStack(spacing: 10) {
-      Image(systemName: "externaldrive.fill.badge.checkmark")
+      Image(systemName: systemImage)
         .font(.system(size: 16, weight: .semibold))
-        .foregroundStyle(Color(hex: "#7BCFA6"))
+        .foregroundStyle(tint)
         .frame(width: 24)
 
-      Text(L10n.tr("discover.feed.localRecovery"))
+      Text(message)
         .font(.system(size: 13, weight: .semibold, design: .rounded))
         .foregroundStyle(.white.opacity(0.72))
         .lineLimit(2)
 
       Spacer(minLength: 0)
+
+      if let actionTitle, let action {
+        Button(actionTitle, action: action)
+          .font(.system(size: 12, weight: .bold, design: .rounded))
+          .foregroundStyle(tint)
+          .buttonStyle(.plain)
+      }
     }
     .padding(12)
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -272,41 +349,43 @@ private struct DiscoverFeedStatusPanel: View {
   var action: (() -> Void)?
 
   var body: some View {
-    VStack(spacing: 18) {
-      Image(systemName: systemImage)
-        .font(.system(size: 34, weight: .semibold))
-        .foregroundStyle(Color(hex: "#7BCFA6"))
-        .frame(width: 64, height: 64)
-        .background(.white.opacity(0.08), in: Circle())
+    ZStack {
+      VStack(spacing: 18) {
+        Image(systemName: systemImage)
+          .font(.system(size: 34, weight: .semibold))
+          .foregroundStyle(Color(hex: "#7BCFA6"))
+          .frame(width: 64, height: 64)
+          .background(.white.opacity(0.08), in: Circle())
 
-      VStack(spacing: 7) {
-        Text(title)
-          .font(.system(size: 20, weight: .bold, design: .rounded))
-          .foregroundStyle(.white)
-          .multilineTextAlignment(.center)
+        VStack(spacing: 7) {
+          Text(title)
+            .font(.system(size: 20, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .multilineTextAlignment(.center)
 
-        Text(message)
-          .font(.system(size: 14, weight: .medium, design: .rounded))
-          .foregroundStyle(.white.opacity(0.54))
-          .lineSpacing(3)
-          .multilineTextAlignment(.center)
-      }
-
-      if let actionTitle, let action {
-        Button(action: action) {
-          Text(actionTitle)
-            .font(.system(size: 14, weight: .bold, design: .rounded))
-            .foregroundStyle(.black.opacity(0.86))
-            .frame(maxWidth: .infinity)
-            .frame(height: 44)
-            .background(Color(hex: "#7BCFA6"), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+          Text(message)
+            .font(.system(size: 14, weight: .medium, design: .rounded))
+            .foregroundStyle(.white.opacity(0.54))
+            .lineSpacing(3)
+            .multilineTextAlignment(.center)
         }
-        .buttonStyle(.plain)
+
+        if let actionTitle, let action {
+          Button(action: action) {
+            Text(actionTitle)
+              .font(.system(size: 14, weight: .bold, design: .rounded))
+              .foregroundStyle(.black.opacity(0.86))
+              .frame(maxWidth: .infinity)
+              .frame(height: 44)
+              .background(Color(hex: "#7BCFA6"), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+          }
+          .buttonStyle(.plain)
+        }
       }
+      .padding(22)
     }
-    .padding(22)
     .frame(maxWidth: .infinity)
-    .frame(minHeight: 360, alignment: .center)
+    .frame(height: 360)
     .background(Color(hex: "#24211E").opacity(0.82), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     .overlay {
       RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -987,10 +1066,11 @@ private struct DiscoverPublishSheet: View {
   @State private var selectedTrackIDs: [String] = []
   @State private var visibility: RadioStationVisibility = .public
   @State private var draft: DiscoverStationPublicationDraft?
-  @State private var publishedStation: DiscoverStation?
+  @State private var publishedStation: PublishedDiscoverStation?
   @State private var isGenerating = false
   @State private var isPublishing = false
   @State private var errorMessage: String?
+  @State private var didCopyPublishedLink = false
 
   var body: some View {
     NavigationStack {
@@ -1013,6 +1093,7 @@ private struct DiscoverPublishSheet: View {
       draft = nil
       publishedStation = nil
       errorMessage = nil
+      didCopyPublishedLink = false
     }
   }
 
@@ -1173,6 +1254,8 @@ private struct DiscoverPublishSheet: View {
           .foregroundStyle(Color(hex: "#F2A27F"))
       }
 
+      publishUploadNotice
+
       VStack(spacing: 10) {
         ForEach(draft.station.items.prefix(5)) { item in
           HStack(spacing: 10) {
@@ -1236,8 +1319,26 @@ private struct DiscoverPublishSheet: View {
     .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
   }
 
-  private func publishedContent(station: DiscoverStation) -> some View {
-    VStack(spacing: 18) {
+  private var publishUploadNotice: some View {
+    Label {
+      Text(L10n.tr("discover.publish.uploadNotice"))
+        .font(.system(size: 12, weight: .semibold, design: .rounded))
+        .foregroundStyle(.white.opacity(0.58))
+        .fixedSize(horizontal: false, vertical: true)
+    } icon: {
+      Image(systemName: "lock.doc")
+        .font(.system(size: 14, weight: .semibold))
+        .foregroundStyle(Color(hex: "#7BCFA6"))
+    }
+    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+  }
+
+  private func publishedContent(station: PublishedDiscoverStation) -> some View {
+    let discoverStation = station.discoverStation()
+
+    return VStack(spacing: 18) {
       Spacer(minLength: 24)
 
       Image(systemName: "checkmark.circle.fill")
@@ -1249,23 +1350,63 @@ private struct DiscoverPublishSheet: View {
           .font(.system(size: 24, weight: .bold, design: .rounded))
           .foregroundStyle(.white)
 
-        Text(station.title)
+        Text(discoverStation.title)
           .font(.system(size: 15, weight: .semibold, design: .rounded))
           .foregroundStyle(.white.opacity(0.58))
           .multilineTextAlignment(.center)
+
+        Text(visibilitySuccessMessage(for: station.visibility))
+          .font(.system(size: 13, weight: .medium, design: .rounded))
+          .foregroundStyle(.white.opacity(0.5))
+          .multilineTextAlignment(.center)
+          .padding(.horizontal, 10)
       }
 
-      ShareLink(
-        item: station.shareURL,
-        subject: Text(station.title),
-        message: Text(L10n.tr("discover.share.message", station.hostName, station.title))
-      ) {
-        Label(L10n.tr("discover.publish.shareNow"), systemImage: "square.and.arrow.up")
-          .frame(maxWidth: .infinity)
-          .frame(height: 48)
+      if station.visibility != .private {
+        Text(station.shareURL.absoluteString)
+          .font(.system(size: 12, weight: .semibold, design: .monospaced))
+          .foregroundStyle(.white.opacity(0.44))
+          .lineLimit(2)
+          .multilineTextAlignment(.center)
+          .padding(.horizontal, 18)
+
+        VStack(spacing: 10) {
+          ShareLink(
+            item: station.shareURL,
+            subject: Text(station.title),
+            message: Text(L10n.tr("discover.share.message", station.ownerDisplayName, station.title))
+          ) {
+            Label(L10n.tr("discover.publish.shareNow"), systemImage: "square.and.arrow.up")
+              .frame(maxWidth: .infinity)
+              .frame(height: 48)
+          }
+          .buttonStyle(.borderedProminent)
+
+          Button {
+            UIPasteboard.general.string = station.shareURL.absoluteString
+            didCopyPublishedLink = true
+          } label: {
+            Label(
+              didCopyPublishedLink ? L10n.tr("discover.publish.linkCopied") : L10n.tr("discover.publish.copyLink"),
+              systemImage: didCopyPublishedLink ? "checkmark" : "doc.on.doc"
+            )
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+          }
+          .buttonStyle(.bordered)
+        }
+        .padding(.horizontal, 20)
       }
-      .buttonStyle(.borderedProminent)
-      .padding(.horizontal, 20)
+
+      if station.visibility == .public {
+        Button {
+          dismiss()
+        } label: {
+          Label(L10n.tr("discover.publish.viewInDiscover"), systemImage: "music.note.list")
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color(hex: "#7BCFA6"))
+      }
 
       Button(L10n.tr("common.close")) {
         dismiss()
@@ -1278,6 +1419,17 @@ private struct DiscoverPublishSheet: View {
     .padding(20)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(hex: "#151311"))
+  }
+
+  private func visibilitySuccessMessage(for visibility: RadioStationVisibility) -> String {
+    switch visibility {
+    case .public:
+      L10n.tr("discover.publish.success.public")
+    case .unlisted:
+      L10n.tr("discover.publish.success.unlisted")
+    case .private:
+      L10n.tr("discover.publish.success.private")
+    }
   }
 
   private var selectableTracks: [Track] {
@@ -1350,7 +1502,7 @@ private struct DiscoverPublishSheet: View {
 
     draft.visibility = visibility
     do {
-      publishedStation = try await discoverStationStore.publish(draft)
+      publishedStation = try await discoverStationStore.publishStation(draft)
     } catch {
       errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }

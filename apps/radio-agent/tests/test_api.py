@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import radio_agent.api as api
+from radio_agent import discover_db
 from radio_agent.api import app, _is_playable, _station_item
 from radio_agent import speech
 from radio_agent.schemas import RadioSpeechAudioConfig, RadioSpeechSegment, RadioTrack
@@ -197,6 +198,66 @@ def test_publish_discover_station_persists_feed_and_station_lookup(monkeypatch, 
   assert persisted_response.json()["title"] == "Second"
 
 
+def test_shared_station_page_renders_public_and_unlisted_only(monkeypatch, tmp_path):
+  monkeypatch.setenv("DISCOVER_STATIONS_DB_PATH", str(tmp_path / "discover.sqlite3"))
+  monkeypatch.setenv("DISCOVER_STATIONS_PUBLIC_BASE_URL", "https://share.test")
+  client = TestClient(app)
+
+  public = client.post("/v1/discover/stations", json=_publish_payload(title="Public")).json()
+  unlisted = client.post(
+    "/v1/discover/stations",
+    json=_publish_payload(title="Unlisted", visibility="unlisted"),
+  ).json()
+  private = client.post(
+    "/v1/discover/stations",
+    json=_publish_payload(title="Private", visibility="private"),
+  ).json()
+
+  public_page = client.get(f"/stations/{public['stationID']}")
+  unlisted_page = client.get(f"/stations/{unlisted['stationID']}")
+  private_page = client.get(f"/stations/{private['stationID']}")
+
+  assert public_page.status_code == 200
+  assert "Public" in public_page.text
+  assert f"airset://stations/{public['stationID']}" in public_page.text
+  assert unlisted_page.status_code == 200
+  assert "Unlisted" in unlisted_page.text
+  assert private_page.status_code == 404
+
+
+def test_discover_share_url_uses_current_public_base_url(monkeypatch, tmp_path):
+  monkeypatch.setenv("DISCOVER_STATIONS_DB_PATH", str(tmp_path / "discover.sqlite3"))
+  monkeypatch.setenv("DISCOVER_STATIONS_PUBLIC_BASE_URL", "https://old.test")
+  client = TestClient(app)
+
+  station = client.post("/v1/discover/stations", json=_publish_payload(title="Moved")).json()
+  monkeypatch.setenv("DISCOVER_STATIONS_PUBLIC_BASE_URL", "https://new.test")
+
+  fetched = client.get(f"/v1/radio/stations/{station['stationID']}").json()
+  feed = client.get("/v1/discover/stations").json()
+
+  assert station["shareURL"] == f"https://old.test/stations/{station['stationID']}"
+  assert fetched["shareURL"] == f"https://new.test/stations/{station['stationID']}"
+  assert feed["stations"][0]["shareURL"] == f"https://new.test/stations/{station['stationID']}"
+
+
+def test_publish_discover_station_is_idempotent_by_client_publication_id(monkeypatch, tmp_path):
+  monkeypatch.setenv("DISCOVER_STATIONS_DB_PATH", str(tmp_path / "discover.sqlite3"))
+  monkeypatch.setenv("DISCOVER_STATIONS_PUBLIC_BASE_URL", "https://share.test")
+  client = TestClient(app)
+  payload = _publish_payload(title="Idempotent")
+  payload["clientPublicationID"] = "client-pub-1"
+
+  first = client.post("/v1/discover/stations", json=payload).json()
+  second = client.post("/v1/discover/stations", json=payload | {"title": "Changed"}).json()
+  feed = client.get("/v1/discover/stations?limit=20").json()
+
+  assert first["stationID"] == second["stationID"]
+  assert first["clientPublicationID"] == "client-pub-1"
+  assert second["title"] == "Idempotent"
+  assert [station["stationID"] for station in feed["stations"]] == [first["stationID"]]
+
+
 def test_discover_storage_status_reports_path_writability_and_counts(monkeypatch, tmp_path):
   db_path = tmp_path / "discover.sqlite3"
   monkeypatch.setenv("DISCOVER_STATIONS_DB_PATH", str(db_path))
@@ -210,6 +271,9 @@ def test_discover_storage_status_reports_path_writability_and_counts(monkeypatch
   assert empty_body["dbExists"] is False
   assert empty_body["directoryExists"] is True
   assert empty_body["directoryWritable"] is True
+  assert empty_body["dbSizeBytes"] == 0
+  assert empty_body["sqliteIntegrityCheck"] == "not_checked"
+  assert empty_body["schemaVersion"] == 0
   assert empty_body["totalStations"] == 0
   assert empty_body["publicStations"] == 0
 
@@ -232,6 +296,48 @@ def test_discover_storage_status_reports_path_writability_and_counts(monkeypatch
   assert body["unlistedStations"] == 1
   assert body["privateStations"] == 1
   assert body["latestPublishedAt"] == "2026-06-25T01:02:00.000Z"
+  assert body["dbSizeBytes"] > 0
+  assert body["sqliteIntegrityCheck"] == "ok"
+  assert body["schemaVersion"] == 1
+  assert body["warnings"] == []
+
+
+def test_discover_db_cli_exports_and_imports_stations(monkeypatch, tmp_path):
+  source_db = tmp_path / "source.sqlite3"
+  target_db = tmp_path / "target.sqlite3"
+  export_path = tmp_path / "discover-export.json"
+  monkeypatch.setenv("DISCOVER_STATIONS_DB_PATH", str(source_db))
+  monkeypatch.setenv("DISCOVER_STATIONS_PUBLIC_BASE_URL", "https://share.test")
+  client = TestClient(app)
+
+  public = client.post("/v1/discover/stations", json=_publish_payload(title="Exported")).json()
+  private = client.post(
+    "/v1/discover/stations",
+    json=_publish_payload(title="Hidden", visibility="private"),
+  ).json()
+
+  assert discover_db.main(["--db-path", str(source_db), "export", str(export_path)]) == 0
+  assert discover_db.main(["--db-path", str(target_db), "import", str(export_path)]) == 0
+
+  monkeypatch.setenv("DISCOVER_STATIONS_DB_PATH", str(target_db))
+  imported_feed = client.get("/v1/discover/stations").json()
+  imported_private = client.get(f"/v1/radio/stations/{private['stationID']}")
+
+  assert [station["stationID"] for station in imported_feed["stations"]] == [public["stationID"]]
+  assert imported_private.status_code == 404
+
+
+def test_discover_db_cli_creates_sqlite_backup(monkeypatch, tmp_path):
+  source_db = tmp_path / "source.sqlite3"
+  backup_db = tmp_path / "backup.sqlite3"
+  monkeypatch.setenv("DISCOVER_STATIONS_DB_PATH", str(source_db))
+  client = TestClient(app)
+  client.post("/v1/discover/stations", json=_publish_payload(title="Backed Up"))
+
+  assert discover_db.main(["--db-path", str(source_db), "backup", str(backup_db)]) == 0
+
+  assert backup_db.is_file()
+  assert backup_db.stat().st_size > 0
 
 
 def test_publish_discover_station_requires_five_unique_seed_tracks(monkeypatch, tmp_path):
