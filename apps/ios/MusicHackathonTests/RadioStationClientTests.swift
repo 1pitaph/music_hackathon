@@ -248,6 +248,14 @@ final class RadioStationClientTests: XCTestCase {
       streamSpeech.playableAudioURL?.absoluteString,
       "https://example.com/speech/stream/file.mp3"
     )
+    XCTAssertEqual(streamSpeech.playableAudioCandidates.map(\.source), [.streamURL, .audioURL])
+    XCTAssertEqual(
+      streamSpeech.playableAudioCandidates.map { $0.url.absoluteString },
+      [
+        "https://example.com/speech/stream/file.mp3",
+        "https://example.com/speech/file.mp3"
+      ]
+    )
 
     let invalidStreamAudio = RadioSpeechAudio(
       audioURL: URL(string: "https://example.com/speech/file.mp3"),
@@ -269,6 +277,7 @@ final class RadioStationClientTests: XCTestCase {
       audioFallbackSpeech.playableAudioURL?.absoluteString,
       "https://example.com/speech/file.mp3"
     )
+    XCTAssertEqual(audioFallbackSpeech.playableAudioCandidates.map(\.source), [.audioURL])
 
     let invalidAudio = RadioSpeechAudio(
       audioURL: URL(string: "ftp://example.com/speech/file.mp3"),
@@ -287,6 +296,26 @@ final class RadioStationClientTests: XCTestCase {
     )
 
     XCTAssertNil(unavailableSpeech.playableAudioURL)
+    XCTAssertTrue(unavailableSpeech.playableAudioCandidates.isEmpty)
+
+    let notReadyAudio = RadioSpeechAudio(
+      audioURL: URL(string: "https://example.com/speech/file.mp3"),
+      streamURL: URL(string: "https://example.com/speech/stream/file.mp3"),
+      cacheKey: "speech-not-ready",
+      voice: "voice-a",
+      model: "seed-tts-1.0",
+      status: "unavailable"
+    )
+    let notReadySpeech = RadioSpeechPlaybackSegment(
+      id: "transition-3",
+      kind: .transition,
+      text: "Next.",
+      displayText: "Next.",
+      audio: notReadyAudio
+    )
+
+    XCTAssertNil(notReadySpeech.playableAudioURL)
+    XCTAssertTrue(notReadySpeech.playableAudioCandidates.isEmpty)
   }
 
   func testGenerateStationCanEncodeEnglishSpeechLanguage() async throws {
@@ -573,6 +602,48 @@ final class RadioStationClientTests: XCTestCase {
     XCTAssertEqual(station.clientPublicationID, "client-pub-1")
     XCTAssertEqual(station.shareURL.absoluteString, "https://share.test/stations/station-1")
     XCTAssertEqual(station.items.first?.track.title, "Seed 1")
+  }
+
+  func testPublishedDiscoverStationPreservesSpeechAudioForDiscoverPlayback() {
+    let speech = RadioSpeech(
+      stationIntro: RadioStationIntroCopy(
+        id: "station-intro",
+        text: "Welcome.",
+        displayText: "Welcome.",
+        targetItemId: "station-speech-item-1",
+        audio: RadioSpeechAudio(
+          audioURL: URL(string: "https://example.com/speech/intro.mp3"),
+          streamURL: URL(string: "https://example.com/speech/stream/intro.mp3"),
+          cacheKey: "speech_intro",
+          voice: "voice-a",
+          model: "seed-tts-1.0",
+          status: "ready"
+        )
+      )
+    )
+    let published = makePublishedStation(stationID: "station-speech", speech: speech)
+
+    let radioStation = published.discoverStation().radioStation()
+
+    XCTAssertEqual(
+      radioStation.speech?.stationIntro?.audio?.streamURL?.absoluteString,
+      "https://example.com/speech/stream/intro.mp3"
+    )
+    XCTAssertEqual(radioStation.speech?.stationIntro?.audio?.status, "ready")
+    XCTAssertEqual(
+      radioStation.speech?.stationIntro?.playbackSegment.playableAudioURL?.absoluteString,
+      "https://example.com/speech/stream/intro.mp3"
+    )
+  }
+
+  func testPublishedDiscoverStationWithoutSpeechBuildsFallbackSpeech() {
+    let published = makePublishedStation(stationID: "station-fallback", speech: nil)
+
+    let radioStation = published.discoverStation().radioStation()
+
+    XCTAssertEqual(radioStation.speech?.stationIntro?.targetItemId, "station-fallback-item-1")
+    XCTAssertFalse(radioStation.speech?.stationIntro?.displayText.isEmpty ?? true)
+    XCTAssertNil(radioStation.speech?.stationIntro?.audio)
   }
 
   @MainActor
@@ -1115,7 +1186,8 @@ final class RadioStationClientTests: XCTestCase {
     title: String = "Published Radio",
     subtitle: String = "Published intro.",
     visibility: RadioStationVisibility = .public,
-    publishedAt: String = "2026-06-25T01:00:00.000Z"
+    publishedAt: String = "2026-06-25T01:00:00.000Z",
+    speech: RadioSpeech? = nil
   ) -> PublishedDiscoverStation {
     let track = makePublishTrack(index: 1)
     return PublishedDiscoverStation(
@@ -1139,7 +1211,7 @@ final class RadioStationClientTests: XCTestCase {
           handoffText: "Start here."
         )
       ],
-      speech: nil,
+      speech: speech,
       coverArtworkURL: URL(string: "https://example.com/\(stationID)-cover.jpg"),
       colorHex: "#3A6B5C",
       favorites: 0

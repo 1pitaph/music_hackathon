@@ -311,6 +311,16 @@ struct RadioSpeechAudio: Codable, Hashable {
   }
 }
 
+enum RadioSpeechAudioPlaybackSource: String, Hashable {
+  case streamURL
+  case audioURL
+}
+
+struct RadioSpeechAudioPlaybackCandidate: Hashable {
+  let source: RadioSpeechAudioPlaybackSource
+  let url: URL
+}
+
 struct RadioSpeechPlaybackSegment: Identifiable, Hashable {
   enum Kind: String, Hashable {
     case stationIntro
@@ -324,8 +334,32 @@ struct RadioSpeechPlaybackSegment: Identifiable, Hashable {
   let audio: RadioSpeechAudio?
 
   var playableAudioURL: URL? {
-    guard audio?.status == "ready" else { return nil }
-    return Self.playableRemoteURL(audio?.streamURL) ?? Self.playableRemoteURL(audio?.audioURL)
+    playableAudioCandidates.first?.url
+  }
+
+  var playableAudioCandidates: [RadioSpeechAudioPlaybackCandidate] {
+    guard audio?.status == "ready" else { return [] }
+
+    var seen = Set<URL>()
+    let candidates: [(source: RadioSpeechAudioPlaybackSource, url: URL?)] = [
+      (.streamURL, audio?.streamURL),
+      (.audioURL, audio?.audioURL)
+    ]
+    return candidates.compactMap { candidate in
+      guard let playableURL = Self.playableRemoteURL(candidate.url),
+            !seen.contains(playableURL) else {
+        return nil
+      }
+      seen.insert(playableURL)
+      return RadioSpeechAudioPlaybackCandidate(source: candidate.source, url: playableURL)
+    }
+  }
+
+  var audioFallbackReason: String {
+    guard let audio, audio.status == "ready" else {
+      return "missing_ready_audio"
+    }
+    return playableAudioCandidates.isEmpty ? "invalid_audio_url" : "remote_audio_failed_all_candidates"
   }
 
   var timedCues: [RadioSpeechCue] {
@@ -422,6 +456,7 @@ struct PublishedDiscoverStation: Identifiable, Equatable, Codable {
       genre: seedTracks.first?.mood ?? items.first?.track.mood ?? "Radio",
       favorites: favorites,
       items: items,
+      speech: speech,
       colorHex: colorHex,
       artworkURL: coverArtworkURL,
       shareURL: shareURL

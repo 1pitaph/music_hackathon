@@ -545,6 +545,8 @@
 "diagnostic.message.speechAudioPlaybackStarted" = "主持人語音音頻播放已啓動。";
 "diagnostic.message.speechSynthesisPlaybackStarted" = "主持人語音合成播放已啓動。";
 "diagnostic.message.fullSongPlaybackResumed" = "完整歌曲播放已恢復。";
+"diagnostic.message.speechAudioRetryAlternate" = "主持人語音音頻播放失敗，正在重試備用音頻地址。";
+"diagnostic.message.speechAudioUnavailableFallbackSynthesis" = "主持人語音音頻不可用，已切換到系統語音合成。";
 "diagnostic.message.speechAudioFallbackSynthesis" = "主持人語音音頻播放失敗，切換到系統語音合成。";
 "diagnostic.message.playbackFailed" = "播放失敗。";
 "diagnostic.message.trackPlaybackFinished" = "曲目播放完成。";

@@ -9,9 +9,38 @@ struct DiscoverStation: Identifiable, Hashable {
   let genre: String
   let favorites: Int
   let items: [RadioQueueItem]
+  let speech: RadioSpeech?
   let colorHex: String
   let artworkURL: URL?
   let shareURL: URL
+
+  init(
+    id: String,
+    title: String,
+    briefIntro: String,
+    description: String,
+    hostName: String,
+    genre: String,
+    favorites: Int,
+    items: [RadioQueueItem],
+    speech: RadioSpeech? = nil,
+    colorHex: String,
+    artworkURL: URL?,
+    shareURL: URL
+  ) {
+    self.id = id
+    self.title = title
+    self.briefIntro = briefIntro
+    self.description = description
+    self.hostName = hostName
+    self.genre = genre
+    self.favorites = favorites
+    self.items = items
+    self.speech = speech
+    self.colorHex = colorHex
+    self.artworkURL = artworkURL
+    self.shareURL = shareURL
+  }
 
   var color: Color {
     Color(hex: colorHex)
@@ -52,12 +81,12 @@ struct DiscoverStation: Identifiable, Hashable {
       title: title,
       subtitle: briefIntro,
       items: items,
-      speech: radioSpeech,
+      speech: speech ?? fallbackRadioSpeech,
       allowsAutoExtension: false
     )
   }
 
-  private var radioSpeech: RadioSpeech? {
+  private var fallbackRadioSpeech: RadioSpeech? {
     guard let firstItem = items.first else { return nil }
 
     let introText = firstItem.handoffText?.trimmedNilIfEmpty
@@ -270,6 +299,7 @@ extension DiscoverStation {
       genre: genre,
       favorites: favorites,
       items: items,
+      speech: nil,
       colorHex: colorHex,
       artworkURL: realArtworkURL,
       shareURL: URL(string: "https://airset.example/stations/\(id)")!

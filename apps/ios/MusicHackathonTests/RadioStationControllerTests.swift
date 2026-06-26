@@ -862,6 +862,54 @@ final class RadioStationControllerTests: XCTestCase {
     XCTAssertEqual(station.speech?.betweenTracks.count, max(station.items.count - 1, 0))
   }
 
+  func testDiscoverStationReadySpeechAudioReachesPlaybackController() async {
+    let item = makeQueueItem(title: "One", appleMusicID: "one")
+    let discoverStation = DiscoverStation(
+      id: "discover-ai-speech",
+      title: "Discover AI Speech",
+      briefIntro: "AI intro.",
+      description: "AI speech station.",
+      hostName: "Publisher",
+      genre: "Radio",
+      favorites: 1,
+      items: [item],
+      speech: RadioSpeech(
+        stationIntro: RadioStationIntroCopy(
+          id: "discover-ai-speech-intro",
+          text: "Welcome.",
+          displayText: "Welcome.",
+          targetItemId: item.id,
+          audio: RadioSpeechAudio(
+            audioURL: URL(string: "https://example.com/speech/intro.mp3"),
+            streamURL: URL(string: "https://example.com/speech/stream/intro.mp3"),
+            cacheKey: "speech_intro",
+            voice: "voice-a",
+            model: "seed-tts-1.0",
+            status: "ready"
+          )
+        )
+      ),
+      colorHex: "#3A6B5C",
+      artworkURL: item.track.artworkURL,
+      shareURL: URL(string: "https://share.test/stations/discover-ai-speech")!
+    )
+    let playbackController = MockPlaybackController()
+    let controller = RadioStationController(
+      playbackController: playbackController,
+      stationClient: MockStationClient(result: .success(makeStation(items: []))),
+      memoryStore: MockMemoryStore()
+    )
+
+    await controller.loadLocalStation(discoverStation.radioStation(), playImmediately: true)
+
+    XCTAssertEqual(playbackController.currentSpeech?.id, "discover-ai-speech-intro")
+    XCTAssertEqual(
+      playbackController.currentSpeech?.playableAudioURL?.absoluteString,
+      "https://example.com/speech/stream/intro.mp3"
+    )
+    XCTAssertEqual(playbackController.currentSpeech?.playableAudioCandidates.map(\.source), [.streamURL, .audioURL])
+  }
+
   func testStartStationPrefetchesWhenQueueFallsToThresholdAndAppends() async {
     let stationClient = SequencedStationClient(results: [
       .success(

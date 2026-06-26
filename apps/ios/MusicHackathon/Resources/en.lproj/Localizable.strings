@@ -545,6 +545,8 @@
 "diagnostic.message.speechAudioPlaybackStarted" = "Host speech audio playback started.";
 "diagnostic.message.speechSynthesisPlaybackStarted" = "Host speech synthesis playback started.";
 "diagnostic.message.fullSongPlaybackResumed" = "Full song playback resumed.";
+"diagnostic.message.speechAudioRetryAlternate" = "Host speech audio failed; retrying alternate audio URL.";
+"diagnostic.message.speechAudioUnavailableFallbackSynthesis" = "Host speech audio unavailable; switched to system speech synthesis.";
 "diagnostic.message.speechAudioFallbackSynthesis" = "Host speech audio failed; switched to system speech synthesis.";
 "diagnostic.message.playbackFailed" = "Playback failed.";
 "diagnostic.message.trackPlaybackFinished" = "Track playback completed.";

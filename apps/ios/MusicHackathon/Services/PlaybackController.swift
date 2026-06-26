@@ -166,6 +166,7 @@ final class PlaybackController: RadioPlaybackControlling {
   @ObservationIgnored private var currentPlaybackAttemptID: String?
   @ObservationIgnored private var currentPlaybackStartedAt: Date?
   @ObservationIgnored private var synthesizedSpeechCueRanges: [SpeechCueRange] = []
+  @ObservationIgnored private var pendingSpeechAudioCandidates: [RadioSpeechAudioPlaybackCandidate] = []
   @ObservationIgnored private var currentTrackPlaybackPolicy: RadioTrackPlaybackPolicy = .fullSongPreferred
   @ObservationIgnored private var currentSpeechPlaybackMode: RadioSpeechPlaybackMode = .standalone
   @ObservationIgnored private var currentOverlayTiming: RadioTransitionOverlayTiming = .automatic
@@ -890,16 +891,28 @@ final class PlaybackController: RadioPlaybackControlling {
   }
 
   private func beginSpeechOutput(for speech: RadioSpeechPlaybackSegment) {
-    if let audioURL = speech.playableAudioURL {
-      startSpeechAudioPlayback(for: speech, audioURL: audioURL)
-    } else {
+    let candidates = speech.playableAudioCandidates
+    guard let firstCandidate = candidates.first else {
+      recordSpeechSynthesisFallback(for: speech, reason: speech.audioFallbackReason)
       startSynthesizedSpeechPlayback(for: speech)
+      return
     }
+
+    startSpeechAudioPlayback(
+      for: speech,
+      candidate: firstCandidate,
+      remainingCandidates: Array(candidates.dropFirst())
+    )
   }
 
-  private func startSpeechAudioPlayback(for speech: RadioSpeechPlaybackSegment, audioURL: URL) {
+  private func startSpeechAudioPlayback(
+    for speech: RadioSpeechPlaybackSegment,
+    candidate: RadioSpeechAudioPlaybackCandidate,
+    remainingCandidates: [RadioSpeechAudioPlaybackCandidate]
+  ) {
     didNotifySpeechFinished = false
-    let item = AVPlayerItem(url: audioURL)
+    pendingSpeechAudioCandidates = remainingCandidates
+    let item = AVPlayerItem(url: candidate.url)
     speechAudioPlayer.replaceCurrentItem(with: item)
     addSpeechPeriodicTimeObserver()
     addSpeechPlaybackItemObservers(for: item, mediaKind: .speech(speech))
@@ -917,14 +930,32 @@ final class PlaybackController: RadioPlaybackControlling {
       chain: .playbackSpeech,
       event: "speech_audio_start",
       message: L10n.tr("diagnostic.message.speechAudioPlaybackStarted"),
+      payload: DiagnosticsPayload.merge(
+        [
+          "speech_id_hash": DiagnosticsRedactor.hash(speech.id),
+          "duration_seconds": String(Int((speech.audio?.durationSeconds ?? 0).rounded())),
+          "audio_url_source": candidate.source.rawValue
+        ],
+        DiagnosticsPayload.url(candidate.url)
+      )
+    )
+  }
+
+  private func recordSpeechSynthesisFallback(for speech: RadioSpeechPlaybackSegment, reason: String) {
+    diagnostics?.record(
+      .warning,
+      chain: .playbackSpeech,
+      event: "speech_synthesis_fallback",
+      message: L10n.tr("diagnostic.message.speechAudioUnavailableFallbackSynthesis"),
       payload: [
         "speech_id_hash": DiagnosticsRedactor.hash(speech.id),
-        "duration_seconds": String(Int((speech.audio?.durationSeconds ?? 0).rounded()))
+        "fallback_reason": reason
       ]
     )
   }
 
   private func startSynthesizedSpeechPlayback(for speech: RadioSpeechPlaybackSegment) {
+    pendingSpeechAudioCandidates = []
     stopSpeechMetadataRefresh()
     let spokenText = speech.text.isEmpty ? speech.displayText : speech.text
     guard !spokenText.isEmpty else {
@@ -1073,6 +1104,7 @@ final class PlaybackController: RadioPlaybackControlling {
     removeSpeechPeriodicTimeObserver()
     removeSpeechPlaybackItemObservers()
     stopSpeechProgressTimer()
+    pendingSpeechAudioCandidates = []
     if clearCurrentSpeech {
       currentSpeech = nil
       currentSpeechCue = nil
@@ -1275,19 +1307,37 @@ final class PlaybackController: RadioPlaybackControlling {
       currentTrack = track
       failPlayback(error, failedPhase: "preview_item_failed", correlationID: correlationID)
     case let .speech(speech):
+      let nextCandidate = pendingSpeechAudioCandidates.first
+      let remainingCandidates = Array(pendingSpeechAudioCandidates.dropFirst())
       diagnostics?.record(
         .warning,
         chain: .playbackSpeech,
         event: "speech_audio_failed",
-        message: L10n.tr("diagnostic.message.speechAudioFallbackSynthesis"),
+        message: nextCandidate == nil
+          ? L10n.tr("diagnostic.message.speechAudioFallbackSynthesis")
+          : L10n.tr("diagnostic.message.speechAudioRetryAlternate"),
         payload: DiagnosticsPayload.merge(
-          ["speech_id_hash": DiagnosticsRedactor.hash(speech.id)],
+          [
+            "speech_id_hash": DiagnosticsRedactor.hash(speech.id),
+            "fallback_action": nextCandidate == nil ? "synthesize_speech" : "retry_audio_url",
+            "fallback_reason": nextCandidate == nil ? speech.audioFallbackReason : "remote_audio_candidate_failed"
+          ],
+          nextCandidate.map { ["next_audio_url_source": $0.source.rawValue] } ?? [:],
           DiagnosticsPayload.error(error)
         )
       )
       removeSpeechPlaybackItemObservers()
       removeSpeechPeriodicTimeObserver()
       speechAudioPlayer.replaceCurrentItem(with: nil)
+      if let nextCandidate {
+        startSpeechAudioPlayback(
+          for: speech,
+          candidate: nextCandidate,
+          remainingCandidates: remainingCandidates
+        )
+        return
+      }
+      recordSpeechSynthesisFallback(for: speech, reason: speech.audioFallbackReason)
       startSynthesizedSpeechPlayback(for: speech)
     }
   }
